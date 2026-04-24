@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Parlor</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #1a1a1a;
+        color: #fff;
+        overflow: hidden;
+      }
+
+      #app {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        flex-direction: row;
+      }
+
+      /* Main content wrapper (video + filmstrips) */
+      #main-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      /* Video area */
+      #main-area {
+        flex: 1;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      /* Filmstrip panel */
+      #filmstrip-panel {
+        background: #111;
+        border-top: 1px solid #333;
+        padding: 12px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+
+      .filmstrip-row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        background: #1a1a1a;
+        border-radius: 6px;
+        padding: 10px;
+      }
+
+      .filmstrip-image {
+        flex-shrink: 0;
+        background: #000;
+        border-radius: 4px;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+      }
+
+      .filmstrip-image img {
+        display: block;
+        height: 48px;
+        width: auto;
+      }
+
+      .filmstrip-placeholder {
+        color: #444;
+        font-size: 11px;
+        padding: 12px;
+      }
+
+      .filmstrip-status {
+        display: none;
+        color: #FFD700;
+        font-size: 11px;
+        padding: 12px;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      .filmstrip-status.active {
+        display: block;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      .filmstrip-image.loading .filmstrip-placeholder {
+        display: none;
+      }
+
+      .filmstrip-image.loading .filmstrip-status {
+        display: block;
+      }
+
+      .filmstrip-result {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .filmstrip-type {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #666;
+        margin-bottom: 2px;
+      }
+
+      .filmstrip-emotion {
+        font-size: 16px;
+        font-weight: 600;
+        color: #0f0;
+        margin-bottom: 4px;
+      }
+
+      .filmstrip-values {
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 4px;
+      }
+
+      .filmstrip-description {
+        font-size: 11px;
+        color: #666;
+        font-style: italic;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #video {
+        display: none;
+      }
+
+      #canvas-wrapper {
+        position: relative;
+        display: inline-block;
+        max-width: 100%;
+        max-height: 100%;
+      }
+
+      #canvas {
+        display: block;
+        max-width: 100%;
+        max-height: calc(100vh - 180px);
+        background: #000;
+      }
+
+      #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      #stats {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px 15px;
+        border-radius: 5px;
+        font-family: monospace;
+        font-size: 14px;
+      }
+
+      #stats .fps {
+        color: #0f0;
+      }
+
+      #status {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        font-size: 12px;
+        color: #888;
+        max-width: 400px;
+      }
+
+      /* Sidebar */
+      #sidebar {
+        width: 280px;
+        background: #111;
+        padding: 16px;
+        overflow-y: auto;
+        border-left: 1px solid #333;
+        flex-shrink: 0;
+      }
+
+      #sidebar section {
+        margin-bottom: 24px;
+      }
+
+      #sidebar h3 {
+        color: #666;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 12px;
+        border-bottom: 1px solid #333;
+        padding-bottom: 8px;
+      }
+
+      /* Detection controls grid */
+      .detection-grid {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px 12px;
+        align-items: center;
+      }
+
+      .detection-grid .header {
+        font-size: 10px;
+        color: #555;
+        text-transform: uppercase;
+      }
+
+      .detection-grid .label {
+        font-size: 13px;
+      }
+
+      /* Checkbox styling */
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: #0a0;
+        cursor: pointer;
+      }
+
+      input[type="checkbox"]:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
+      /* Text and number inputs */
+      #sidebar input[type="text"],
+      #sidebar input[type="number"] {
+        background: #222;
+        border: 1px solid #444;
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 13px;
+        width: 100%;
+      }
+
+      #sidebar input[type="text"]:focus,
+      #sidebar input[type="number"]:focus {
+        outline: none;
+        border-color: #0a0;
+      }
+
+      #sidebar input[type="number"] {
+        width: 70px;
+      }
+
+      /* Input row */
+      .input-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .input-row label {
+        font-size: 13px;
+        min-width: 50px;
+      }
+
+      .input-row input[type="text"] {
+        flex: 1;
+      }
+
+      /* Analysis controls */
+      .analysis-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .analysis-row label {
+        font-size: 13px;
+        min-width: 50px;
+      }
+
+      .analysis-row .interval {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: #888;
+      }
+
+      .countdown {
+        font-size: 11px;
+        color: #0a0;
+        font-family: monospace;
+        min-width: 30px;
+      }
+
+      /* Orientation toggle */
+      .orientation-toggle {
+        display: flex;
+        gap: 4px;
+      }
+
+      .orientation-btn {
+        flex: 1;
+        padding: 6px 12px;
+        background: #222;
+        border: 1px solid #444;
+        color: #888;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.15s;
+      }
+
+      .orientation-btn:hover {
+        background: #333;
+        color: #fff;
+      }
+
+      .orientation-btn.active {
+        background: #0a0;
+        border-color: #0a0;
+        color: #fff;
+      }
+
+      /* Portrait mode - canvas dimensions are swapped automatically */
+      #canvas-wrapper.portrait #canvas,
+      #canvas-wrapper.portrait #overlay {
+        /* Portrait frames have swapped aspect ratio */
+        max-width: 100%;
+        max-height: calc(100vh - 180px);
+      }
+
+      /* Fivestone branding */
+      #fivestone-branding {
+        margin-top: auto;
+        padding-top: 16px;
+        border-top: 1px solid #333;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        opacity: 0.7;
+      }
+
+      #fivestone-branding:hover {
+        opacity: 1;
+      }
+
+      .fivestone-logo {
+        flex-shrink: 0;
+      }
+
+      .fivestone-text {
+        font-size: 12px;
+        font-weight: 500;
+        color: #888;
+        letter-spacing: 0.5px;
+      }
+
+      /* Output panel */
+      #output-panel .result {
+        background: #1a1a1a;
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 12px;
+        font-size: 12px;
+        line-height: 1.5;
+        border: 1px solid #2a2a2a;
+      }
+
+      #output-panel .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+
+      #output-panel .result-type {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #666;
+      }
+
+      #output-panel .result-emotion {
+        font-weight: 600;
+        color: #0f0;
+      }
+
+      #output-panel .result-values {
+        color: #888;
+        font-size: 11px;
+        margin-bottom: 6px;
+      }
+
+      #output-panel .result-description {
+        color: #aaa;
+        font-size: 11px;
+        font-style: italic;
+      }
+
+      #output-panel .no-data {
+        color: #555;
+        font-size: 12px;
+        text-align: center;
+        padding: 20px;
+      }
+
+      /* OSC info panel */
+      .osc-info {
+        font-size: 13px;
+      }
+
+      .osc-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .osc-label {
+        color: #888;
+      }
+
+      .osc-value {
+        font-family: monospace;
+        color: #0f0;
+      }
+
+      .osc-link {
+        display: block;
+        color: #6af;
+        font-size: 11px;
+        text-decoration: none;
+        margin-top: 8px;
+      }
+
+      .osc-link:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Main content (video + filmstrips) -->
+      <div id="main-content">
+        <!-- Video area -->
+        <div id="main-area">
+          <video id="video" autoplay playsinline></video>
+          <div id="canvas-wrapper">
+            <canvas id="canvas"></canvas>
+            <canvas id="overlay"></canvas>
+          </div>
+
+          <div id="stats">
+            FPS: <span class="fps">--</span>
+          </div>
+
+          <div id="status">
+            Initializing...
+          </div>
+        </div>
+
+        <!-- Filmstrip results panel -->
+        <div id="filmstrip-panel">
+          <div id="face-filmstrip" class="filmstrip-row">
+            <div class="filmstrip-image">
+              <span class="filmstrip-placeholder">No face analysis yet</span>
+              <span class="filmstrip-status"></span>
+            </div>
+            <div class="filmstrip-result">
+              <div class="filmstrip-type">Face</div>
+              <div class="filmstrip-emotion">--</div>
+              <div class="filmstrip-values"></div>
+              <div class="filmstrip-description"></div>
+            </div>
+          </div>
+          <div id="body-filmstrip" class="filmstrip-row">
+            <div class="filmstrip-image">
+              <span class="filmstrip-placeholder">No body analysis yet</span>
+              <span class="filmstrip-status"></span>
+            </div>
+            <div class="filmstrip-result">
+              <div class="filmstrip-type">Body</div>
+              <div class="filmstrip-emotion">--</div>
+              <div class="filmstrip-values"></div>
+              <div class="filmstrip-description"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar controls -->
+      <aside id="sidebar">
+        <!-- Detection toggles -->
+        <section id="detection-controls">
+          <h3>Detection</h3>
+          <div class="detection-grid">
+            <span class="header"></span>
+            <span class="header">Detect</span>
+            <span class="header">Draw</span>
+
+            <span class="label">Pose</span>
+            <input type="checkbox" id="detect-pose" checked />
+            <input type="checkbox" id="draw-pose" checked />
+
+            <span class="label">Face</span>
+            <input type="checkbox" id="detect-face" checked />
+            <input type="checkbox" id="draw-face" checked />
+
+            <span class="label">Segment</span>
+            <input type="checkbox" id="detect-segment" checked />
+            <input type="checkbox" id="draw-segment" checked />
+          </div>
+        </section>
+
+        <!-- Camera orientation -->
+        <section id="orientation-controls">
+          <h3>Camera</h3>
+          <div class="orientation-toggle">
+            <button id="orientation-landscape" class="orientation-btn active">Landscape</button>
+            <button id="orientation-portrait" class="orientation-btn">Portrait</button>
+          </div>
+        </section>
+
+        <!-- Spout outputs -->
+        <section id="spout-controls">
+          <h3>Spout Outputs</h3>
+          <div class="input-row">
+            <label>Video:</label>
+            <input type="text" id="spout-video-name" value="Parlor" />
+          </div>
+          <div class="input-row">
+            <label>Mask:</label>
+            <input type="text" id="spout-mask-name" value="Parlor Mask" />
+          </div>
+        </section>
+
+        <!-- OSC output -->
+        <section id="osc-controls">
+          <h3>OSC Output</h3>
+          <div class="osc-info">
+            <div class="osc-row">
+              <span class="osc-label">Port:</span>
+              <span id="osc-port" class="osc-value">9000</span>
+            </div>
+            <div class="osc-row">
+              <span class="osc-label">Rate:</span>
+              <span id="osc-rate" class="osc-value">-- msg/s</span>
+            </div>
+            <a href="#" id="osc-format-link" class="osc-link">View OSC Format</a>
+          </div>
+        </section>
+
+        <!-- Analysis controls -->
+        <section id="analysis-controls">
+          <h3>Analysis</h3>
+          <div class="analysis-row">
+            <input type="checkbox" id="auto-face" />
+            <label>Face</label>
+            <div class="interval">
+              <input type="number" id="face-interval" value="10" min="5" max="120" />
+              <span>sec</span>
+            </div>
+            <span id="face-countdown" class="countdown"></span>
+          </div>
+          <div class="analysis-row">
+            <input type="checkbox" id="auto-body" />
+            <label>Body</label>
+            <div class="interval">
+              <input type="number" id="body-interval" value="15" min="5" max="120" />
+              <span>sec</span>
+            </div>
+            <span id="body-countdown" class="countdown"></span>
+          </div>
+        </section>
+
+        <!-- Fivestone branding -->
+        <div id="fivestone-branding">
+          <svg class="fivestone-logo" width="32" height="24" viewBox="0 0 43 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="logo-gradient" x1="50%" y1="0%" x2="50%" y2="100%">
+                <stop offset="0%" stop-color="#FFE700">
+                  <animate attributeName="stop-color" values="#FFE700; #FFA000; #FFE700" dur="2s" repeatCount="indefinite"></animate>
+                </stop>
+                <stop offset="100%" stop-color="#FFA000">
+                  <animate attributeName="stop-color" values="#FFA000; #FFE700; #FFA000" dur="2s" repeatCount="indefinite"></animate>
+                </stop>
+              </linearGradient>
+            </defs>
+            <path d="M40.6567 19.5885L21.3787 0L2.07405 19.5885C-0.69135 22.3946 -0.69135 26.9814 2.07405 29.7875C3.45675 31.1906 5.29149 31.8921 7.09964 31.8921C8.90778 31.8921 10.7425 31.1906 12.1252 29.7875L14.0663 27.8179L16.0872 29.8685C17.4699 31.2715 19.278 31.973 21.1128 31.973C22.9209 31.973 24.7291 31.2715 26.1384 29.8685C26.9627 29.032 27.5477 28.0337 27.8933 26.9545L30.6587 29.7605C33.4241 32.5666 37.9445 32.5666 40.7099 29.7605C43.4487 26.9814 43.4487 22.3946 40.6567 19.5885ZM37.9977 27.0894C36.6948 28.4115 34.5675 28.4115 33.2646 27.0894L21.3787 15.0017L18.7728 17.6459L23.4527 22.3946C24.7557 23.7167 24.7557 25.8752 23.4527 27.1973C22.8146 27.8718 21.9371 28.1956 21.0862 28.1956C20.2353 28.1956 19.3844 27.8718 18.7196 27.1973L14.0397 22.4216L9.46618 27.0894C8.80142 27.7639 7.95053 28.0877 7.09964 28.0877C6.24874 28.0877 5.39785 27.7639 4.73309 27.0894C3.43016 25.7673 3.43016 23.6088 4.73309 22.2867L21.3787 5.39629L38.0243 22.2867C39.3006 23.6088 39.3006 25.7673 37.9977 27.0894Z" fill="url(#logo-gradient)"></path>
+          </svg>
+          <span class="fivestone-text">Fivestone</span>
+        </div>
+
+      </aside>
+    </div>
+    <script type="module" src="/src/renderer/main.ts"></script>
+  </body>
+</html>
