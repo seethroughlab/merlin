@@ -33,8 +33,10 @@ $RECYCLE.BIN/
 *.lnk
 
 # Output artifacts
-output/sessions/*
-!output/sessions/.gitkeep
+output/
+
+# Windows null device artifact
+nul
 
 # Logs
 *.log
