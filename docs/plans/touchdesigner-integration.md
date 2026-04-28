@@ -68,9 +68,9 @@ Parlor (Electron)                          TouchDesigner
 - [x] WebSocket server starts on port 8001
 - [x] TD Bridge initializes correctly
 - [x] Error callbacks working
-- [ ] TD connects to Parlor WebSocket (needs TD script)
-- [ ] `td_ready` message received and logged (needs TD script)
-- [ ] Basic `mood_update` messages received by TD (needs TD script)
+- [x] TD connects to Parlor WebSocket
+- [x] `td_ready` message received and logged
+- [x] Basic `mood_update` messages received by TD
 
 ### Progress Notes
 
@@ -142,8 +142,8 @@ Parlor (Electron)                          TouchDesigner
 - [x] Gemini can call `set_skeleton_overlay` to highlight body parts
 - [x] Existing `set_mood` also pushes to TD when connected
 - [x] Tool failures (TD not connected) handled gracefully
-- [ ] TD receives and applies visual changes (needs TD-side implementation)
-- [ ] Effects sync with mentalist speech/reveals (needs TD-side implementation)
+- [x] TD receives and applies visual changes
+- [ ] Effects sync with mentalist speech/reveals (needs testing)
 
 ### Progress Notes
 
@@ -217,6 +217,13 @@ ws_parlor (websocketDAT) ──> ws_callbacks (textDAT)
 - Skeleton draw callbacks match Parlor colors (green lines, red points) with Gemini overlay support
 - Aura composited using screen blend mode for glow effect
 - Fixed Spout coordinate alignment via CSS (`body.spout-mode` fills 100vw×100vh) + Y-flip in TD
+
+**2026-04-28:** Aura visibility fixes.
+- Created `color_helper` textDAT with hex-to-RGB functions for parameter expressions
+- Fixed aura chain wiring: `aura_base → aura_blur → aura_tint → aura_multiply → aura_composite`
+- Properly connected `spout_mask` to `aura_multiply` input 1 (constrains aura to person silhouette)
+- Increased aura visibility: radius 0.5x0.6, blur 40, alpha 1.0
+- Dynamic expressions on `aura_tint` read from `scene_state['aura_color']`
 
 ---
 
