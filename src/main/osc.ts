@@ -14,6 +14,17 @@
  *   /parlor/face/detected          [int]   - 1 if face detected, 0 otherwise
  *   /parlor/face/bbox              [x,y,w,h] - Face bounding box (normalized 0-1)
  *   /parlor/face/confidence        [float] - Face detection confidence
+ *
+ * Mentalist mode addresses:
+ *   /parlor/mentalist/active           [int]    - 1 if mentalist mode active, 0 otherwise
+ *   /parlor/mentalist/phase            [string] - idle/intro/reading/reveal/finale
+ *   /parlor/mentalist/mood             [string] - mysterious/tension/revelation/warm/contemplative
+ *   /parlor/mentalist/mood/color       [string] - Hex color accent (e.g., "#8B5CF6")
+ *   /parlor/mentalist/mood/particles   [string] - calm/orbiting/attracted/repelled/burst
+ *   /parlor/mentalist/reveal/trigger   [int]    - 1 when reveal triggered (pulse)
+ *   /parlor/mentalist/reveal/type      [string] - emotion/trait/prediction/observation/secret
+ *   /parlor/mentalist/reveal/text      [string] - The insight text
+ *   /parlor/mentalist/reveal/intensity [float]  - 0.0 to 1.0
  */
 
 import { Client } from 'node-osc';
@@ -186,4 +197,63 @@ export function getOscStats(): OscStats {
     port: currentPort,
     messagesPerSecond: Math.round(currentRate),
   };
+}
+
+// ============ MENTALIST OSC ============
+
+/**
+ * Mentalist OSC update data
+ */
+export interface MentalistOscUpdate {
+  active?: boolean;
+  phase?: string;
+  mood?: string;
+  colorAccent?: string;
+  particleBehavior?: string;
+  reveal?: {
+    trigger: boolean;
+    type: string;
+    text: string;
+    intensity: number;
+  };
+}
+
+/**
+ * Send mentalist state update via OSC
+ */
+export function sendMentalistUpdate(update: MentalistOscUpdate): void {
+  if (!oscClient || !enabled) return;
+
+  try {
+    if (update.active !== undefined) {
+      oscClient.send('/parlor/mentalist/active', update.active ? 1 : 0);
+    }
+
+    if (update.phase !== undefined) {
+      oscClient.send('/parlor/mentalist/phase', update.phase);
+    }
+
+    if (update.mood !== undefined) {
+      oscClient.send('/parlor/mentalist/mood', update.mood);
+    }
+
+    if (update.colorAccent !== undefined) {
+      oscClient.send('/parlor/mentalist/mood/color', update.colorAccent);
+    }
+
+    if (update.particleBehavior !== undefined) {
+      oscClient.send('/parlor/mentalist/mood/particles', update.particleBehavior);
+    }
+
+    if (update.reveal) {
+      oscClient.send('/parlor/mentalist/reveal/trigger', 1);
+      oscClient.send('/parlor/mentalist/reveal/type', update.reveal.type);
+      oscClient.send('/parlor/mentalist/reveal/text', update.reveal.text);
+      oscClient.send('/parlor/mentalist/reveal/intensity', update.reveal.intensity);
+    }
+
+    messageCount++;
+  } catch (error) {
+    console.error('OSC mentalist send error:', error);
+  }
 }

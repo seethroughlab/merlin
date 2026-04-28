@@ -6,7 +6,7 @@
  */
 
 import { GoogleGenerativeAI, Part } from '@google/generative-ai';
-import type { MicroExpressionAnalysis, BodyLanguageAnalysis } from '../shared/types';
+import type { MicroExpressionAnalysis, BodyLanguageAnalysis, VoiceCommandResult, VoiceCommandAction } from '../shared/types';
 
 let genAI: GoogleGenerativeAI | null = null;
 let model: any = null;
@@ -216,4 +216,92 @@ export async function analyzeBodyLanguage(
  */
 export function isGeminiAvailable(): boolean {
   return model !== null;
+}
+
+const VOICE_COMMAND_PROMPT = `You are a voice command interpreter for Parlor, a motion capture application.
+The user has spoken a command. Interpret what they want and respond with a JSON action.
+
+Available commands and their actions:
+- "start pose tracking" / "enable pose" / "turn on pose" → toggle_pose enabled:true
+- "stop pose tracking" / "disable pose" / "turn off pose" → toggle_pose enabled:false
+- "start face detection" / "enable face" / "turn on face" → toggle_face enabled:true
+- "stop face detection" / "disable face" / "turn off face" → toggle_face enabled:false
+- "start segmentation" / "enable segmentation" / "turn on segmentation" → toggle_segmentation enabled:true
+- "stop segmentation" / "disable segmentation" / "turn off segmentation" → toggle_segmentation enabled:false
+- "show pose overlay" / "show skeleton" → toggle_pose_overlay enabled:true
+- "hide pose overlay" / "hide skeleton" → toggle_pose_overlay enabled:false
+- "show face overlay" / "show face boxes" → toggle_face_overlay enabled:true
+- "hide face overlay" / "hide face boxes" → toggle_face_overlay enabled:false
+- "portrait mode" / "switch to portrait" → set_orientation portrait:true
+- "landscape mode" / "switch to landscape" → set_orientation portrait:false
+- "capture face" / "analyze face" / "read my expression" → capture_face
+- "capture body" / "analyze body" / "read my body language" → capture_body
+- "start auto face analysis" / "auto analyze face every X seconds" → start_auto_face (with optional intervalSeconds)
+- "stop auto face analysis" → stop_auto_face
+- "start auto body analysis" / "auto analyze body every X seconds" → start_auto_body (with optional intervalSeconds)
+- "stop auto body analysis" → stop_auto_body
+- "set face interval to X seconds" → set_face_interval seconds:X
+- "set body interval to X seconds" → set_body_interval seconds:X
+
+User said: "{transcript}"
+
+Respond with ONLY valid JSON (no markdown, no code blocks):
+{
+  "understood": <true if you recognized a command, false otherwise>,
+  "action": <the action object if understood, null otherwise>,
+  "response": "<brief human-readable response to speak back>",
+  "confidence": <0 to 1>
+}
+
+Examples:
+User: "turn on pose tracking" → {"understood":true,"action":{"type":"toggle_pose","enabled":true},"response":"Pose tracking enabled","confidence":0.95}
+User: "analyze my face" → {"understood":true,"action":{"type":"capture_face"},"response":"Capturing face expression","confidence":0.9}
+User: "what's the weather" → {"understood":false,"action":null,"response":"I can only control Parlor features","confidence":0.8}`;
+
+/**
+ * Interpret a voice command transcript using Gemini
+ */
+export async function interpretVoiceCommand(
+  transcript: string
+): Promise<VoiceCommandResult> {
+  if (!model) {
+    throw new Error('Gemini not initialized');
+  }
+
+  const prompt = VOICE_COMMAND_PROMPT.replace('{transcript}', transcript);
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const text = response.text();
+
+    // Parse JSON response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('Failed to parse Gemini voice command response:', text);
+      return {
+        understood: false,
+        action: null,
+        response: "I didn't understand that command",
+        confidence: 0,
+      };
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    return {
+      understood: parsed.understood ?? false,
+      action: parsed.action ?? null,
+      response: parsed.response ?? "Command processed",
+      confidence: parsed.confidence ?? 0,
+    };
+  } catch (error) {
+    console.error('Voice command interpretation error:', error);
+    return {
+      understood: false,
+      action: null,
+      response: `Error: ${error}`,
+      confidence: 0,
+    };
+  }
 }

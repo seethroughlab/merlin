@@ -128,3 +128,129 @@ export interface OscStats {
   /** Messages sent per second */
   messagesPerSecond: number;
 }
+
+/**
+ * Voice command result from Gemini
+ */
+export interface VoiceCommandResult {
+  /** Whether a valid command was recognized */
+  understood: boolean;
+  /** The action to perform */
+  action: VoiceCommandAction | null;
+  /** Human-readable response to show the user */
+  response: string;
+  /** Confidence in the interpretation (0 to 1) */
+  confidence: number;
+}
+
+/**
+ * Possible voice command actions
+ */
+export type VoiceCommandAction =
+  | { type: 'toggle_pose'; enabled: boolean }
+  | { type: 'toggle_face'; enabled: boolean }
+  | { type: 'toggle_segmentation'; enabled: boolean }
+  | { type: 'toggle_pose_overlay'; enabled: boolean }
+  | { type: 'toggle_face_overlay'; enabled: boolean }
+  | { type: 'toggle_segmentation_overlay'; enabled: boolean }
+  | { type: 'set_orientation'; portrait: boolean }
+  | { type: 'capture_face' }
+  | { type: 'capture_body' }
+  | { type: 'start_auto_face'; intervalSeconds?: number }
+  | { type: 'stop_auto_face' }
+  | { type: 'start_auto_body'; intervalSeconds?: number }
+  | { type: 'stop_auto_body' }
+  | { type: 'set_face_interval'; seconds: number }
+  | { type: 'set_body_interval'; seconds: number };
+
+// ============ MENTALIST TYPES ============
+
+/**
+ * Phases of the mentalist reading
+ */
+export type MentalistPhase = 'idle' | 'intro' | 'reading' | 'reveal' | 'finale';
+
+/**
+ * Visual mood settings
+ */
+export type MentalistMood = 'mysterious' | 'tension' | 'revelation' | 'warm' | 'contemplative';
+
+/**
+ * Types of insights the mentalist can reveal
+ */
+export type InsightType = 'emotion' | 'trait' | 'prediction' | 'observation' | 'secret';
+
+/**
+ * A single insight accumulated during the reading
+ */
+export interface MentalistInsight {
+  id: string;
+  type: InsightType;
+  content: string;
+  confidence: number;
+  timestamp: number;
+  revealed: boolean;
+}
+
+/**
+ * Response from the mentalist
+ */
+export interface MentalistResponse {
+  text: string;
+  phase: MentalistPhase;
+  mood: MentalistMood;
+  newInsights: MentalistInsight[];
+  revealedInsight?: MentalistInsight;
+}
+
+/**
+ * Conversation message
+ */
+export interface MentalistConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+/**
+ * Data sent to renderer for UI updates
+ */
+export interface MentalistUIUpdate {
+  phase: MentalistPhase;
+  mood: MentalistMood;
+  turnCount: number;
+  lastMessage?: MentalistConversationMessage;
+  revealedInsights: MentalistInsight[];
+  isListening: boolean;
+  isProcessing: boolean;
+}
+
+/**
+ * Mentalist session state (for IPC)
+ */
+export interface MentalistSessionInfo {
+  state: {
+    phase: MentalistPhase;
+    turnCount: number;
+    currentMood: MentalistMood;
+  };
+  history: MentalistConversationMessage[];
+  revealedInsights: MentalistInsight[];
+  isActive: boolean;
+}
+
+// ============ TTS TYPES ============
+
+/**
+ * Result from Gemini TTS generation
+ */
+export interface TTSResult {
+  /** Base64-encoded PCM audio data */
+  audioBase64: string;
+  /** Sample rate in Hz (typically 24000) */
+  sampleRate: number;
+  /** Number of channels (typically 1 for mono) */
+  channels: number;
+  /** Bit depth (typically 16) */
+  bitDepth: number;
+}
