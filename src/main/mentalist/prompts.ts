@@ -56,6 +56,20 @@ You receive structured data about:
 - Use \`set_mood\` to shift the visual atmosphere as the reading progresses
 - Use \`request_body_analysis\` or \`request_face_analysis\` if you want fresh data mid-turn
 
+## Visual Tool Usage (TouchDesigner Integration)
+- Use \`set_visual_scene\` to evolve the atmosphere as you learn about the person
+  - Start subtle in intro, intensify during reading, dramatic for reveals
+  - Match particle behavior to what you're observing (attracted=engaged, repelled=defensive)
+- Use \`trigger_visual_reveal\` for punctuation moments
+  - Pair with \`trigger_reveal\` for maximum impact
+  - center_landmark focuses the effect on body parts you're reading
+- Use \`set_skeleton_overlay\` to highlight what you're observing
+  - E.g., highlight shoulders when discussing posture, hands when discussing gestures
+  - Clear overlays by sending empty array when moving to new observation
+
+## MediaPipe Landmark Reference (for center_landmark and overlays)
+- 0: nose, 11-12: shoulders, 13-14: elbows, 15-16: wrists, 23-24: hips
+
 ## Example Observations
 - "The way you hold your hands tells me you're someone who thinks before they speak..."
 - "There - that micro-expression. You're curious but guarded. Someone taught you to be careful."
@@ -157,6 +171,116 @@ export const MENTALIST_TOOLS: FunctionDeclaration[] = [
         },
       },
       required: ['category'],
+    },
+  },
+  // ===== Visual Tools for TouchDesigner =====
+  {
+    name: 'set_visual_scene',
+    description: 'Control the visual scene in TouchDesigner. Use to set particle effects, aura, and background mood. Changes persist until next call. Use sparingly for dramatic effect.',
+    parameters: {
+      type: 'object' as SchemaType,
+      properties: {
+        particle_intensity: {
+          type: 'string' as SchemaType,
+          enum: ['subtle', 'moderate', 'intense', 'overwhelming'],
+          description: 'How many particles (subtle=few ambient, overwhelming=dramatic swarm)',
+        },
+        particle_behavior: {
+          type: 'string' as SchemaType,
+          enum: ['calm', 'orbiting', 'attracted', 'repelled', 'burst', 'trailing'],
+          description: 'How particles move relative to the person',
+        },
+        particle_color: {
+          type: 'string' as SchemaType,
+          description: 'Hex color for particles (e.g., "#8B5CF6" for purple)',
+        },
+        aura_color: {
+          type: 'string' as SchemaType,
+          description: 'Hex color for the aura glow around the person',
+        },
+        aura_size: {
+          type: 'number' as SchemaType,
+          description: 'Aura size from 0 (none) to 1 (large)',
+        },
+        background_mood: {
+          type: 'string' as SchemaType,
+          enum: ['mysterious', 'warm', 'cold', 'electric', 'transcendent'],
+          description: 'Overall visual atmosphere',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'trigger_visual_reveal',
+    description: 'Trigger a dramatic one-shot visual effect. Use alongside trigger_reveal for insight moments, or standalone for emphasis. Effect plays once then fades.',
+    parameters: {
+      type: 'object' as SchemaType,
+      properties: {
+        effect_type: {
+          type: 'string' as SchemaType,
+          enum: ['burst', 'converge', 'ripple', 'ascend', 'transform'],
+          description: 'burst=explosion outward, converge=particles rush to point, ripple=wave effect, ascend=upward motion, transform=morph effect',
+        },
+        color: {
+          type: 'string' as SchemaType,
+          description: 'Hex color for the effect (optional, uses mood color if omitted)',
+        },
+        intensity: {
+          type: 'number' as SchemaType,
+          description: 'Effect intensity from 0.0 (subtle) to 1.0 (dramatic)',
+        },
+        duration: {
+          type: 'number' as SchemaType,
+          description: 'Effect duration in seconds (default 2)',
+        },
+        center_landmark: {
+          type: 'number' as SchemaType,
+          description: 'MediaPipe landmark to center effect on (0=nose, 11-12=shoulders, 15-16=wrists). Omit for center screen.',
+        },
+      },
+      required: ['effect_type', 'intensity'],
+    },
+  },
+  {
+    name: 'set_skeleton_overlay',
+    description: 'Add glowing lines or effects along the skeleton. Use to highlight body parts you are reading (e.g., connect shoulders for posture, highlight hands for gestures).',
+    parameters: {
+      type: 'object' as SchemaType,
+      properties: {
+        overlays: {
+          type: 'array' as SchemaType,
+          description: 'Array of skeleton overlay effects',
+          items: {
+            type: 'object' as SchemaType,
+            properties: {
+              landmark_start: {
+                type: 'number' as SchemaType,
+                description: 'Starting MediaPipe landmark index (0-32)',
+              },
+              landmark_end: {
+                type: 'number' as SchemaType,
+                description: 'Ending MediaPipe landmark index (0-32)',
+              },
+              effect: {
+                type: 'string' as SchemaType,
+                enum: ['glow', 'trail', 'geometric', 'energy_line'],
+                description: 'Visual effect type',
+              },
+              color: {
+                type: 'string' as SchemaType,
+                description: 'Hex color for the effect',
+              },
+              intensity: {
+                type: 'number' as SchemaType,
+                description: 'Effect intensity 0-1',
+              },
+            },
+            required: ['landmark_start', 'landmark_end', 'effect', 'color', 'intensity'],
+          },
+        },
+      },
+      required: ['overlays'],
     },
   },
 ];

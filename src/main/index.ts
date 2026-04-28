@@ -8,6 +8,16 @@ import { initGemini, analyzeMicroExpressions, analyzeBodyLanguage, interpretVoic
 import { initTTS as initGeminiTTS, generateMentalistSpeech, isTTSAvailable } from './tts';
 import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './tts-live';
 import { MentalistSession } from './mentalist';
+import {
+  initTDBridge,
+  closeTDBridge,
+  isConnected as isTDConnected,
+  isTDReady,
+  pushMoodUpdate,
+  pushSceneParams,
+  pushRevealEffect,
+  state as tdState,
+} from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
 import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis } from '../shared/types';
 import type { MentalistUIUpdate, RevealTriggerParams, SetMoodParams } from './mentalist';
@@ -621,6 +631,35 @@ ipcMain.on('stream-speech', (_event, text: string, mood?: string) => {
   streamSpeech(text, mood || 'mysterious');
 });
 
+// ============ TD BRIDGE IPC HANDLERS ============
+
+// Get TD connection status
+ipcMain.handle('td-get-status', () => ({
+  connected: isTDConnected(),
+  ready: isTDReady(),
+  capabilities: tdState.capabilities,
+}));
+
+// Push mood update to TD
+ipcMain.on('td-push-mood', (_event, { mood, color, intensity }: { mood: string; color?: string; intensity?: number }) => {
+  pushMoodUpdate(mood, color, intensity);
+});
+
+// Push scene parameters to TD
+ipcMain.on('td-push-scene', (_event, params: Parameters<typeof pushSceneParams>[0]) => {
+  pushSceneParams(params);
+});
+
+// Push reveal effect to TD
+ipcMain.on('td-push-reveal', (_event, { effect_type, intensity, duration, landmark }: {
+  effect_type: string;
+  intensity: number;
+  duration: number;
+  landmark?: number;
+}) => {
+  pushRevealEffect(effect_type, intensity, duration, landmark);
+});
+
 app.whenReady().then(async () => {
   console.log('=== Parlor Starting ===');
 
@@ -643,6 +682,26 @@ app.whenReady().then(async () => {
   // Initialize OSC
   initOsc(oscConfig);
   console.log('OSC initialized');
+
+  // Initialize TD Bridge (WebSocket server for TouchDesigner)
+  initTDBridge({
+    onConnect: () => {
+      console.log('TouchDesigner connected');
+      mainWindow?.webContents.send('td-status', { connected: true, ready: false });
+    },
+    onDisconnect: () => {
+      console.log('TouchDesigner disconnected');
+      mainWindow?.webContents.send('td-status', { connected: false, ready: false });
+    },
+    onReady: (capabilities) => {
+      console.log('TouchDesigner ready:', capabilities);
+      mainWindow?.webContents.send('td-status', { connected: true, ready: true, capabilities });
+    },
+    onError: (error) => {
+      console.error('TD Bridge error:', error);
+    },
+  });
+  console.log('TD Bridge initialized');
 
   // Create visible preview window
   createMainWindow();
@@ -679,4 +738,5 @@ app.on('quit', () => {
   closeOsc();
   closeSpout();
   closeLiveTTS();
+  closeTDBridge();
 });

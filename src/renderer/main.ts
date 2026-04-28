@@ -141,8 +141,9 @@ async function speakWithStreaming(text: string, mood: string = 'mysterious'): Pr
   }
 }
 
-// Hide UI in Spout/Mask modes
+// Hide UI in Spout/Mask modes and enable full-window rendering
 if (isSpoutMode || isMaskMode) {
+  document.body.classList.add('spout-mode');
   document.getElementById('stats')?.remove();
   document.getElementById('status')?.remove();
   document.getElementById('sidebar')?.remove();
@@ -1066,48 +1067,14 @@ function executeVoiceCommand(action: VoiceCommandAction): void {
       captureAndAnalyzeBodyLanguage();
       break;
 
+    // Legacy auto-analysis commands (UI removed, kept for voice command compatibility)
     case 'start_auto_face':
-      if (action.intervalSeconds && faceIntervalInput) {
-        faceIntervalInput.value = action.intervalSeconds.toString();
-        faceAnalysisInterval = action.intervalSeconds * 1000;
-      }
-      autoAnalyzeFace = true;
-      if (autoFaceCheckbox) autoFaceCheckbox.checked = true;
-      startFaceAnalysisTimer();
-      break;
-
     case 'stop_auto_face':
-      autoAnalyzeFace = false;
-      if (autoFaceCheckbox) autoFaceCheckbox.checked = false;
-      stopFaceAnalysisTimer();
-      break;
-
     case 'start_auto_body':
-      if (action.intervalSeconds && bodyIntervalInput) {
-        bodyIntervalInput.value = action.intervalSeconds.toString();
-        bodyAnalysisInterval = action.intervalSeconds * 1000;
-      }
-      autoAnalyzeBody = true;
-      if (autoBodyCheckbox) autoBodyCheckbox.checked = true;
-      startBodyAnalysisTimer();
-      break;
-
     case 'stop_auto_body':
-      autoAnalyzeBody = false;
-      if (autoBodyCheckbox) autoBodyCheckbox.checked = false;
-      stopBodyAnalysisTimer();
-      break;
-
     case 'set_face_interval':
-      faceAnalysisInterval = action.seconds * 1000;
-      if (faceIntervalInput) faceIntervalInput.value = action.seconds.toString();
-      if (autoAnalyzeFace) startFaceAnalysisTimer();
-      break;
-
     case 'set_body_interval':
-      bodyAnalysisInterval = action.seconds * 1000;
-      if (bodyIntervalInput) bodyIntervalInput.value = action.seconds.toString();
-      if (autoAnalyzeBody) startBodyAnalysisTimer();
+      console.log('Auto-analysis commands not available (UI removed)');
       break;
 
     default:

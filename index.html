@@ -68,6 +68,27 @@
         background: #000;
       }
 
+      /* Spout/Mask mode: fill entire window with no scaling */
+      body.spout-mode #app,
+      body.spout-mode #main-content,
+      body.spout-mode #main-area,
+      body.spout-mode #canvas-wrapper {
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      body.spout-mode #canvas {
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
+        object-fit: fill !important;
+      }
+
       #overlay {
         position: absolute;
         top: 0;

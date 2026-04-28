@@ -147,6 +147,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     });
   },
 
+  // ============ TD BRIDGE ============
+
+  // Get TD connection status
+  tdGetStatus: (): Promise<{ connected: boolean; ready: boolean; capabilities: unknown }> => {
+    return ipcRenderer.invoke('td-get-status');
+  },
+
+  // Push mood update to TD
+  tdPushMood: (mood: string, color?: string, intensity?: number) => {
+    ipcRenderer.send('td-push-mood', { mood, color, intensity });
+  },
+
+  // Push scene parameters to TD
+  tdPushScene: (params: {
+    particle_intensity?: string;
+    particle_behavior?: string;
+    particle_color?: string;
+    aura_color?: string;
+    aura_size?: number;
+    background_mood?: string;
+  }) => {
+    ipcRenderer.send('td-push-scene', params);
+  },
+
+  // Push reveal effect to TD
+  tdPushReveal: (effect_type: string, intensity: number, duration: number, landmark?: number) => {
+    ipcRenderer.send('td-push-reveal', { effect_type, intensity, duration, landmark });
+  },
+
+  // Listen for TD status changes
+  onTDStatus: (callback: (status: { connected: boolean; ready: boolean; capabilities?: unknown }) => void) => {
+    ipcRenderer.on('td-status', (_event, status) => {
+      callback(status);
+    });
+    return () => ipcRenderer.removeAllListeners('td-status');
+  },
+
   // Platform info
   platform: process.platform,
 });
@@ -183,6 +220,19 @@ declare global {
       streamSpeech: (text: string, mood?: string) => void;
       onTTSAudioChunk: (callback: (chunk: { audioBase64: string; sampleRate: number; channels: number }) => void) => void;
       onTTSComplete: (callback: () => void) => void;
+      // TD Bridge
+      tdGetStatus: () => Promise<{ connected: boolean; ready: boolean; capabilities: unknown }>;
+      tdPushMood: (mood: string, color?: string, intensity?: number) => void;
+      tdPushScene: (params: {
+        particle_intensity?: string;
+        particle_behavior?: string;
+        particle_color?: string;
+        aura_color?: string;
+        aura_size?: number;
+        background_mood?: string;
+      }) => void;
+      tdPushReveal: (effect_type: string, intensity: number, duration: number, landmark?: number) => void;
+      onTDStatus: (callback: (status: { connected: boolean; ready: boolean; capabilities?: unknown }) => void) => () => void;
       platform: NodeJS.Platform;
     };
   }

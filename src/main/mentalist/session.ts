@@ -16,9 +16,20 @@ import type {
   MentalistToolCall,
   RevealTriggerParams,
   SetMoodParams,
+  SetVisualSceneParams,
+  TriggerVisualRevealParams,
+  SetSkeletonOverlayParams,
   ConversationMessage,
 } from './types';
 import type { BodyLanguageAnalysis, MicroExpressionAnalysis } from '../../shared/types';
+import {
+  pushSceneParams,
+  pushRevealEffect,
+  pushSkeletonAugment,
+  pushAuraUpdate,
+  pushMoodUpdate,
+  isConnected as isTDConnected,
+} from '../td-bridge';
 
 /**
  * Callback for when a reveal should be triggered
@@ -304,6 +315,11 @@ export class MentalistSession {
             this.config.onMoodChange(params);
           }
 
+          // Also push to TouchDesigner if connected
+          if (isTDConnected()) {
+            pushMoodUpdate(params.mood, params.colorAccent);
+          }
+
           response = { success: true, mood: params.mood };
           break;
         }
@@ -338,6 +354,67 @@ export class MentalistSession {
             templates,
             note: 'Use these for inspiration - adapt to the current context and your observations',
           };
+          break;
+        }
+
+        // ===== Visual Tools for TouchDesigner =====
+
+        case 'set_visual_scene': {
+          const params = call.args as unknown as SetVisualSceneParams;
+
+          if (isTDConnected()) {
+            // Push scene parameters
+            pushSceneParams({
+              particle_intensity: params.particle_intensity,
+              particle_behavior: params.particle_behavior,
+              particle_color: params.particle_color,
+              aura_color: params.aura_color,
+              aura_size: params.aura_size,
+              background_mood: params.background_mood,
+            });
+
+            // Also update aura separately if specified
+            if (params.aura_color && params.aura_size !== undefined) {
+              pushAuraUpdate(
+                params.aura_color,
+                params.aura_size,
+                params.particle_behavior || 'calm'
+              );
+            }
+
+            response = { success: true, applied: params };
+          } else {
+            response = { success: false, error: 'TouchDesigner not connected' };
+          }
+          break;
+        }
+
+        case 'trigger_visual_reveal': {
+          const params = call.args as unknown as TriggerVisualRevealParams;
+
+          if (isTDConnected()) {
+            pushRevealEffect(
+              params.effect_type,
+              params.intensity,
+              params.duration ?? 2,
+              params.center_landmark
+            );
+            response = { success: true, effect: params.effect_type };
+          } else {
+            response = { success: false, error: 'TouchDesigner not connected' };
+          }
+          break;
+        }
+
+        case 'set_skeleton_overlay': {
+          const params = call.args as unknown as SetSkeletonOverlayParams;
+
+          if (isTDConnected()) {
+            pushSkeletonAugment(params.overlays);
+            response = { success: true, overlayCount: params.overlays.length };
+          } else {
+            response = { success: false, error: 'TouchDesigner not connected' };
+          }
           break;
         }
 
