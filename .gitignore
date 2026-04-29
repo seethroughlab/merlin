@@ -54,3 +54,4 @@ coverage/
 .cache/
 .claude
 td/Backup
+td/*.*.toe
