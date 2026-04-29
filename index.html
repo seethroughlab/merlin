@@ -330,28 +330,28 @@
         padding: 20px;
       }
 
-      /* OSC info panel */
-      .osc-info {
+      /* WebSocket info panel */
+      .ws-info {
         font-size: 13px;
       }
 
-      .osc-row {
+      .ws-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 8px;
       }
 
-      .osc-label {
+      .ws-label {
         color: #888;
       }
 
-      .osc-value {
+      .ws-value {
         font-family: monospace;
         color: #0f0;
       }
 
-      .osc-link {
+      .ws-link {
         display: block;
         color: #6af;
         font-size: 11px;
@@ -359,7 +359,7 @@
         margin-top: 8px;
       }
 
-      .osc-link:hover {
+      .ws-link:hover {
         text-decoration: underline;
       }
 
@@ -712,19 +712,19 @@
           </div>
         </section>
 
-        <!-- OSC output -->
-        <section id="osc-controls">
-          <h3>OSC Output</h3>
-          <div class="osc-info">
-            <div class="osc-row">
-              <span class="osc-label">Port:</span>
-              <span id="osc-port" class="osc-value">9000</span>
+        <!-- WebSocket Bridge -->
+        <section id="ws-controls">
+          <h3>WebSocket Bridge</h3>
+          <div class="ws-info">
+            <div class="ws-row">
+              <span class="ws-label">Port:</span>
+              <span id="ws-port" class="ws-value">8001</span>
             </div>
-            <div class="osc-row">
-              <span class="osc-label">Rate:</span>
-              <span id="osc-rate" class="osc-value">-- msg/s</span>
+            <div class="ws-row">
+              <span class="ws-label">Status:</span>
+              <span id="ws-status" class="ws-value">--</span>
             </div>
-            <a href="#" id="osc-format-link" class="osc-link">View OSC Format</a>
+            <a href="#" id="ws-format-link" class="ws-link">View Message Format</a>
           </div>
         </section>
 

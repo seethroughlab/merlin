@@ -819,15 +819,15 @@ function setupSidebar(): void {
   landscapeBtn?.addEventListener('click', () => setOrientation(false, true));
   portraitBtn?.addEventListener('click', () => setOrientation(true, true));
 
-  // OSC format link handler
-  const oscFormatLink = document.getElementById('osc-format-link');
-  oscFormatLink?.addEventListener('click', (e) => {
+  // WebSocket format link handler
+  const wsFormatLink = document.getElementById('ws-format-link');
+  wsFormatLink?.addEventListener('click', (e) => {
     e.preventDefault();
-    showOscFormatModal();
+    showWsFormatModal();
   });
 
-  // Start OSC stats polling
-  startOscStatsPoll();
+  // Start WebSocket stats polling
+  startWsStatsPoll();
 
   // Device choosers (camera + mic)
   setupDeviceChoosers();
@@ -898,35 +898,38 @@ function setupDeviceChoosers(): void {
 }
 
 /**
- * Poll and display OSC stats
+ * Poll and display WebSocket bridge stats
  */
-function startOscStatsPoll(): void {
-  const oscPort = document.getElementById('osc-port');
-  const oscRate = document.getElementById('osc-rate');
+function startWsStatsPoll(): void {
+  const wsPort = document.getElementById('ws-port');
+  const wsStatus = document.getElementById('ws-status');
 
-  async function updateOscStats() {
+  async function updateWsStats() {
     if (!window.electronAPI) return;
 
     try {
-      const stats = await window.electronAPI.getOscStats();
-      if (oscPort) oscPort.textContent = stats.port.toString();
-      if (oscRate) oscRate.textContent = `${stats.messagesPerSecond} msg/s`;
+      const stats = await window.electronAPI.getOscStats(); // Uses backward-compatible API name
+      if (wsPort) wsPort.textContent = stats.port.toString();
+      if (wsStatus) {
+        wsStatus.textContent = stats.enabled ? 'Connected' : 'Waiting...';
+        wsStatus.style.color = stats.enabled ? '#0f0' : '#888';
+      }
     } catch {
       // Ignore errors silently
     }
   }
 
   // Update every second
-  setInterval(updateOscStats, 1000);
-  updateOscStats(); // Initial update
+  setInterval(updateWsStats, 1000);
+  updateWsStats(); // Initial update
 }
 
 /**
- * Show OSC format modal
+ * Show WebSocket message format modal
  */
-function showOscFormatModal(): void {
+function showWsFormatModal(): void {
   // Check if modal already exists
-  let modal = document.getElementById('osc-format-modal');
+  let modal = document.getElementById('ws-format-modal');
   if (modal) {
     modal.style.display = 'flex';
     return;
@@ -934,7 +937,7 @@ function showOscFormatModal(): void {
 
   // Create modal
   modal = document.createElement('div');
-  modal.id = 'osc-format-modal';
+  modal.id = 'ws-format-modal';
   modal.style.cssText = `
     position: fixed;
     top: 0;
@@ -949,42 +952,49 @@ function showOscFormatModal(): void {
   `;
 
   modal.innerHTML = `
-    <div style="background: #1a1a1a; padding: 24px; border-radius: 8px; max-width: 600px; max-height: 80vh; overflow-y: auto; border: 1px solid #333;">
-      <h2 style="margin: 0 0 16px; color: #fff; font-size: 18px;">OSC Output Format</h2>
+    <div style="background: #1a1a1a; padding: 24px; border-radius: 8px; max-width: 700px; max-height: 80vh; overflow-y: auto; border: 1px solid #333;">
+      <h2 style="margin: 0 0 16px; color: #fff; font-size: 18px;">WebSocket Message Format</h2>
       <p style="color: #888; font-size: 13px; margin-bottom: 16px;">
-        Parlor sends tracking data via OSC (Open Sound Control) to localhost on the configured port.
+        Parlor runs a WebSocket server on localhost. Clients connect to receive tracking data and scene control messages as JSON.
       </p>
-      <h3 style="color: #0f0; font-size: 14px; margin: 16px 0 8px;">Addresses:</h3>
+      <h3 style="color: #0f0; font-size: 14px; margin: 16px 0 8px;">High-Frequency (30fps):</h3>
       <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
         <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">/parlor/fps</td>
-          <td style="padding: 6px 8px; color: #888;">[float] Current FPS</td>
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">tracking_frame</td>
+          <td style="padding: 6px 8px; color: #888;">fps, frame {width, height, portrait}, pose {detected, landmarks[]}, face {detected, bbox}</td>
+        </tr>
+      </table>
+      <h3 style="color: #0f0; font-size: 14px; margin: 16px 0 8px;">Event-Driven:</h3>
+      <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid #333;">
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">orientation_update</td>
+          <td style="padding: 6px 8px; color: #888;">portrait, width, height</td>
         </tr>
         <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">/parlor/pose/detected</td>
-          <td style="padding: 6px 8px; color: #888;">[int] 1 if pose detected, 0 otherwise</td>
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">mood_update</td>
+          <td style="padding: 6px 8px; color: #888;">mood, color, intensity</td>
         </tr>
         <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">/parlor/pose/landmark/{i}</td>
-          <td style="padding: 6px 8px; color: #888;">[x, y, z, visibility] Landmark 0-32</td>
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">scene_params</td>
+          <td style="padding: 6px 8px; color: #888;">params {particle_*, aura_*, ...}</td>
         </tr>
         <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">/parlor/pose/landmarks</td>
-          <td style="padding: 6px 8px; color: #888;">[blob] All 33 landmarks (Float32)</td>
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">mentalist_state</td>
+          <td style="padding: 6px 8px; color: #888;">active, phase, mood, colorAccent</td>
         </tr>
         <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">/parlor/face/detected</td>
-          <td style="padding: 6px 8px; color: #888;">[int] 1 if face detected, 0 otherwise</td>
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">reveal_effect</td>
+          <td style="padding: 6px 8px; color: #888;">effect_type, intensity, duration</td>
         </tr>
         <tr>
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">/parlor/face/bbox</td>
-          <td style="padding: 6px 8px; color: #888;">[x, y, w, h] Bounding box (0-1)</td>
+          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">zone_update</td>
+          <td style="padding: 6px 8px; color: #888;">zone, glsl_code</td>
         </tr>
       </table>
       <p style="color: #666; font-size: 11px; margin-top: 16px;">
-        Coordinates are normalized 0-1. Pose landmarks follow the MediaPipe BlazePose topology.
+        Coordinates are normalized 0-1. Pose landmarks follow the MediaPipe BlazePose topology (33 landmarks).
       </p>
-      <button id="osc-modal-close" style="margin-top: 16px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Close</button>
+      <button id="ws-modal-close" style="margin-top: 16px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Close</button>
     </div>
   `;
 
@@ -992,7 +1002,7 @@ function showOscFormatModal(): void {
 
   // Close on click outside or close button
   modal.addEventListener('click', (e) => {
-    if (e.target === modal || (e.target as HTMLElement).id === 'osc-modal-close') {
+    if (e.target === modal || (e.target as HTMLElement).id === 'ws-modal-close') {
       modal!.style.display = 'none';
     }
   });
