@@ -4,22 +4,36 @@ WebSocket callbacks for Parlor <-> TouchDesigner communication.
 Expanded POP system for mirror/echo AR visuals.
 """
 import json
+import os
 
-# Expanded zone mappings (matching vibe-agent pattern)
-ZONE_PATHS = {
-    'force_field': '/project1/particles/glsl_force',
-    'spawn_behavior': '/project1/particles/glsl_spawn',
-    'color_over_life': '/project1/particles/glsl_color',
-    'size_over_life': '/project1/particles/glsl_size',
-    'velocity_modifier': '/project1/particles/glsl_velmod',
+# Base path for shader templates (relative to TD project)
+SHADER_TEMPLATE_DIR = 'shaders'
+
+# Zone to template file mapping
+ZONE_TEMPLATES = {
+    'force_field': 'force.glsl',
+    'spawn_behavior': 'spawn.glsl',
+    'color_over_life': 'color.glsl',
+    'size_over_life': 'size.glsl',
+    'velocity_modifier': 'velmod.glsl',
 }
 
+# Zone to glslPOP node mapping
+ZONE_PATHS = {
+    'force_field': '/project1/glsl_force1',
+    'spawn_behavior': '/project1/glsl_spawn',
+    'color_over_life': '/project1/glsl_color1',
+    'size_over_life': '/project1/glsl_size',
+    'velocity_modifier': '/project1/glsl_velmod',
+}
+
+# Zone to compute textDAT mapping
 ZONE_COMPUTE_PATHS = {
-    'force_field': '/project1/particles/glsl_force_compute',
-    'spawn_behavior': '/project1/particles/glsl_spawn_compute',
-    'color_over_life': '/project1/particles/glsl_color_compute',
-    'size_over_life': '/project1/particles/glsl_size_compute',
-    'velocity_modifier': '/project1/particles/glsl_velmod_compute',
+    'force_field': '/project1/glsl_force1_compute',
+    'spawn_behavior': '/project1/glsl_spawn_compute',
+    'color_over_life': '/project1/glsl_color1_compute',
+    'size_over_life': '/project1/glsl_size_compute',
+    'velocity_modifier': '/project1/glsl_velmod_compute',
 }
 
 # Emotion to index mapping for shaders
@@ -74,6 +88,14 @@ analysis_state = {
 
 def onConnect(dat):
     print(f"[WS] Connected to Parlor")
+
+    # Check which templates are available
+    available_zones = []
+    for zone in ZONE_TEMPLATES:
+        template, error = load_shader_template(zone)
+        if template:
+            available_zones.append(zone)
+
     ready_msg = json.dumps({
         "type": "td_ready",
         "capabilities": {
@@ -81,11 +103,12 @@ def onConnect(dat):
             "hasAura": True,
             "hasSkeletonOverlay": True,
             "hasAnalysis": True,
-            "availableZones": list(ZONE_PATHS.keys())
+            "hasTemplates": True,
+            "availableZones": available_zones
         }
     })
     dat.sendText(ready_msg)
-    print(f"[WS] Zones: {list(ZONE_PATHS.keys())}")
+    print(f"[WS] Zones with templates: {available_zones}")
 
 
 def onDisconnect(dat):
@@ -124,9 +147,62 @@ def onReceiveText(dat, rowIndex, message):
         print(f"[WS] Error: {e}")
 
 
+def load_shader_template(zone):
+    """Load a shader template file and return its contents."""
+    if zone not in ZONE_TEMPLATES:
+        return None, f"Unknown zone: {zone}"
+
+    template_file = ZONE_TEMPLATES[zone]
+    template_path = os.path.join(project.folder, SHADER_TEMPLATE_DIR, template_file)
+
+    try:
+        with open(template_path, 'r') as f:
+            return f.read(), None
+    except FileNotFoundError:
+        return None, f"Template not found: {template_path}"
+    except Exception as e:
+        return None, f"Error reading template: {e}"
+
+
+def merge_shader_template(template, zone_code):
+    """Merge zone_code snippet into template at {zone_code} placeholder."""
+    if '{zone_code}' not in template:
+        return None, "Template missing {zone_code} placeholder"
+
+    # Replace placeholder with custom code (or empty if no custom code)
+    merged = template.replace('{zone_code}', zone_code if zone_code else '')
+    return merged, None
+
+
 def handle_zone_update(dat, msg):
+    """Handle zone_update message with template-based shader compilation.
+
+    Message format:
+    {
+        "type": "zone_update",
+        "zone": "force_field",
+        "zone_code": "// custom GLSL snippet to insert"
+    }
+
+    The zone_code is merged into the canonical template at {zone_code} marker.
+    """
     zone = msg.get('zone', '')
-    glsl_code = msg.get('glsl_code', '')
+    zone_code = msg.get('zone_code', '')  # Custom snippet from Gemini
+
+    # Legacy support: if glsl_code is provided, use it directly
+    if 'glsl_code' in msg and msg['glsl_code']:
+        full_shader = msg['glsl_code']
+    else:
+        # Load template and merge with zone_code
+        template, error = load_shader_template(zone)
+        if error:
+            send_compile_result(dat, zone, False, error)
+            return
+
+        full_shader, error = merge_shader_template(template, zone_code)
+        if error:
+            send_compile_result(dat, zone, False, error)
+            return
 
     if zone not in ZONE_COMPUTE_PATHS:
         send_compile_result(dat, zone, False, f"Unknown zone: {zone}")
@@ -139,7 +215,8 @@ def handle_zone_update(dat, msg):
         send_compile_result(dat, zone, False, f"Zone not found: {zone}")
         return
 
-    compute_dat.text = glsl_code
+    # Write merged shader to textDAT
+    compute_dat.text = full_shader
     glsl_pop.cook(force=True)
 
     errors = glsl_pop.errors()
@@ -147,6 +224,7 @@ def handle_zone_update(dat, msg):
         send_compile_result(dat, zone, False, errors)
     else:
         send_compile_result(dat, zone, True)
+        print(f"[WS] Zone '{zone}' updated successfully")
 
 
 def send_compile_result(dat, zone, success, error=None):
@@ -388,6 +466,49 @@ def get_force_mode():
     """Get particle force mode based on current mood (0=orbit, 1=attract, 2=repel, 3=emit)."""
     mood = mentalist_state['mood']
     return MOOD_FORCE_MODE.get(mood, 0)
+
+
+def reset_zone_to_template(zone):
+    """Reset a zone's shader to the default template (no custom code).
+
+    Returns (success, error_message).
+    """
+    template, error = load_shader_template(zone)
+    if error:
+        return False, error
+
+    # Merge with empty zone_code to get default behavior
+    full_shader, error = merge_shader_template(template, '')
+    if error:
+        return False, error
+
+    compute_dat = op(ZONE_COMPUTE_PATHS.get(zone))
+    glsl_pop = op(ZONE_PATHS.get(zone))
+
+    if not compute_dat or not glsl_pop:
+        return False, f"Zone nodes not found: {zone}"
+
+    compute_dat.text = full_shader
+    glsl_pop.cook(force=True)
+
+    errors = glsl_pop.errors()
+    if errors:
+        return False, errors
+
+    print(f"[WS] Zone '{zone}' reset to template")
+    return True, None
+
+
+def reset_all_zones():
+    """Reset all zones to their default templates.
+
+    Returns dict of {zone: (success, error)}.
+    """
+    results = {}
+    for zone in ZONE_TEMPLATES:
+        success, error = reset_zone_to_template(zone)
+        results[zone] = (success, error)
+    return results
 
 def update_scene_state(table_dat, key, value):
     for row in range(table_dat.numRows):

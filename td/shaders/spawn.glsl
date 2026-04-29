@@ -2,6 +2,17 @@
 // Output: P, PartVel
 // Custom behavior can modify: pos, vel, seed
 
+uniform float uTime;
+uniform float uDeltaTime;
+uniform vec4 uAnalysis1;
+uniform vec4 uAnalysis2;
+
+#define uValence uAnalysis1.x
+#define uArousal uAnalysis1.y
+#define uTension uAnalysis1.z
+#define uOpenness uAnalysis1.w
+#define uEngagement uAnalysis2.x
+
 void main() {
     uint idx = TDIndex();
     if (idx >= TDNumElements()) return;
