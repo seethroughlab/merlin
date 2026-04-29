@@ -22,6 +22,7 @@ export {
   pushOrientationUpdate,
   pushTrackingFrame,
   pushMentalistState,
+  pushAnalysisUpdate,
 } from './push';
 
 // Re-export push types

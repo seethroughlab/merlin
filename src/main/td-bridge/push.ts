@@ -5,7 +5,7 @@
  */
 
 import { send, isConnected } from './connection';
-import type { SceneParams, SkeletonOverlay, ZoneName } from './types';
+import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate } from './types';
 import type { TrackingFrame } from '../../shared/types';
 
 const ts = () => new Date().toISOString().slice(11, 23);
@@ -153,4 +153,31 @@ export interface MentalistStateUpdate {
  */
 export function pushMentalistState(state: MentalistStateUpdate): boolean {
   return guardedSend({ type: 'mentalist_state', ...state }, 'push mentalist state');
+}
+
+// ===== Analysis =====
+
+/**
+ * Push psychological analysis values to TD for visual feedback.
+ * These values drive the "mirror/echo" AR effects:
+ * - tension: edge energy around silhouette
+ * - openness: aura expansion/contraction
+ * - valence: color temperature and particle direction
+ * - arousal: overall visual energy/speed
+ * - engagement: skeleton glow intensity
+ * - primary_emotion: color palette selection
+ */
+export function pushAnalysisUpdate(analysis: AnalysisUpdate): boolean {
+  return guardedSend(
+    {
+      type: 'analysis_update',
+      valence: analysis.valence,
+      arousal: analysis.arousal,
+      tension: analysis.tension,
+      openness: analysis.openness,
+      engagement: analysis.engagement,
+      primary_emotion: analysis.primary_emotion,
+    },
+    'push analysis update'
+  );
 }

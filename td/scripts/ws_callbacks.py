@@ -1,16 +1,45 @@
 """
 WebSocket callbacks for Parlor <-> TouchDesigner communication.
+
+Expanded POP system for mirror/echo AR visuals.
 """
 import json
 
+# Expanded zone mappings (matching vibe-agent pattern)
 ZONE_PATHS = {
     'force_field': '/project1/particles/glsl_force',
+    'spawn_behavior': '/project1/particles/glsl_spawn',
     'color_over_life': '/project1/particles/glsl_color',
+    'size_over_life': '/project1/particles/glsl_size',
+    'velocity_modifier': '/project1/particles/glsl_velmod',
 }
 
 ZONE_COMPUTE_PATHS = {
     'force_field': '/project1/particles/glsl_force_compute',
+    'spawn_behavior': '/project1/particles/glsl_spawn_compute',
     'color_over_life': '/project1/particles/glsl_color_compute',
+    'size_over_life': '/project1/particles/glsl_size_compute',
+    'velocity_modifier': '/project1/particles/glsl_velmod_compute',
+}
+
+# Emotion to index mapping for shaders
+EMOTION_INDEX = {
+    'neutral': 0,
+    'joy': 1,
+    'fear': 2,
+    'anger': 3,
+    'sadness': 4,
+    'surprise': 5,
+}
+
+# Mood to particle force mode mapping
+# 0=orbit, 1=attract, 2=repel, 3=emit
+MOOD_FORCE_MODE = {
+    'mysterious': 0,     # orbit
+    'tension': 2,        # repel
+    'revelation': 1,     # attract
+    'warm': 3,           # emit
+    'contemplative': 0,  # orbit
 }
 
 tracking_state = {
@@ -31,6 +60,17 @@ mentalist_state = {
     'particle_behavior': 'calm',
 }
 
+# Analysis state for mirror/echo visuals
+analysis_state = {
+    'valence': 0.0,      # -1 (negative) to 1 (positive)
+    'arousal': 0.0,      # 0 (calm) to 1 (excited)
+    'tension': 0.0,      # 0 (relaxed) to 1 (tense)
+    'openness': 0.0,     # -1 (closed) to 1 (open)
+    'engagement': 0.0,   # 0 (disengaged) to 1 (engaged)
+    'primary_emotion': 'neutral',
+    'emotion_index': 0,  # For shader lookup
+}
+
 
 def onConnect(dat):
     print(f"[WS] Connected to Parlor")
@@ -40,10 +80,12 @@ def onConnect(dat):
             "hasParticles": True,
             "hasAura": True,
             "hasSkeletonOverlay": True,
+            "hasAnalysis": True,
             "availableZones": list(ZONE_PATHS.keys())
         }
     })
     dat.sendText(ready_msg)
+    print(f"[WS] Zones: {list(ZONE_PATHS.keys())}")
 
 
 def onDisconnect(dat):
@@ -75,6 +117,8 @@ def onReceiveText(dat, rowIndex, message):
             handle_tracking_frame(msg)
         elif msg_type == 'mentalist_state':
             handle_mentalist_state(msg)
+        elif msg_type == 'analysis_update':
+            handle_analysis_update(msg)
 
     except Exception as e:
         print(f"[WS] Error: {e}")
@@ -227,6 +271,48 @@ def handle_mentalist_state(msg):
     if 'particleBehavior' in msg:
         mentalist_state['particle_behavior'] = msg['particleBehavior']
 
+    # Update force mode in scene_state based on mood
+    scene_state = op('/project1/scene_state')
+    if scene_state:
+        force_mode = MOOD_FORCE_MODE.get(mentalist_state['mood'], 0)
+        update_scene_state(scene_state, 'force_mode', str(force_mode))
+        print(f"[WS] Mentalist: mood={mentalist_state['mood']} force_mode={force_mode}")
+
+
+def handle_analysis_update(msg):
+    """Handle continuous analysis values for mirror/echo visuals.
+
+    Updates both the module-level analysis_state dict and the
+    analysis_state tableDAT in TouchDesigner.
+    """
+    global analysis_state
+
+    # Update module state
+    analysis_state['valence'] = msg.get('valence', 0.0)
+    analysis_state['arousal'] = msg.get('arousal', 0.0)
+    analysis_state['tension'] = msg.get('tension', 0.0)
+    analysis_state['openness'] = msg.get('openness', 0.0)
+    analysis_state['engagement'] = msg.get('engagement', 0.0)
+    analysis_state['primary_emotion'] = msg.get('primary_emotion', 'neutral')
+    analysis_state['emotion_index'] = EMOTION_INDEX.get(
+        analysis_state['primary_emotion'], 0
+    )
+
+    # Update analysis_state tableDAT
+    table = op('/project1/analysis_state')
+    if table:
+        update_scene_state(table, 'valence', str(analysis_state['valence']))
+        update_scene_state(table, 'arousal', str(analysis_state['arousal']))
+        update_scene_state(table, 'tension', str(analysis_state['tension']))
+        update_scene_state(table, 'openness', str(analysis_state['openness']))
+        update_scene_state(table, 'engagement', str(analysis_state['engagement']))
+        update_scene_state(table, 'primary_emotion', analysis_state['primary_emotion'])
+        update_scene_state(table, 'emotion_index', str(analysis_state['emotion_index']))
+
+    v = analysis_state['valence']
+    e = analysis_state['primary_emotion']
+    print(f"[WS] Analysis: valence={v:.2f} emotion={e}")
+
 
 def is_pose_detected():
     return tracking_state['pose_detected']
@@ -248,6 +334,60 @@ def get_mentalist_phase():
 
 def get_mentalist_mood():
     return mentalist_state['mood']
+
+
+# ===== Analysis Helpers =====
+
+def get_valence():
+    """Get emotional valence (-1 negative to 1 positive)."""
+    return analysis_state['valence']
+
+def get_arousal():
+    """Get arousal level (0 calm to 1 excited)."""
+    return analysis_state['arousal']
+
+def get_tension():
+    """Get tension level (0 relaxed to 1 tense)."""
+    return analysis_state['tension']
+
+def get_openness():
+    """Get openness level (-1 closed to 1 open)."""
+    return analysis_state['openness']
+
+def get_engagement():
+    """Get engagement level (0 disengaged to 1 engaged)."""
+    return analysis_state['engagement']
+
+def get_emotion():
+    """Get primary emotion string."""
+    return analysis_state['primary_emotion']
+
+def get_emotion_index():
+    """Get emotion index for shader lookup (0-5)."""
+    return analysis_state['emotion_index']
+
+def get_analysis_vec4_1():
+    """Get first analysis vec4: (valence, arousal, tension, openness)."""
+    return (
+        analysis_state['valence'],
+        analysis_state['arousal'],
+        analysis_state['tension'],
+        analysis_state['openness'],
+    )
+
+def get_analysis_vec4_2():
+    """Get second analysis vec4: (engagement, emotion_index, 0, 0)."""
+    return (
+        analysis_state['engagement'],
+        float(analysis_state['emotion_index']),
+        0.0,
+        0.0,
+    )
+
+def get_force_mode():
+    """Get particle force mode based on current mood (0=orbit, 1=attract, 2=repel, 3=emit)."""
+    mood = mentalist_state['mood']
+    return MOOD_FORCE_MODE.get(mood, 0)
 
 def update_scene_state(table_dat, key, value):
     for row in range(table_dat.numRows):

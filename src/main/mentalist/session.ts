@@ -30,6 +30,7 @@ import {
   pushAuraUpdate,
   pushMoodUpdate,
   pushZoneUpdate,
+  pushAnalysisUpdate,
   isConnected as isTDConnected,
   // Phase 4: Insight-driven visuals
   applySessionStartVisuals,
@@ -38,6 +39,7 @@ import {
   updateVisualsForInsight,
   getInsightVisualEffect,
 } from '../td-bridge';
+import type { AnalysisUpdate } from '../td-bridge/types';
 
 /**
  * Callback for when a reveal should be triggered
@@ -311,6 +313,19 @@ export class MentalistSession {
     // Store new insights
     this.state.insights.push(...newInsights);
 
+    // Push analysis values to TD for "mirror/echo" visuals
+    if (isTDConnected() && (bodyAnalysis || faceAnalysis)) {
+      const analysisUpdate: AnalysisUpdate = {
+        valence: faceAnalysis?.valence ?? 0,
+        arousal: faceAnalysis?.arousal ?? 0,
+        tension: bodyAnalysis?.tension ?? 0,
+        openness: bodyAnalysis?.openness ?? 0,
+        engagement: bodyAnalysis?.engagement ?? 0,
+        primary_emotion: this.mapEmotionToCategory(faceAnalysis?.primaryEmotion),
+      };
+      pushAnalysisUpdate(analysisUpdate);
+    }
+
     // Check for auto-end after finale response
     const totalTurns = this.getTotalTurns();
     if (this.state.turnCount >= totalTurns && this.config.onSessionComplete) {
@@ -325,6 +340,34 @@ export class MentalistSession {
       newInsights,
       revealedInsight,
     };
+  }
+
+  /**
+   * Map a detected emotion string to one of the supported categories
+   */
+  private mapEmotionToCategory(emotion: string | undefined): AnalysisUpdate['primary_emotion'] {
+    if (!emotion) return 'neutral';
+
+    const normalized = emotion.toLowerCase();
+
+    // Map common variations to our supported categories
+    if (['joy', 'happy', 'happiness', 'content', 'pleased', 'elated'].includes(normalized)) {
+      return 'joy';
+    }
+    if (['fear', 'afraid', 'scared', 'anxious', 'nervous', 'worried'].includes(normalized)) {
+      return 'fear';
+    }
+    if (['anger', 'angry', 'frustrated', 'irritated', 'annoyed'].includes(normalized)) {
+      return 'anger';
+    }
+    if (['sadness', 'sad', 'melancholy', 'dejected', 'unhappy', 'grief'].includes(normalized)) {
+      return 'sadness';
+    }
+    if (['surprise', 'surprised', 'shocked', 'astonished', 'amazed'].includes(normalized)) {
+      return 'surprise';
+    }
+
+    return 'neutral';
   }
 
   /**
