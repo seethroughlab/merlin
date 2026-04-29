@@ -229,7 +229,7 @@ ws_parlor (websocketDAT) ──> ws_callbacks (textDAT)
 
 ## Phase 4: Insight-Driven Augmentation
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** Visuals that evolve based on accumulated insights.
 
@@ -237,34 +237,52 @@ ws_parlor (websocketDAT) ──> ws_callbacks (textDAT)
 
 | Phase | Visual Treatment |
 |-------|------------------|
-| `intro` | Subtle ambient particles, gentle aura scan |
-| `reading` | Growing particle density, aura responds to tension |
-| `reveal` | Burst effects, skeleton highlights, dramatic colors |
-| `finale` | Full augmentation, integrated aura, peaceful settling |
+| `intro` | Subtle particles, gentle ripple effect, purple aura (0.3) |
+| `reading` | Moderate orbiting particles, converge effect, indigo aura (0.4) |
+| `reveal` | Intense attracted particles, burst effect, gold aura (0.6) |
+| `finale` | Moderate trailing particles, ascend effect, orange aura (0.5) |
 
 ### Insight → Visual Mapping
 
 Each revealed insight adds a visual layer that stacks/blends:
-- **emotion**: Aura color shift, pulsing rate
-- **trait**: Particle motif change
-- **prediction**: Energy lines between landmarks
-- **secret**: Deep color saturation, intensity boost
+- **emotion**: Ripple effect centered on face, coral color (#FF6B6B), aura boost +0.1
+- **trait**: Converge effect, shoulder glow overlay, teal color (#4ECDC4)
+- **prediction**: Ascend effect, energy lines from hands to shoulders, purple (#9B59B6), aura boost +0.15
+- **observation**: Subtle ripple, geometric hand overlay, blue (#3498DB)
+- **secret**: Transform effect, full body glow, deep red (#E74C3C), aura boost +0.2
 
-### Files to Create
+### Files Created
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `src/main/td-bridge/insight-visuals.ts` | Map insights to configs | Not Started |
-| `src/main/td-bridge/phase-transitions.ts` | Phase transition visuals | Not Started |
+| `src/main/td-bridge/insight-visuals.ts` | Map insights to visual configs | Complete |
+| `src/main/td-bridge/phase-transitions.ts` | Phase transition visuals | Complete |
+
+### Files Modified
+
+| File | Changes | Status |
+|------|---------|--------|
+| `src/main/td-bridge/index.ts` | Export new insight/phase functions | Complete |
+| `src/main/mentalist/session.ts` | Integrate visual triggers | Complete |
 
 ### Success Criteria
-- [ ] Each insight reveal triggers visual effect
-- [ ] Visual complexity grows through reading
-- [ ] Finale creates "complete portrait" of participant
+- [x] Each insight reveal triggers visual effect
+- [x] Visual complexity grows through reading (accumulated state)
+- [x] Finale creates "complete portrait" of participant
+- [ ] Visual evolution tested in live mentalist session
 
 ### Progress Notes
 
-_No progress yet._
+**2026-04-28:** Phase 4 implementation complete.
+- Created `insight-visuals.ts` with color palettes, phase configs, and insight effect mappings
+- Created `phase-transitions.ts` with transition handlers and accumulated visual state tracking
+- Integrated into `session.ts`:
+  - `applySessionStartVisuals()` called on session start
+  - `triggerPhaseTransition()` called when phase changes
+  - `getInsightVisualEffect()` + visual updates on `trigger_reveal`
+  - `applySessionEndVisuals()` called on session end
+- Visual complexity accumulates: each revealed insight increases aura intensity and influences dominant color
+- Skeleton overlays applied per insight type (shoulders for traits, hands for predictions, etc.)
 
 ---
 
@@ -365,3 +383,50 @@ When TD crashes or is restarted, all dynamically created nodes are lost. The fol
 ### Avoid numpy.flipud() in scriptTOP
 
 Using `np.flipud(result)` before `copyNumpyArray()` caused TD to freeze/crash. Instead, flip coordinates during calculation or use a flipTOP downstream.
+
+### GLSL Particle System (Phase 3 Addendum)
+
+**Implementation:** Native TouchDesigner POP network with GLSL POPs for GPU particle simulation.
+
+**Architecture:**
+```
+/project1/particles (baseCOMP)
+├── emitter (pointgeneratorPOP) ─> particle (particlePOP) ─> glsl_force (glslPOP) ─> glsl_color (glslPOP) ─> out (nullPOP)
+├── glsl_force_compute (textDAT) - GLSL shader for force/movement
+├── glsl_color_compute (textDAT) - GLSL shader for color
+├── geo_render (geometryCOMP) - Instances spheres at particle positions
+└── particle_mat (pointspriteMAT) - Material with color from particles
+```
+
+**Key Learnings:**
+
+1. **Custom Attributes:** The `color` attribute isn't built-in. Use glslPOP's `attr0name='custom'`, `attr0customname='color'`, `attr0type='vec3'`, and `initoutputattrs=True`.
+
+2. **Output Buffers:** Write to `P[id]` for position, `color[id]` for custom attributes. The buffer name must match `outputattrs` parameter.
+
+3. **Time Uniform:** `uTDGeneral.time` doesn't work in glslPOP compute shaders. Add a custom vec uniform with expression `absTime.seconds`.
+
+4. **GLSL Template Pattern:**
+```glsl
+uniform float uTime;
+
+void main() {
+    uint id = TDIndex();
+    if (id >= TDNumElements())
+        return;
+
+    vec3 pos = TDIn_P();
+
+    // User code here - modifies pos
+    pos.y += 0.002;
+
+    P[id] = pos;
+}
+```
+
+**WebSocket Protocol:**
+- `zone_update` message: `{ type: "zone_update", zone: "force_field"|"color_over_life", glsl_code: string }`
+- TD responds with `compile_result`: `{ type: "compile_result", zone: string, success: boolean, error?: string }`
+
+**Gemini Tool:**
+- `update_particle_zone(zone, glsl_code, description?)` - Gemini provides GLSL snippet, wrapper adds boilerplate
