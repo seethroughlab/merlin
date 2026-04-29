@@ -116,17 +116,13 @@ export interface BodyLanguageAnalysis {
 }
 
 /**
- * OSC connection statistics
+ * WebSocket bridge connection statistics
  */
-export interface OscStats {
-  /** Whether OSC is enabled */
-  enabled: boolean;
-  /** Target host */
-  host: string;
-  /** Target port */
+export interface BridgeStats {
+  /** Whether a client is connected */
+  connected: boolean;
+  /** Server port */
   port: number;
-  /** Messages sent per second */
-  messagesPerSecond: number;
 }
 
 /**

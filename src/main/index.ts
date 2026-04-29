@@ -393,14 +393,10 @@ ipcMain.handle('rename-spout-sender', async (_event, oldName: string, newName: s
 });
 
 // IPC handler for connection stats (TD Bridge)
-ipcMain.handle('get-osc-stats', () => {
-  // Return TD connection status (backward compatible API name)
+ipcMain.handle('get-bridge-stats', () => {
   return {
-    enabled: true,
-    host: '127.0.0.1',
-    port: 8001,
-    messagesPerSecond: 0, // Could track this in td-bridge if needed
     connected: isTDConnected(),
+    port: 8001,
   };
 });
 

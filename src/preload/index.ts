@@ -3,7 +3,7 @@ import type {
   TrackingFrame,
   MicroExpressionAnalysis,
   BodyLanguageAnalysis,
-  OscStats,
+  BridgeStats,
   VoiceCommandResult,
   MentalistResponse,
   MentalistUIUpdate,
@@ -38,9 +38,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('rename-spout-sender', oldName, newName);
   },
 
-  // Get OSC statistics (config + send rate)
-  getOscStats: (): Promise<OscStats> => {
-    return ipcRenderer.invoke('get-osc-stats');
+  // Get WebSocket bridge statistics
+  getBridgeStats: (): Promise<BridgeStats> => {
+    return ipcRenderer.invoke('get-bridge-stats');
   },
 
   // Get all saved settings
@@ -197,7 +197,7 @@ declare global {
       analyzeSkeletonStrip: (imageDataUrl: string) => Promise<BodyLanguageAnalysis>;
       interpretVoiceCommand: (transcript: string) => Promise<VoiceCommandResult>;
       renameSpoutSender: (oldName: string, newName: string) => Promise<boolean>;
-      getOscStats: () => Promise<OscStats>;
+      getBridgeStats: () => Promise<BridgeStats>;
       getSettings: () => Promise<Record<string, unknown>>;
       saveSetting: (key: string, value: unknown) => Promise<boolean>;
       setPortraitMode: (portrait: boolean) => void;

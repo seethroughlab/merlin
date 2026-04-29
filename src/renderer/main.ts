@@ -908,11 +908,11 @@ function startWsStatsPoll(): void {
     if (!window.electronAPI) return;
 
     try {
-      const stats = await window.electronAPI.getOscStats(); // Uses backward-compatible API name
+      const stats = await window.electronAPI.getBridgeStats();
       if (wsPort) wsPort.textContent = stats.port.toString();
       if (wsStatus) {
-        wsStatus.textContent = stats.enabled ? 'Connected' : 'Waiting...';
-        wsStatus.style.color = stats.enabled ? '#0f0' : '#888';
+        wsStatus.textContent = stats.connected ? 'Connected' : 'Waiting...';
+        wsStatus.style.color = stats.connected ? '#0f0' : '#888';
       }
     } catch {
       // Ignore errors silently
