@@ -19,6 +19,7 @@ import type {
   SetVisualSceneParams,
   TriggerVisualRevealParams,
   SetSkeletonOverlayParams,
+  UpdateParticleZoneParams,
   ConversationMessage,
 } from './types';
 import type { BodyLanguageAnalysis, MicroExpressionAnalysis } from '../../shared/types';
@@ -28,7 +29,14 @@ import {
   pushSkeletonAugment,
   pushAuraUpdate,
   pushMoodUpdate,
+  pushZoneUpdate,
   isConnected as isTDConnected,
+  // Phase 4: Insight-driven visuals
+  applySessionStartVisuals,
+  applySessionEndVisuals,
+  triggerPhaseTransition,
+  updateVisualsForInsight,
+  getInsightVisualEffect,
 } from '../td-bridge';
 
 /**
@@ -82,6 +90,49 @@ function generateId(): string {
 }
 
 /**
+ * Wrap a GLSL code snippet in the full shader template for the given zone
+ */
+function wrapGLSLSnippet(zone: 'force_field' | 'color_over_life', snippet: string): string {
+  if (zone === 'force_field') {
+    return `uniform float uTime;
+
+void main() {
+    uint id = TDIndex();
+    if (id >= TDNumElements())
+        return;
+
+    vec3 pos = TDIn_P();
+
+    // === ZONE CODE START ===
+    ${snippet}
+    // === ZONE CODE END ===
+
+    P[id] = pos;
+}
+`;
+  } else if (zone === 'color_over_life') {
+    return `uniform float uTime;
+
+void main() {
+    uint id = TDIndex();
+    if (id >= TDNumElements())
+        return;
+
+    vec3 pos = TDIn_P();
+    vec3 col = vec3(1.0);
+
+    // === ZONE CODE START ===
+    ${snippet}
+    // === ZONE CODE END ===
+
+    color[id] = col;
+}
+`;
+  }
+  return snippet; // Fallback
+}
+
+/**
  * MentalistSession class
  */
 export class MentalistSession {
@@ -90,6 +141,7 @@ export class MentalistSession {
   private conversationHistory: ConversationMessage[] = [];
   private config: MentalistSessionConfig;
   private phaseConfig: PhaseConfig;
+  private previousPhase: MentalistPhase = 'idle';
 
   constructor(config: MentalistSessionConfig = {}) {
     this.chat = new MentalistChat();
@@ -119,11 +171,15 @@ export class MentalistSession {
     this.state = this.createInitialState();
     this.conversationHistory = [];
     this.state.phase = 'intro';
+    this.previousPhase = 'idle';
 
     // Set initial mood
     if (this.config.onMoodChange) {
       this.config.onMoodChange({ mood: 'mysterious', particleBehavior: 'calm' });
     }
+
+    // Apply intro visuals to TouchDesigner
+    applySessionStartVisuals();
 
     let result = await this.chat.startChat();
     const newInsights: MentalistInsight[] = [];
@@ -298,9 +354,32 @@ export class MentalistSession {
           };
           insightAccumulator.push(insight);
 
-          // Trigger visual effect
+          // Trigger visual effect callback
           if (this.config.onReveal) {
             this.config.onReveal(params);
+          }
+
+          // Apply insight-specific visual effect to TouchDesigner
+          if (isTDConnected()) {
+            const visualEffect = getInsightVisualEffect(params.type, params.intensity);
+
+            // Push reveal effect
+            pushRevealEffect(
+              visualEffect.effect_type,
+              visualEffect.intensity,
+              visualEffect.duration,
+              visualEffect.center_landmark
+            );
+
+            // Push skeleton overlays if defined
+            if (visualEffect.skeletonOverlays && visualEffect.skeletonOverlays.length > 0) {
+              pushSkeletonAugment(visualEffect.skeletonOverlays);
+            }
+
+            // Update accumulated visuals
+            const allRevealed = [...this.state.insights.filter((i) => i.revealed), insight]
+              .map((i) => ({ type: i.type, confidence: i.confidence }));
+            updateVisualsForInsight(allRevealed, this.state.phase);
           }
 
           response = { success: true, insightId: insight.id };
@@ -418,6 +497,21 @@ export class MentalistSession {
           break;
         }
 
+        case 'update_particle_zone': {
+          const params = call.args as unknown as UpdateParticleZoneParams;
+
+          if (isTDConnected()) {
+            // Wrap the user's GLSL snippet in the full shader template
+            const fullShader = wrapGLSLSnippet(params.zone, params.glsl_code);
+            pushZoneUpdate(params.zone, fullShader);
+            console.log(`[Mentalist] Zone ${params.zone} updated: ${params.description || 'no description'}`);
+            response = { success: true, zone: params.zone };
+          } else {
+            response = { success: false, error: 'TouchDesigner not connected' };
+          }
+          break;
+        }
+
         default:
           response = { error: `Unknown tool: ${call.name}` };
       }
@@ -439,15 +533,28 @@ export class MentalistSession {
     const readingEnd = introEnd + readingTurns;
     const revealEnd = readingEnd + revealTurns;
 
+    let newPhase: MentalistPhase;
     if (turn <= introEnd) {
-      this.state.phase = 'intro';
+      newPhase = 'intro';
     } else if (turn <= readingEnd) {
-      this.state.phase = 'reading';
+      newPhase = 'reading';
     } else if (turn <= revealEnd) {
-      this.state.phase = 'reveal';
+      newPhase = 'reveal';
     } else {
-      this.state.phase = 'finale';
+      newPhase = 'finale';
     }
+
+    // Trigger visual transition if phase changed
+    if (newPhase !== this.previousPhase) {
+      const revealedInsights = this.state.insights
+        .filter((i) => i.revealed)
+        .map((i) => ({ type: i.type, confidence: i.confidence }));
+
+      triggerPhaseTransition(this.previousPhase, newPhase, revealedInsights);
+      this.previousPhase = newPhase;
+    }
+
+    this.state.phase = newPhase;
   }
 
   /**
@@ -477,6 +584,12 @@ export class MentalistSession {
     if (this.config.onMoodChange) {
       this.config.onMoodChange({ mood: 'warm', particleBehavior: 'calm' });
     }
+
+    // Apply finale visuals to TouchDesigner
+    const revealedInsights = this.state.insights
+      .filter((i) => i.revealed)
+      .map((i) => ({ type: i.type, confidence: i.confidence }));
+    applySessionEndVisuals(revealedInsights);
 
     const finaleText = await this.chat.endSession();
 

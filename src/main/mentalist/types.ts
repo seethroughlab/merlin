@@ -80,7 +80,8 @@ export interface MentalistToolCall {
     | 'get_question_template'
     | 'set_visual_scene'
     | 'trigger_visual_reveal'
-    | 'set_skeleton_overlay';
+    | 'set_skeleton_overlay'
+    | 'update_particle_zone';
   args: Record<string, unknown>;
 }
 
@@ -138,6 +139,15 @@ export interface SetSkeletonOverlayParams {
     color: string; // hex color
     intensity: number; // 0-1
   }>;
+}
+
+/**
+ * Parameters for update_particle_zone tool
+ */
+export interface UpdateParticleZoneParams {
+  zone: 'force_field' | 'color_over_life';
+  glsl_code: string;
+  description?: string;
 }
 
 /**

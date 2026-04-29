@@ -283,6 +283,48 @@ export const MENTALIST_TOOLS: FunctionDeclaration[] = [
       required: ['overlays'],
     },
   },
+  // ===== GLSL Particle Zone Tools =====
+  {
+    name: 'update_particle_zone',
+    description: `Update a GLSL shader zone for the particle system. Use to dynamically change how particles move or look.
+
+Available zones:
+- force_field: Controls particle movement/forces. Write GLSL that modifies 'pos' (vec3).
+- color_over_life: Controls particle color. Write GLSL that sets 'col' (vec3).
+
+Template variables available:
+- pos: vec3 particle position (read/write for force_field)
+- col: vec3 particle color (write for color_over_life)
+- uTime: float time in seconds
+
+Example force_field code:
+  float noise = sin(pos.x * 3.0 + uTime) * 0.01;
+  pos.y += 0.002;
+  pos.x += noise;
+
+Example color_over_life code:
+  float t = clamp(pos.y * 0.5 + 0.5, 0.0, 1.0);
+  col = mix(vec3(0.5, 0.3, 0.9), vec3(1.0, 0.8, 0.0), t);`,
+    parameters: {
+      type: 'object' as SchemaType,
+      properties: {
+        zone: {
+          type: 'string' as SchemaType,
+          enum: ['force_field', 'color_over_life'],
+          description: 'Which zone to update',
+        },
+        glsl_code: {
+          type: 'string' as SchemaType,
+          description: 'GLSL code snippet to inject into the zone (just the effect logic, not the full shader)',
+        },
+        description: {
+          type: 'string' as SchemaType,
+          description: 'Brief description of what this effect does (for logging)',
+        },
+      },
+      required: ['zone', 'glsl_code'],
+    },
+  },
 ];
 
 /**
