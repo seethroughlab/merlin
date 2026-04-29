@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
-import { initOsc, sendTrackingFrame, closeOsc, getOscStats, sendMentalistUpdate } from './osc';
+// OSC removed - all communication now via WebSocket (td-bridge)
 import { createSpoutSender, wireWindowToSender, closeSpout, resizeSpoutSender } from './spout';
 import { initGemini, analyzeMicroExpressions, analyzeBodyLanguage, interpretVoiceCommand, isGeminiAvailable } from './gemini';
 import { initTTS as initGeminiTTS, generateMentalistSpeech, isTTSAvailable } from './tts';
@@ -16,6 +16,9 @@ import {
   pushMoodUpdate,
   pushSceneParams,
   pushRevealEffect,
+  pushOrientationUpdate,
+  pushTrackingFrame,
+  pushMentalistState,
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
@@ -46,12 +49,7 @@ let mainWindow: BrowserWindow | null = null;
 let spoutWindow: BrowserWindow | null = null;
 let maskWindow: BrowserWindow | null = null;
 
-// OSC configuration (will be loaded from config.yaml later)
-const oscConfig = {
-  enabled: true,
-  host: '127.0.0.1',
-  port: 9000,
-};
+// OSC removed - all communication now via WebSocket (td-bridge)
 
 // Spout configuration
 const spoutConfig = {
@@ -123,22 +121,22 @@ function createMentalistSession(): MentalistSession {
   return new MentalistSession({
     onReveal: (params: RevealTriggerParams) => {
       console.log(`[Mentalist] Reveal triggered: ${params.type} - "${params.text}"`);
-      sendMentalistUpdate({
-        reveal: {
-          trigger: true,
-          type: params.type,
-          text: params.text,
-          intensity: params.intensity,
-        },
-      });
+      // WebSocket reveal effect
+      if (isTDConnected()) {
+        pushRevealEffect(params.type, params.intensity, 2);
+      }
     },
     onMoodChange: (params: SetMoodParams) => {
       console.log(`[Mentalist] Mood changed: ${params.mood}`);
-      sendMentalistUpdate({
-        mood: params.mood,
-        colorAccent: params.colorAccent,
-        particleBehavior: params.particleBehavior,
-      });
+      // WebSocket
+      if (isTDConnected()) {
+        pushMentalistState({
+          active: true,
+          mood: params.mood,
+          colorAccent: params.colorAccent,
+          particleBehavior: params.particleBehavior,
+        });
+      }
     },
     onRequestAnalysis: async (type, _focus) => {
       // Request fresh analysis from renderer (or fall back to cached)
@@ -315,7 +313,10 @@ async function createMaskWindow(): Promise<void> {
 ipcMain.on('tracking-frame', (event, data: TrackingFrame) => {
   // Only process tracking data from the main preview window
   if (mainWindow && event.sender.id === mainWindow.webContents.id) {
-    sendTrackingFrame(data);
+    // Send via WebSocket (unified protocol)
+    if (isTDConnected()) {
+      pushTrackingFrame(data);
+    }
   }
 });
 
@@ -391,9 +392,16 @@ ipcMain.handle('rename-spout-sender', async (_event, oldName: string, newName: s
   }
 });
 
-// IPC handler for OSC statistics
+// IPC handler for connection stats (TD Bridge)
 ipcMain.handle('get-osc-stats', () => {
-  return getOscStats();
+  // Return TD connection status (backward compatible API name)
+  return {
+    enabled: true,
+    host: '127.0.0.1',
+    port: 8001,
+    messagesPerSecond: 0, // Could track this in td-bridge if needed
+    connected: isTDConnected(),
+  };
 });
 
 // IPC handlers for settings persistence
@@ -436,6 +444,12 @@ ipcMain.on('set-portrait-mode', async (_event, portrait: boolean) => {
       win.webContents.send('portrait-mode-changed', portrait);
     }
   }
+
+  // Send orientation update to TouchDesigner
+  if (isTDConnected()) {
+    pushOrientationUpdate(portrait, width, height);
+    console.log(`Sent orientation to TD: ${portrait ? 'portrait' : 'landscape'} ${width}x${height}`);
+  }
 });
 
 // ============ MENTALIST IPC HANDLERS ============
@@ -455,12 +469,14 @@ ipcMain.handle('mentalist-start', async () => {
   try {
     const response = await mentalistSession.startSession();
 
-    // Send OSC update
-    sendMentalistUpdate({
-      active: true,
-      phase: response.phase,
-      mood: response.mood,
-    });
+    // WebSocket
+    if (isTDConnected()) {
+      pushMentalistState({
+        active: true,
+        phase: response.phase,
+        mood: response.mood,
+      });
+    }
 
     // Broadcast UI update (no lastMessage - renderer adds it directly)
     broadcastMentalistUpdate({
@@ -497,11 +513,14 @@ ipcMain.handle('mentalist-process-speech', async (_event, transcript: string) =>
 
     const state = mentalistSession.getState();
 
-    // Send OSC update
-    sendMentalistUpdate({
-      phase: response.phase,
-      mood: response.mood,
-    });
+    // WebSocket
+    if (isTDConnected()) {
+      pushMentalistState({
+        active: true,
+        phase: response.phase,
+        mood: response.mood,
+      });
+    }
 
     // Broadcast UI update (no lastMessage - renderer adds it directly)
     broadcastMentalistUpdate({
@@ -531,12 +550,14 @@ ipcMain.handle('mentalist-end', async () => {
   try {
     const response = await mentalistSession.endSession();
 
-    // Send OSC update
-    sendMentalistUpdate({
-      active: false,
-      phase: 'idle',
-      mood: 'warm',
-    });
+    // WebSocket
+    if (isTDConnected()) {
+      pushMentalistState({
+        active: false,
+        phase: 'idle',
+        mood: 'warm',
+      });
+    }
 
     // Broadcast final UI update (no lastMessage - renderer adds it directly)
     broadcastMentalistUpdate({
@@ -679,9 +700,7 @@ app.whenReady().then(async () => {
     console.log('Gemini TTS not available');
   }
 
-  // Initialize OSC
-  initOsc(oscConfig);
-  console.log('OSC initialized');
+  // OSC removed - all communication now via WebSocket (td-bridge)
 
   // Initialize TD Bridge (WebSocket server for TouchDesigner)
   initTDBridge({
@@ -696,6 +715,13 @@ app.whenReady().then(async () => {
     onReady: (capabilities) => {
       console.log('TouchDesigner ready:', capabilities);
       mainWindow?.webContents.send('td-status', { connected: true, ready: true, capabilities });
+
+      // Send current orientation to TD on connect
+      const isPortrait = store.get('isPortraitMode') as boolean ?? false;
+      const width = isPortrait ? 720 : 1280;
+      const height = isPortrait ? 1280 : 720;
+      pushOrientationUpdate(isPortrait, width, height);
+      console.log(`Sent initial orientation to TD: ${isPortrait ? 'portrait' : 'landscape'} ${width}x${height}`);
     },
     onError: (error) => {
       console.error('TD Bridge error:', error);
@@ -735,7 +761,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('quit', () => {
-  closeOsc();
   closeSpout();
   closeLiveTTS();
   closeTDBridge();

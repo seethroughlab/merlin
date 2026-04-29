@@ -28,7 +28,34 @@ export type TDOutboundMessage =
   | { type: 'aura_update'; color: string; size: number; behavior: string }
   | { type: 'skeleton_augment'; overlays: SkeletonOverlay[] }
   | { type: 'scene_params'; params: SceneParams }
+  | { type: 'zone_update'; zone: ZoneName; glsl_code: string }
+  | { type: 'orientation_update'; portrait: boolean; width: number; height: number }
+  | { type: 'tracking_frame'; timestamp: number; fps: number; frame: FrameInfo; pose: PoseData; face: FaceData }
+  | { type: 'mentalist_state'; active: boolean; phase?: string; mood?: string; colorAccent?: string; particleBehavior?: string }
   | { type: 'ping' };
+
+// ===== Tracking Data Types =====
+
+export interface FrameInfo {
+  width: number;
+  height: number;
+  portrait: boolean;
+}
+
+export interface PoseData {
+  detected: boolean;
+  landmarks?: number[][]; // Array of [x, y, z, visibility] tuples
+}
+
+export interface FaceData {
+  detected: boolean;
+  bbox?: number[]; // [x, y, width, height]
+}
+
+/**
+ * Available GLSL zone names for particle effects
+ */
+export type ZoneName = 'force_field' | 'color_over_life';
 
 export interface SkeletonOverlay {
   landmark_start: number;

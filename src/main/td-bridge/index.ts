@@ -18,7 +18,35 @@ export {
   pushRevealEffect,
   pushAuraUpdate,
   pushSkeletonAugment,
+  pushZoneUpdate,
+  pushOrientationUpdate,
+  pushTrackingFrame,
+  pushMentalistState,
 } from './push';
+
+// Re-export push types
+export type { MentalistStateUpdate } from './push';
+
+// Re-export insight visual functions
+export {
+  getPhaseVisualConfig,
+  getInsightVisualEffect,
+  calculateAccumulatedState,
+  getAccumulatedSceneParams,
+  INSIGHT_COLORS,
+  MOOD_COLORS,
+  PHASE_COLORS,
+} from './insight-visuals';
+
+// Re-export phase transition functions
+export {
+  resetVisualState,
+  triggerPhaseTransition,
+  applySessionStartVisuals,
+  applySessionEndVisuals,
+  updateVisualsForInsight,
+  getCurrentVisualState,
+} from './phase-transitions';
 
 import { startServer, stopServer } from './connection';
 import type { TDBridgeCallbacks } from './types';
