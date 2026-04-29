@@ -103,6 +103,21 @@ null_out (nullPOP) - for output
 
 For each glslPOP, create a corresponding textDAT with the shader code.
 
+### GLSL POP Attribute Reference
+
+Standard TouchDesigner particle attributes (case-sensitive):
+- `P` (vec3) - position
+- `PartVel` (vec3) - velocity
+- `PartAge` (float) - particle age in seconds
+- `PartLife` (float) - particle lifespan in seconds
+- `PartMass` (float) - mass
+- `PartDrag` (float) - drag coefficient
+- `PointScale` (float) - render scale
+- `Color` (vec4) - color with alpha
+
+Read syntax: `TDIn_AttributeName()` (e.g., `TDIn_P()`, `TDIn_PartAge()`)
+Write syntax: `AttributeName[id]` (e.g., `P[id]`, `Color[id]`)
+
 ### glsl_spawn_compute
 
 ```glsl
@@ -171,7 +186,7 @@ uniform vec4 uAnalysis1;
 
 void main() {
     uint id = TDIndex();
-    vec3 vel = TDIn_v();
+    vec3 vel = TDIn_PartVel();  // Standard TD particle velocity attribute
 
     // Arousal speeds things up
     float speedMult = 0.5 + uArousal * 1.5;
@@ -181,7 +196,7 @@ void main() {
     float damping = 1.0 - uTension * 0.3;
     vel *= damping;
 
-    v[id] = vel;
+    PartVel[id] = vel;  // Write back to PartVel
 }
 ```
 
@@ -195,9 +210,9 @@ uniform vec4 uAnalysis1;
 
 void main() {
     uint id = TDIndex();
-    float age = TDIn_age();
-    float life = TDIn_life();
-    float t = age / life;
+    float age = TDIn_PartAge();   // Standard TD particle age attribute
+    float life = TDIn_PartLife(); // Standard TD particle lifespan attribute
+    float t = age / max(life, 0.001);
 
     // Base size curve (grow then shrink)
     float baseSize = sin(t * 3.14159) * 0.1;
@@ -209,7 +224,7 @@ void main() {
     baseSize *= 1.0 - uTension * 0.3;
 
     baseSize = max(baseSize, 0.01);
-    pscale[id] = baseSize;
+    PointScale[id] = baseSize;  // Standard TD point scale attribute
 }
 ```
 
@@ -247,9 +262,9 @@ vec3 getColor(int emo, float t) {
 
 void main() {
     uint id = TDIndex();
-    float age = TDIn_age();
-    float life = TDIn_life();
-    float t = clamp(age / life, 0.0, 1.0);
+    float age = TDIn_PartAge();   // Standard TD particle age attribute
+    float life = TDIn_PartLife(); // Standard TD particle lifespan attribute
+    float t = clamp(age / max(life, 0.001), 0.0, 1.0);
 
     vec3 col = getColor(uEmotionIndex, t);
 
@@ -261,7 +276,7 @@ void main() {
     // Arousal affects brightness
     col *= 0.8 + uArousal * 0.4;
 
-    color[id] = col;
+    Color[id] = vec4(col, 1.0);  // Standard TD Color attribute (vec4 with alpha)
 }
 ```
 
@@ -351,6 +366,7 @@ uniform sampler2D uLandmarkTex;  // 33x1 RGBA32F texture
 #define uArousal uAnalysis1.y
 #define uTension uAnalysis1.z
 #define uOpenness uAnalysis1.w
+#define uEngagement uAnalysis2.x
 
 vec3 getLandmark(int idx) {
     return texelFetch(uLandmarkTex, ivec2(idx, 0), 0).xyz;
