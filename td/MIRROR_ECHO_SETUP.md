@@ -109,29 +109,35 @@ Standard TouchDesigner particle attributes (case-sensitive):
 - `P` (vec3) - position
 - `PartVel` (vec3) - velocity
 - `PartAge` (float) - particle age in seconds
-- `PartLife` (float) - particle lifespan in seconds
+- `PartLifeSpan` (float) - particle lifespan in seconds (**not** `PartLife`)
 - `PartMass` (float) - mass
 - `PartDrag` (float) - drag coefficient
-- `PointScale` (float) - render scale
-- `Color` (vec4) - color with alpha
+- `PartForce` (vec3) - force accumulator
+- `PartId` (float) - unique particle ID
 
-Read syntax: `TDIn_AttributeName()` (e.g., `TDIn_P()`, `TDIn_PartAge()`)
-Write syntax: `AttributeName[id]` (e.g., `P[id]`, `Color[id]`)
+**For glslPOP (simple):**
+- Read: `TDIn_AttributeName()` (e.g., `TDIn_P()`, `TDIn_PartAge()`)
+- Write: `AttributeName[idx]` (e.g., `P[idx]`, `PartVel[idx]`)
 
-### glsl_spawn_compute
+**For glsladvancedPOP:**
+- Read: `TDInPoint_AttributeName()` (e.g., `TDInPoint_P()`, `TDInPoint_PartAge()`)
+- Write: `oTDPoint_AttributeName[idx]` (e.g., `oTDPoint_P[idx]`)
+- **Important:** Set `ptoutputattrs` parameter to list attributes being written
+- Custom attributes (like `pscale`, `Cd`) must be created on the Create Attributes page
+
+### glsl_spawn_compute (glsladvancedPOP)
+
+**Node config:** Set `ptoutputattrs` = `P`
 
 ```glsl
-// Spawn Behavior - emission patterns based on openness/arousal
 void main() {
-    uint id = TDIndex();
-    vec3 pos = TDIn_P();
+    uint idx = TDIndex();
+    if (idx >= TDNumElements()) return;
 
-    // Get analysis from Python helper (or uniform)
-    // For now, use default expansion
+    vec3 pos = TDInPoint_P();
     float radius = 0.3;
-
     pos *= radius;
-    P[id] = pos;
+    oTDPoint_P[idx] = pos;
 }
 ```
 
@@ -176,7 +182,9 @@ void main() {
 }
 ```
 
-### glsl_velmod_compute
+### glsl_velmod_compute (glsladvancedPOP)
+
+**Node config:** Set `ptoutputattrs` = `PartVel`
 
 ```glsl
 uniform vec4 uAnalysis1;
@@ -185,22 +193,26 @@ uniform vec4 uAnalysis1;
 #define uTension uAnalysis1.z
 
 void main() {
-    uint id = TDIndex();
-    vec3 vel = TDIn_PartVel();  // Standard TD particle velocity attribute
+    uint idx = TDIndex();
+    if (idx >= TDNumElements()) return;
 
-    // Arousal speeds things up
+    vec3 vel = TDInPoint_PartVel();
+
     float speedMult = 0.5 + uArousal * 1.5;
     vel *= speedMult;
 
-    // Tension adds damping
     float damping = 1.0 - uTension * 0.3;
     vel *= damping;
 
-    PartVel[id] = vel;  // Write back to PartVel
+    oTDPoint_PartVel[idx] = vel;
 }
 ```
 
-### glsl_size_compute
+### glsl_size_compute (glsladvancedPOP)
+
+**Node config:**
+- Create custom attribute: `pscale` (float, 1 component)
+- Set `ptoutputattrs` = `pscale`
 
 ```glsl
 uniform vec4 uAnalysis1;
@@ -209,26 +221,27 @@ uniform vec4 uAnalysis1;
 #define uTension uAnalysis1.z
 
 void main() {
-    uint id = TDIndex();
-    float age = TDIn_PartAge();   // Standard TD particle age attribute
-    float life = TDIn_PartLife(); // Standard TD particle lifespan attribute
-    float t = age / max(life, 0.001);
+    uint idx = TDIndex();
+    if (idx >= TDNumElements()) return;
 
-    // Base size curve (grow then shrink)
-    float baseSize = sin(t * 3.14159) * 0.1;
+    float age = TDInPoint_PartAge();
+    float lifeSpan = TDInPoint_PartLifeSpan();
+    float life = 1.0 - (age / max(lifeSpan, 0.001));
 
-    // Arousal adds size variation
+    float baseSize = 0.05 * life;
     baseSize *= 1.0 + uArousal * 0.5;
-
-    // Tension compresses size
     baseSize *= 1.0 - uTension * 0.3;
-
     baseSize = max(baseSize, 0.01);
-    PointScale[id] = baseSize;  // Standard TD point scale attribute
+
+    oTDPoint_pscale[idx] = baseSize;
 }
 ```
 
-### glsl_color_compute
+### glsl_color_compute (glsladvancedPOP)
+
+**Node config:**
+- Create custom attribute: `Cd` (float, 4 components)
+- Set `ptoutputattrs` = `Cd`
 
 ```glsl
 uniform float uTime;
@@ -261,22 +274,21 @@ vec3 getColor(int emo, float t) {
 }
 
 void main() {
-    uint id = TDIndex();
-    float age = TDIn_PartAge();   // Standard TD particle age attribute
-    float life = TDIn_PartLife(); // Standard TD particle lifespan attribute
-    float t = clamp(age / max(life, 0.001), 0.0, 1.0);
+    uint idx = TDIndex();
+    if (idx >= TDNumElements()) return;
 
-    vec3 col = getColor(uEmotionIndex, t);
+    float age = TDInPoint_PartAge();
+    float lifeSpan = TDInPoint_PartLifeSpan();
+    float life = 1.0 - (age / max(lifeSpan, 0.001));
 
-    // Valence shift: warm or cool
+    vec3 col = getColor(uEmotionIndex, life);
+
     vec3 warmShift = vec3(0.1, 0.05, -0.1);
     vec3 coolShift = vec3(-0.1, 0.0, 0.15);
     col += mix(coolShift, warmShift, uValence * 0.5 + 0.5) * 0.3;
-
-    // Arousal affects brightness
     col *= 0.8 + uArousal * 0.4;
 
-    Color[id] = vec4(col, 1.0);  // Standard TD Color attribute (vec4 with alpha)
+    oTDPoint_Cd[idx] = vec4(col, life);
 }
 ```
 
