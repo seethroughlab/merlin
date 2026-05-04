@@ -67,7 +67,7 @@ export async function initWhisper(config?: VoiceConfig): Promise<boolean> {
   if (config?.silenceTimeout) silenceTimeout = config.silenceTimeout;
   if (config?.maxRecordingTime) maxRecordingTime = config.maxRecordingTime;
 
-  const modelId = config?.model || 'onnx-community/whisper-tiny.en';
+  const modelId = config?.model || 'onnx-community/whisper-small.en';
 
   updateStatus({ state: 'loading', message: `Loading Whisper (${modelId.split('/').pop()})...` });
 
@@ -87,7 +87,7 @@ export async function initWhisper(config?: VoiceConfig): Promise<boolean> {
 
     isModelLoaded = true;
     console.log('Whisper initialized successfully');
-    updateStatus({ state: 'ready', message: 'Voice ready (V to talk)' });
+    updateStatus({ state: 'ready', message: 'Voice ready (Shift+M for Merlin)' });
 
     // Hot-swap mic stream when user changes microphone selection
     onMicrophoneChange(() => {

@@ -1,17 +1,18 @@
 /**
  * Phase Transition Visual Effects
  *
- * Handles visual transitions between mentalist reading phases.
+ * Handles visual transitions between reading phases.
  * Each transition has a distinct visual treatment that signals
  * the shift in the reading's energy and focus.
  */
 
-import type { MentalistPhase } from '../mentalist/types';
 import {
   getPhaseVisualConfig,
   getAccumulatedSceneParams,
   calculateAccumulatedState,
   type AccumulatedVisualState,
+  type MentalistPhase,
+  type InsightType,
 } from './insight-visuals';
 import {
   pushSceneParams,
@@ -19,7 +20,6 @@ import {
   pushAuraUpdate,
   isConnected as isTDConnected,
 } from './index';
-import type { InsightType } from '../mentalist/types';
 
 /**
  * Track the current visual state across the session

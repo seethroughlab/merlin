@@ -5,9 +5,8 @@ import type {
   BodyLanguageAnalysis,
   BridgeStats,
   VoiceCommandResult,
-  MentalistResponse,
-  MentalistUIUpdate,
-  MentalistSessionInfo,
+  MerlinResponse,
+  MerlinUIUpdate,
   TTSResult,
 } from '@shared/types';
 
@@ -65,43 +64,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     });
   },
 
-  // ============ MENTALIST ============
-
-  // Start mentalist session
-  mentalistStart: (): Promise<MentalistResponse> => {
-    return ipcRenderer.invoke('mentalist-start');
-  },
-
-  // Process user speech in mentalist session
-  mentalistProcessSpeech: (transcript: string): Promise<MentalistResponse> => {
-    return ipcRenderer.invoke('mentalist-process-speech', transcript);
-  },
-
-  // End mentalist session
-  mentalistEnd: (): Promise<MentalistResponse> => {
-    return ipcRenderer.invoke('mentalist-end');
-  },
-
-  // Get mentalist session state
-  mentalistGetState: (): Promise<MentalistSessionInfo | null> => {
-    return ipcRenderer.invoke('mentalist-get-state');
-  },
-
-  // Update cached analysis for mentalist
-  mentalistUpdateAnalysis: (data: {
-    body?: Partial<BodyLanguageAnalysis>;
-    face?: Partial<MicroExpressionAnalysis>;
-  }) => {
-    ipcRenderer.send('mentalist-update-analysis', data);
-  },
-
-  // Listen for mentalist UI updates
-  onMentalistUpdate: (callback: (update: MentalistUIUpdate) => void) => {
-    ipcRenderer.on('mentalist-update', (_event, update: MentalistUIUpdate) => {
-      callback(update);
-    });
-  },
-
   // Listen for analysis requests from main process (when Gemini tools need fresh data)
   onRequestAnalysis: (callback: (data: { type: 'face' | 'body'; requestId: string }) => void) => {
     ipcRenderer.on('request-analysis', (_event, data: { type: 'face' | 'body'; requestId: string }) => {
@@ -114,9 +76,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('analysis-result', { requestId, result });
   },
 
-  // Listen for auto-end signal when session completes
-  onMentalistAutoEnd: (callback: () => void) => {
-    ipcRenderer.on('mentalist-auto-end', () => {
+  // ============ MERLIN ============
+
+  // Start Merlin session
+  merlinStart: (): Promise<MerlinResponse> => {
+    return ipcRenderer.invoke('merlin-start');
+  },
+
+  // Process user speech in Merlin session
+  merlinProcessSpeech: (transcript: string): Promise<MerlinResponse> => {
+    return ipcRenderer.invoke('merlin-process-speech', transcript);
+  },
+
+  // End Merlin session
+  merlinEnd: (): Promise<MerlinResponse> => {
+    return ipcRenderer.invoke('merlin-end');
+  },
+
+  // Get Merlin session state
+  merlinGetState: (): Promise<{ phase: string; turnCount: number; spell: unknown; isActive: boolean } | null> => {
+    return ipcRenderer.invoke('merlin-get-state');
+  },
+
+  // Update cached analysis for Merlin
+  merlinUpdateAnalysis: (data: {
+    body?: Partial<BodyLanguageAnalysis>;
+    face?: Partial<MicroExpressionAnalysis>;
+  }) => {
+    ipcRenderer.send('merlin-update-analysis', data);
+  },
+
+  // Listen for Merlin UI updates
+  onMerlinUpdate: (callback: (update: MerlinUIUpdate) => void) => {
+    ipcRenderer.on('merlin-update', (_event, update: MerlinUIUpdate) => {
+      callback(update);
+    });
+  },
+
+  // Listen for auto-end signal when Merlin session completes
+  onMerlinAutoEnd: (callback: () => void) => {
+    ipcRenderer.on('merlin-auto-end', () => {
       callback();
     });
   },
@@ -202,19 +201,20 @@ declare global {
       saveSetting: (key: string, value: unknown) => Promise<boolean>;
       setPortraitMode: (portrait: boolean) => void;
       onPortraitModeChanged: (callback: (portrait: boolean) => void) => void;
-      // Mentalist
-      mentalistStart: () => Promise<MentalistResponse>;
-      mentalistProcessSpeech: (transcript: string) => Promise<MentalistResponse>;
-      mentalistEnd: () => Promise<MentalistResponse>;
-      mentalistGetState: () => Promise<MentalistSessionInfo | null>;
-      mentalistUpdateAnalysis: (data: {
+      // Analysis requests
+      onRequestAnalysis: (callback: (data: { type: 'face' | 'body'; requestId: string }) => void) => void;
+      sendAnalysisResult: (requestId: string, result: unknown) => void;
+      // Merlin
+      merlinStart: () => Promise<MerlinResponse>;
+      merlinProcessSpeech: (transcript: string) => Promise<MerlinResponse>;
+      merlinEnd: () => Promise<MerlinResponse>;
+      merlinGetState: () => Promise<{ phase: string; turnCount: number; spell: unknown; isActive: boolean } | null>;
+      merlinUpdateAnalysis: (data: {
         body?: Partial<BodyLanguageAnalysis>;
         face?: Partial<MicroExpressionAnalysis>;
       }) => void;
-      onMentalistUpdate: (callback: (update: MentalistUIUpdate) => void) => void;
-      onRequestAnalysis: (callback: (data: { type: 'face' | 'body'; requestId: string }) => void) => void;
-      sendAnalysisResult: (requestId: string, result: unknown) => void;
-      onMentalistAutoEnd: (callback: () => void) => void;
+      onMerlinUpdate: (callback: (update: MerlinUIUpdate) => void) => void;
+      onMerlinAutoEnd: (callback: () => void) => void;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;
       streamSpeech: (text: string, mood?: string) => void;

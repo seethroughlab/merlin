@@ -1,13 +1,17 @@
 /**
  * Insight-Driven Visual Augmentation
  *
- * Maps mentalist insights and phases to TouchDesigner visual configurations.
+ * Maps phases and insights to TouchDesigner visual configurations.
  * Each insight type and phase has distinct visual treatments that stack/blend
  * to create an evolving visual portrait of the participant.
  */
 
 import type { SceneParams, SkeletonOverlay } from './types';
-import type { MentalistPhase, InsightType, MentalistMood } from '../mentalist/types';
+
+// Local type definitions (formerly in mentalist/types)
+export type InsightType = 'emotion' | 'trait' | 'prediction' | 'observation' | 'secret';
+export type MentalistMood = 'mysterious' | 'tension' | 'revelation' | 'warm' | 'contemplative';
+export type MentalistPhase = 'idle' | 'intro' | 'reading' | 'reveal' | 'finale';
 
 // ===== Color Palettes =====
 
@@ -341,7 +345,7 @@ export function calculateAccumulatedState(
   let dominantType: InsightType = 'observation';
   let maxCount = 0;
   for (const [type, count] of Object.entries(insightsByType)) {
-    if (count > maxCount) {
+    if (count !== undefined && count > maxCount) {
       maxCount = count;
       dominantType = type as InsightType;
     }

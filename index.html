@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Parlor</title>
+    <title>Merlin</title>
     <style>
       * {
         margin: 0;
@@ -408,107 +408,8 @@
         text-align: center;
       }
 
-      /* ============ MENTALIST MODE ============ */
-
-      /* Mentalist panel (hidden by default) */
-      #mentalist-panel {
-        display: none;
-      }
-
-      #mentalist-panel.active {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-      }
-
-      /* Hide normal sidebar when mentalist is active */
-      #sidebar.mentalist-active > section:not(#mentalist-panel) {
-        display: none;
-      }
-
-      #sidebar.mentalist-active #fivestone-branding {
-        display: none;
-      }
-
-      /* Prevent double scrollbar - only conversation should scroll */
-      #sidebar.mentalist-active {
-        overflow: hidden;
-      }
-
-      /* Mentalist header */
-      .mentalist-header {
-        padding: 12px;
-        background: linear-gradient(135deg, #2a1a3a 0%, #1a1a2a 100%);
-        border-radius: 6px;
-        margin-bottom: 12px;
-      }
-
-      .mentalist-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: #c9a0ff;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .mentalist-title::before {
-        content: "🔮";
-      }
-
-      .mentalist-status-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 11px;
-        color: #888;
-      }
-
-      .mentalist-phase {
-        color: #b8f;
-      }
-
-      .mentalist-mood {
-        color: #8bf;
-      }
-
-      /* Conversation area */
-      .mentalist-conversation {
-        flex: 1;
-        overflow-y: auto;
-        padding-right: 4px;
-        margin-bottom: 12px;
-      }
-
-      .mentalist-message {
-        padding: 10px 12px;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        font-size: 13px;
-        line-height: 1.4;
-      }
-
-      .mentalist-message.user {
-        background: #2a3a4a;
-        color: #acd;
-        margin-left: 20px;
-      }
-
-      .mentalist-message.assistant {
-        background: #3a2a4a;
-        color: #dcc;
-        margin-right: 20px;
-      }
-
-      .mentalist-message-role {
-        font-size: 10px;
-        text-transform: uppercase;
-        color: #666;
-        margin-bottom: 4px;
-      }
-
-      /* Analysis bubbles - show what mentalist "sees" */
-      .mentalist-analysis-bubbles {
+      /* Analysis bubbles - show what AI "sees" */
+      .analysis-bubbles {
         display: flex;
         gap: 8px;
         margin-bottom: 8px;
@@ -551,83 +452,208 @@
         font-family: monospace;
       }
 
-      /* Insights area */
-      .mentalist-insights {
-        margin-bottom: 12px;
+      /* ============ MERLIN MODE ============ */
+
+      /* Merlin panel (hidden by default) */
+      #merlin-panel {
+        display: none;
       }
 
-      .mentalist-insight {
-        background: linear-gradient(135deg, #2a2a1a 0%, #1a2a2a 100%);
-        border: 1px solid #4a4a2a;
+      #merlin-panel.active {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      /* Hide normal sidebar when Merlin is active */
+      #sidebar.merlin-active > section:not(#merlin-panel) {
+        display: none;
+      }
+
+      #sidebar.merlin-active #fivestone-branding {
+        display: none;
+      }
+
+      /* Prevent double scrollbar - only conversation should scroll */
+      #sidebar.merlin-active {
+        overflow: hidden;
+      }
+
+      /* Merlin header */
+      .merlin-header {
+        padding: 12px;
+        background: linear-gradient(135deg, #1a2a3a 0%, #0a1a2a 100%);
         border-radius: 6px;
-        padding: 10px 12px;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
+        border-left: 3px solid #4af;
       }
 
-      .mentalist-insight-type {
-        font-size: 10px;
-        text-transform: uppercase;
-        color: #a90;
-        margin-bottom: 4px;
+      .merlin-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #6af;
+        margin-bottom: 8px;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 8px;
       }
 
-      .mentalist-insight-type::before {
+      .merlin-title::before {
         content: "✨";
       }
 
-      .mentalist-insight-content {
-        font-size: 13px;
-        color: #dca;
+      .merlin-status-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #888;
+      }
+
+      .merlin-phase {
+        color: #6af;
+      }
+
+      .merlin-turn {
+        color: #8bf;
+      }
+
+      /* Spell state display */
+      .merlin-spell {
+        background: #1a1a2a;
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 12px;
+        border: 1px solid #2a2a4a;
+      }
+
+      .spell-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+
+      .spell-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .spell-label {
+        color: #666;
+      }
+
+      .spell-value {
+        color: #aaf;
+        font-weight: 500;
+      }
+
+      .spell-value.empty {
+        color: #444;
+      }
+
+      .spell-magic-word {
+        color: #ffd700;
         font-style: italic;
       }
 
-      /* Voice status in mentalist mode */
-      .mentalist-voice {
+      /* Confidence bar */
+      .spell-confidence-bar {
+        height: 4px;
+        background: #222;
+        border-radius: 2px;
+        margin-top: 8px;
+        overflow: hidden;
+      }
+
+      .spell-confidence-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #4af 0%, #8f4 100%);
+        transition: width 0.3s ease;
+      }
+
+      /* Conversation area */
+      .merlin-conversation {
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 4px;
+        margin-bottom: 12px;
+      }
+
+      .merlin-message {
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .merlin-message.user {
+        background: #2a3a4a;
+        color: #acd;
+        margin-left: 20px;
+      }
+
+      .merlin-message.assistant {
+        background: #1a2a4a;
+        color: #cdf;
+        margin-right: 20px;
+      }
+
+      .merlin-message-role {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #666;
+        margin-bottom: 4px;
+      }
+
+      /* Voice status in Merlin mode */
+      .merlin-voice {
         padding: 12px;
         background: #1a1a2a;
         border-radius: 6px;
         text-align: center;
       }
 
-      .mentalist-voice-status {
+      .merlin-voice-status {
         font-size: 13px;
         color: #888;
         margin-bottom: 4px;
       }
 
-      .mentalist-voice-status.listening {
+      .merlin-voice-status.listening {
         color: #0f0;
         animation: pulse 1s ease-in-out infinite;
       }
 
-      .mentalist-voice-status.processing {
+      .merlin-voice-status.processing {
         color: #6af;
         animation: pulse 0.5s ease-in-out infinite;
       }
 
-      .mentalist-voice-status.speaking {
-        color: #c9a0ff;
+      .merlin-voice-status.speaking {
+        color: #6af;
         animation: pulse 1.2s ease-in-out infinite;
       }
 
-      .mentalist-voice-status.speaking::before {
-        content: "🔮 ";
+      .merlin-voice-status.speaking::before {
+        content: "✨ ";
       }
 
-      .mentalist-hint {
+      .merlin-hint {
         font-size: 11px;
         color: #555;
       }
 
-      /* Mood visual accents */
-      .mood-mysterious { border-left: 3px solid #8b5cf6; }
-      .mood-tension { border-left: 3px solid #ef4444; }
-      .mood-revelation { border-left: 3px solid #f59e0b; }
-      .mood-warm { border-left: 3px solid #10b981; }
-      .mood-contemplative { border-left: 3px solid #3b82f6; }
+      /* Element color accents */
+      .element-fire { border-left: 3px solid #ff6b35; }
+      .element-water { border-left: 3px solid #4da6ff; }
+      .element-air { border-left: 3px solid #a8dadc; }
+      .element-earth { border-left: 3px solid #8b7355; }
+      .element-light { border-left: 3px solid #ffd93d; }
+      .element-shadow { border-left: 3px solid #5c5470; }
+      .element-crystal { border-left: 3px solid #e0aaff; }
+      .element-storm { border-left: 3px solid #7b68ee; }
+      .element-flora { border-left: 3px solid #52b788; }
+      .element-cosmic { border-left: 3px solid #9d4edd; }
     </style>
   </head>
   <body>
@@ -733,30 +759,49 @@
         <section id="voice-controls">
           <h3>Voice Commands</h3>
           <div id="voice-status" class="voice-status voice-idle">Loading...</div>
-          <div class="voice-hint">Hold V to speak • M for Mentalist</div>
+          <div class="voice-hint">Shift+M = Merlin Mode</div>
         </section>
 
-        <!-- Mentalist mode panel (hidden by default) -->
-        <section id="mentalist-panel">
-          <div class="mentalist-header mood-mysterious" id="mentalist-header">
-            <div class="mentalist-title">Mentalist Mode</div>
-            <div class="mentalist-status-row">
-              <span>Phase: <span class="mentalist-phase" id="mentalist-phase">Idle</span></span>
-              <span>Mood: <span class="mentalist-mood" id="mentalist-mood">Mysterious</span></span>
+        <!-- Merlin mode panel (hidden by default) -->
+        <section id="merlin-panel">
+          <div class="merlin-header" id="merlin-header">
+            <div class="merlin-title">Merlin Mirror</div>
+            <div class="merlin-status-row">
+              <span>Phase: <span class="merlin-phase" id="merlin-phase">Idle</span></span>
+              <span>Turn: <span class="merlin-turn" id="merlin-turn">0</span></span>
             </div>
           </div>
 
-          <div class="mentalist-conversation" id="mentalist-conversation">
+          <!-- Spell state display -->
+          <div class="merlin-spell" id="merlin-spell">
+            <div class="spell-row">
+              <span class="spell-label">Intent:</span>
+              <span class="spell-value" id="spell-intent">-</span>
+            </div>
+            <div class="spell-row">
+              <span class="spell-label">Element:</span>
+              <span class="spell-value" id="spell-element">-</span>
+            </div>
+            <div class="spell-row">
+              <span class="spell-label">Origin:</span>
+              <span class="spell-value" id="spell-origin">-</span>
+            </div>
+            <div class="spell-row">
+              <span class="spell-label">Magic Word:</span>
+              <span class="spell-value spell-magic-word" id="spell-magic-word">-</span>
+            </div>
+            <div class="spell-confidence-bar">
+              <div class="spell-confidence-fill" id="spell-confidence-fill" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="merlin-conversation" id="merlin-conversation">
             <!-- Messages will be added here dynamically -->
           </div>
 
-          <div class="mentalist-insights" id="mentalist-insights">
-            <!-- Revealed insights will be added here -->
-          </div>
-
-          <div class="mentalist-voice">
-            <div class="mentalist-voice-status" id="mentalist-voice-status">Press M to begin</div>
-            <div class="mentalist-hint">M to end session</div>
+          <div class="merlin-voice">
+            <div class="merlin-voice-status" id="merlin-voice-status">Shift+M to begin</div>
+            <div class="merlin-hint">Say "Hello Merlin" or Shift+M</div>
           </div>
         </section>
 

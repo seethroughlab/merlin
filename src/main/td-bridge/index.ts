@@ -21,12 +21,12 @@ export {
   pushZoneUpdate,
   pushOrientationUpdate,
   pushTrackingFrame,
-  pushMentalistState,
+  pushMerlinState,
   pushAnalysisUpdate,
 } from './push';
 
 // Re-export push types
-export type { MentalistStateUpdate } from './push';
+export type { MerlinStateUpdate } from './push';
 
 // Re-export insight visual functions
 export {

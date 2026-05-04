@@ -59,11 +59,9 @@ import type {
   MicroExpressionAnalysis,
   BodyLanguageAnalysis,
   VoiceCommandAction,
-  MentalistUIUpdate,
-  MentalistConversationMessage,
-  MentalistInsight,
-  MentalistPhase,
-  MentalistMood,
+  MerlinUIUpdate,
+  MerlinResponse,
+  SpellState,
 } from '../shared/types';
 
 // DOM Elements
@@ -118,10 +116,10 @@ let voiceReady = false;
 // TTS state
 let ttsReady = false;
 
-// Mentalist mode state
-let mentalistModeActive = false;
-let mentalistIsListening = false;
-let mentalistIsProcessing = false;
+// Merlin mode state
+let merlinModeActive = false;
+let merlinIsListening = false;
+let merlinIsProcessing = false;
 
 // Pending analysis capture (started when user begins speaking)
 let pendingAnalysisCapture: Promise<{
@@ -1130,89 +1128,26 @@ function updateVoiceStatusDisplay(status: VoiceStatus): void {
   }
 }
 
-// ============ MENTALIST MODE ============
-
 /**
- * Update the mentalist UI with current state
+ * Capitalize first letter
  */
-function updateMentalistUI(update: MentalistUIUpdate): void {
-  const sidebar = document.getElementById('sidebar');
-  const panel = document.getElementById('mentalist-panel');
-  const header = document.getElementById('mentalist-header');
-  const phaseSpan = document.getElementById('mentalist-phase');
-  const moodSpan = document.getElementById('mentalist-mood');
-  const voiceStatus = document.getElementById('mentalist-voice-status');
-
-  if (!sidebar || !panel) return;
-
-  // Update phase and mood
-  if (phaseSpan) phaseSpan.textContent = capitalize(update.phase);
-  if (moodSpan) moodSpan.textContent = capitalize(update.mood);
-
-  // Update mood class on header
-  if (header) {
-    header.className = `mentalist-header mood-${update.mood}`;
-  }
-
-  // Update voice status
-  if (voiceStatus) {
-    if (update.isProcessing) {
-      voiceStatus.textContent = 'Processing...';
-      voiceStatus.className = 'mentalist-voice-status processing';
-    } else if (update.isListening) {
-      voiceStatus.textContent = 'Listening...';
-      voiceStatus.className = 'mentalist-voice-status listening';
-    } else if (update.phase === 'idle') {
-      voiceStatus.textContent = 'Press M to begin';
-      voiceStatus.className = 'mentalist-voice-status';
-    } else {
-      voiceStatus.textContent = 'Ready';
-      voiceStatus.className = 'mentalist-voice-status';
-    }
-  }
-
-  // Add last message to conversation
-  if (update.lastMessage) {
-    addMentalistMessage(update.lastMessage);
-  }
-
-  // Update insights
-  updateMentalistInsights(update.revealedInsights);
+function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 /**
- * Add a message to the mentalist conversation
- */
-function addMentalistMessage(message: MentalistConversationMessage): void {
-  const conversation = document.getElementById('mentalist-conversation');
-  if (!conversation) return;
-
-  const msgDiv = document.createElement('div');
-  msgDiv.className = `mentalist-message ${message.role}`;
-
-  const roleLabel = message.role === 'user' ? 'You' : 'Mentalist';
-  msgDiv.innerHTML = `
-    <div class="mentalist-message-role">${roleLabel}</div>
-    <div>${message.content}</div>
-  `;
-
-  conversation.appendChild(msgDiv);
-  conversation.scrollTop = conversation.scrollHeight;
-}
-
-/**
- * Add analysis bubbles to the mentalist conversation
- * Shows what the mentalist "sees" - facial expressions and body language
+ * Add analysis bubbles to the conversation
+ * Shows what the AI "sees" - facial expressions and body language
  */
 function addAnalysisBubbles(
   face: MicroExpressionAnalysis | null,
   body: BodyLanguageAnalysis | null
 ): void {
-  const conversation = document.getElementById('mentalist-conversation');
+  const conversation = document.getElementById('merlin-conversation');
   if (!conversation) return;
 
   const bubbleContainer = document.createElement('div');
-  bubbleContainer.className = 'mentalist-analysis-bubbles';
+  bubbleContainer.className = 'analysis-bubbles';
 
   // Face analysis bubble
   if (face) {
@@ -1246,312 +1181,6 @@ function addAnalysisBubbles(
 }
 
 /**
- * Update mentalist insights display
- */
-function updateMentalistInsights(insights: MentalistInsight[]): void {
-  const container = document.getElementById('mentalist-insights');
-  if (!container) return;
-
-  container.innerHTML = '';
-
-  for (const insight of insights) {
-    const insightDiv = document.createElement('div');
-    insightDiv.className = 'mentalist-insight';
-    insightDiv.innerHTML = `
-      <div class="mentalist-insight-type">${insight.type}</div>
-      <div class="mentalist-insight-content">${insight.content}</div>
-    `;
-    container.appendChild(insightDiv);
-  }
-}
-
-/**
- * Clear mentalist conversation and insights
- */
-function clearMentalistUI(): void {
-  const conversation = document.getElementById('mentalist-conversation');
-  const insights = document.getElementById('mentalist-insights');
-  if (conversation) conversation.innerHTML = '';
-  if (insights) insights.innerHTML = '';
-}
-
-/**
- * Capitalize first letter
- */
-function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-/**
- * Start mentalist mode
- */
-async function startMentalistMode(): Promise<void> {
-  if (mentalistModeActive) return;
-  if (!window.electronAPI) {
-    console.error('Electron API not available');
-    return;
-  }
-
-  const ts = () => new Date().toISOString().slice(11, 23);
-  console.log(`[Mentalist ${ts()}] Starting...`);
-  mentalistModeActive = true;
-
-  // Activate UI
-  const sidebar = document.getElementById('sidebar');
-  const panel = document.getElementById('mentalist-panel');
-  sidebar?.classList.add('mentalist-active');
-  panel?.classList.add('active');
-
-  clearMentalistUI();
-
-  // Update status
-  const voiceStatus = document.getElementById('mentalist-voice-status');
-  if (voiceStatus) {
-    voiceStatus.textContent = 'Starting session...';
-    voiceStatus.className = 'mentalist-voice-status processing';
-  }
-
-  try {
-    // Start session with Gemini
-    const response = await window.electronAPI.mentalistStart();
-    console.log(`[Mentalist ${ts()}] Session started:`, response.text);
-
-    // Add intro message
-    addMentalistMessage({
-      role: 'assistant',
-      content: response.text,
-      timestamp: Date.now(),
-    });
-
-    // Update UI state (don't pass lastMessage - we already added it above)
-    updateMentalistUI({
-      phase: response.phase,
-      mood: response.mood,
-      turnCount: 0,
-      revealedInsights: [],
-      isListening: false,
-      isProcessing: false,
-      lastMessage: undefined,  // Explicitly undefined to avoid duplicate
-    });
-
-    // Speak the intro aloud with appropriate mood (streaming for lower latency)
-    if (ttsReady && response.text) {
-      await speakWithStreaming(response.text, response.mood);
-    }
-
-    // Start continuous listening (after TTS finishes)
-    mentalistIsListening = true;
-    await startContinuousListening(handleMentalistTranscript);
-
-    // Register speech start callback to begin analysis capture early
-    setSpeechStartCallback(() => {
-      if (!mentalistModeActive || pendingAnalysisCapture) return;
-
-      console.log(`[Mentalist ${ts()}] Speech started - beginning analysis capture...`);
-      pendingAnalysisCapture = Promise.all([
-        captureQuickFaceAnalysis(),
-        captureQuickBodyAnalysis(),
-      ]).then(([face, body]) => ({ face, body }));
-    });
-
-    console.log(`[Mentalist ${ts()}] Continuous listening started`);
-
-  } catch (error) {
-    console.error('[Mentalist] Failed to start:', error);
-    stopMentalistMode();
-  }
-}
-
-/**
- * Stop mentalist mode
- */
-async function stopMentalistMode(): Promise<void> {
-  if (!mentalistModeActive) return;
-
-  console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Stopping...`);
-
-  // Stop continuous listening and clear callbacks
-  stopContinuousListening();
-  setSpeechStartCallback(null);
-  pendingAnalysisCapture = null;
-  mentalistIsListening = false;
-
-  // End session
-  if (window.electronAPI) {
-    try {
-      const response = await window.electronAPI.mentalistEnd();
-      console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Session ended:`, response.text);
-
-      // Add finale message
-      addMentalistMessage({
-        role: 'assistant',
-        content: response.text,
-        timestamp: Date.now(),
-      });
-
-      // Speak the finale aloud with warm mood (streaming for lower latency)
-      if (ttsReady && response.text) {
-        await speakWithStreaming(response.text, 'warm');
-      }
-    } catch (error) {
-      console.error('[Mentalist] Error ending session:', error);
-    }
-  }
-
-  // Deactivate UI after a short delay to show finale
-  setTimeout(() => {
-    mentalistModeActive = false;
-    const sidebar = document.getElementById('sidebar');
-    const panel = document.getElementById('mentalist-panel');
-    sidebar?.classList.remove('mentalist-active');
-    panel?.classList.remove('active');
-  }, 3000);
-}
-
-/**
- * Toggle mentalist mode
- */
-async function toggleMentalistMode(): Promise<void> {
-  if (mentalistModeActive) {
-    await stopMentalistMode();
-  } else {
-    await startMentalistMode();
-  }
-}
-
-// Lock to prevent concurrent transcript processing
-let isProcessingTranscript = false;
-
-/**
- * Handle transcript from continuous listening in mentalist mode
- */
-async function handleMentalistTranscript(transcript: string): Promise<void> {
-  if (!mentalistModeActive || !window.electronAPI) return;
-
-  // Prevent concurrent processing - drop if already processing
-  if (isProcessingTranscript) {
-    console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Dropping transcript (busy): "${transcript}"`);
-    return;
-  }
-
-  isProcessingTranscript = true;
-  const ts = () => new Date().toISOString().slice(11, 23);
-  console.log(`[Mentalist ${ts()}] User said: "${transcript}"`);
-
-  // Add user message to UI
-  addMentalistMessage({
-    role: 'user',
-    content: transcript,
-    timestamp: Date.now(),
-  });
-
-  // Update UI to show processing
-  mentalistIsProcessing = true;
-  const voiceStatus = document.getElementById('mentalist-voice-status');
-  if (voiceStatus) {
-    voiceStatus.textContent = 'Processing...';
-    voiceStatus.className = 'mentalist-voice-status processing';
-  }
-
-  // Use the pre-started analysis capture (from speech start) if available
-  // Otherwise start a new capture as fallback
-  let analysisPromise: Promise<{ face: MicroExpressionAnalysis | null; body: BodyLanguageAnalysis | null }>;
-
-  if (pendingAnalysisCapture) {
-    console.log(`[Mentalist ${ts()}] Using pre-started analysis capture (from speech start)`);
-    analysisPromise = pendingAnalysisCapture;
-    pendingAnalysisCapture = null; // Clear for next utterance
-  } else {
-    console.log(`[Mentalist ${ts()}] No pre-started capture, starting now...`);
-    analysisPromise = Promise.all([
-      captureQuickFaceAnalysis(),
-      captureQuickBodyAnalysis(),
-    ]).then(([face, body]) => ({ face, body }));
-  }
-
-  try {
-    // Await analysis (should be ready or nearly ready since it started when user began speaking)
-    const { face: freshFace, body: freshBody } = await analysisPromise;
-    console.log(`[Mentalist ${ts()}] Analysis ready:`, {
-      face: freshFace?.primaryEmotion,
-      body: freshBody?.primaryPosture,
-    });
-
-    // Show analysis bubbles in conversation
-    addAnalysisBubbles(freshFace, freshBody);
-
-    // Update cached analysis in main process
-    window.electronAPI.mentalistUpdateAnalysis({
-      body: freshBody ?? undefined,
-      face: freshFace ?? undefined,
-    });
-
-    // Now call Gemini with fresh analysis ready
-    console.log(`[Mentalist ${ts()}] Calling Gemini...`);
-    const response = await window.electronAPI.mentalistProcessSpeech(transcript);
-    console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Response:`, response.text);
-
-    // Add response to conversation
-    addMentalistMessage({
-      role: 'assistant',
-      content: response.text,
-      timestamp: Date.now(),
-    });
-
-    // Update phase/mood in UI
-    const phaseSpan = document.getElementById('mentalist-phase');
-    const moodSpan = document.getElementById('mentalist-mood');
-    const header = document.getElementById('mentalist-header');
-
-    if (phaseSpan) phaseSpan.textContent = capitalize(response.phase);
-    if (moodSpan) moodSpan.textContent = capitalize(response.mood);
-    if (header) header.className = `mentalist-header mood-${response.mood}`;
-
-    // Update insights if any revealed
-    if (response.revealedInsight) {
-      const container = document.getElementById('mentalist-insights');
-      if (container) {
-        const insightDiv = document.createElement('div');
-        insightDiv.className = 'mentalist-insight';
-        insightDiv.innerHTML = `
-          <div class="mentalist-insight-type">${response.revealedInsight.type}</div>
-          <div class="mentalist-insight-content">${response.revealedInsight.content}</div>
-        `;
-        container.appendChild(insightDiv);
-      }
-    }
-
-    // Speak the response aloud with appropriate mood (streaming for lower latency)
-    // Pause listening during TTS to prevent feedback
-    if (ttsReady && response.text) {
-      stopContinuousListening();
-      console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Paused listening for TTS`);
-
-      await speakWithStreaming(response.text, response.mood);
-
-      // Resume listening after TTS finishes
-      if (mentalistModeActive) {
-        console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Resuming listening after TTS`);
-        await startContinuousListening(handleMentalistTranscript);
-      }
-    }
-
-  } catch (error) {
-    console.error('[Mentalist] Error processing speech:', error);
-    if (statusDisplay) statusDisplay.textContent = `Mentalist error: ${error}`;
-  } finally {
-    isProcessingTranscript = false;  // Release lock
-    mentalistIsProcessing = false;
-
-    // Resume listening indicator (after TTS finishes)
-    if (voiceStatus && mentalistModeActive) {
-      voiceStatus.textContent = 'Listening...';
-      voiceStatus.className = 'mentalist-voice-status listening';
-    }
-  }
-}
-
-/**
  * Setup keyboard handlers
  */
 function setupKeyboardHandlers(): void {
@@ -1559,35 +1188,16 @@ function setupKeyboardHandlers(): void {
     // Ignore if typing in an input
     if (event.target instanceof HTMLInputElement) return;
 
-    // V key triggers voice command (push-to-talk) - only when not in mentalist mode
-    if (event.code === 'KeyV' && !event.repeat && !mentalistModeActive) {
-      event.preventDefault();
-      if (voiceReady && !isVoiceRecording()) {
-        startRecording();
-      }
-    }
-
-    // M key toggles mentalist mode
-    if (event.code === 'KeyM' && !event.repeat) {
+    // Shift+M toggles Merlin mode
+    if (event.code === 'KeyM' && !event.repeat && event.shiftKey) {
       event.preventDefault();
       if (voiceReady) {
-        toggleMentalistMode();
+        toggleMerlinMode();
       }
     }
   });
 
-  // V key release stops recording (only when not in mentalist mode)
-  document.addEventListener('keyup', (event) => {
-    if (event.target instanceof HTMLInputElement) return;
-
-    if (event.code === 'KeyV' && !mentalistModeActive) {
-      if (isVoiceRecording()) {
-        stopRecording();
-      }
-    }
-  });
-
-  console.log('Keyboard handlers ready (V = voice, M = mentalist)');
+  console.log('Keyboard handlers ready (Shift+M = Merlin)');
 }
 
 /**
@@ -1654,7 +1264,7 @@ async function initSpeech(): Promise<void> {
 
   // Setup callback for speaking state changes
   onSpeakingStateChange((speaking) => {
-    updateMentalistSpeakingIndicator(speaking);
+    updateMerlinSpeakingIndicator(speaking);
   });
 
   const success = await initTTS();
@@ -1671,18 +1281,395 @@ async function initSpeech(): Promise<void> {
   }
 }
 
+// ============ MERLIN MODE ============
+
 /**
- * Update UI to show speaking state
+ * Wake phrase patterns for Merlin activation
  */
-function updateMentalistSpeakingIndicator(speaking: boolean): void {
-  const voiceStatus = document.getElementById('mentalist-voice-status');
-  if (voiceStatus && mentalistModeActive) {
+const MERLIN_WAKE_PATTERNS = [
+  /hello\s*merlin/i,
+  /hey\s*merlin/i,
+  /hi\s*merlin/i,
+];
+
+/**
+ * Detect Merlin wake phrase in transcript
+ */
+function detectMerlinWakePhrase(transcript: string): boolean {
+  const normalized = transcript.toLowerCase().trim();
+  return MERLIN_WAKE_PATTERNS.some(p => p.test(normalized));
+}
+
+/**
+ * Update Merlin UI with current state
+ */
+function updateMerlinUI(update: MerlinUIUpdate): void {
+  const sidebar = document.getElementById('sidebar');
+  const panel = document.getElementById('merlin-panel');
+  const header = document.getElementById('merlin-header');
+  const phaseSpan = document.getElementById('merlin-phase');
+  const turnSpan = document.getElementById('merlin-turn');
+  const voiceStatus = document.getElementById('merlin-voice-status');
+
+  if (!sidebar || !panel) return;
+
+  // Update phase and turn
+  if (phaseSpan) phaseSpan.textContent = capitalize(update.phase);
+  if (turnSpan) turnSpan.textContent = update.turnCount.toString();
+
+  // Update spell state display
+  updateMerlinSpellUI(update.spell);
+
+  // Update element accent on header
+  if (header && update.spell.element) {
+    header.className = `merlin-header element-${update.spell.element}`;
+  }
+
+  // Update voice status
+  if (voiceStatus) {
+    if (update.isProcessing) {
+      voiceStatus.textContent = 'Processing...';
+      voiceStatus.className = 'merlin-voice-status processing';
+    } else if (update.isListening) {
+      voiceStatus.textContent = 'Listening...';
+      voiceStatus.className = 'merlin-voice-status listening';
+    } else if (update.phase === 'idle') {
+      voiceStatus.textContent = 'Shift+M to begin';
+      voiceStatus.className = 'merlin-voice-status';
+    } else {
+      voiceStatus.textContent = 'Ready';
+      voiceStatus.className = 'merlin-voice-status';
+    }
+  }
+
+  // Add last message to conversation
+  if (update.lastMessage) {
+    addMerlinMessage(update.lastMessage.role, update.lastMessage.content);
+  }
+}
+
+/**
+ * Update spell state UI elements
+ */
+function updateMerlinSpellUI(spell: SpellState): void {
+  const intentEl = document.getElementById('spell-intent');
+  const elementEl = document.getElementById('spell-element');
+  const originEl = document.getElementById('spell-origin');
+  const magicWordEl = document.getElementById('spell-magic-word');
+  const confidenceFill = document.getElementById('spell-confidence-fill');
+
+  if (intentEl) {
+    intentEl.textContent = spell.intent ? capitalize(spell.intent) : '-';
+    intentEl.classList.toggle('empty', !spell.intent);
+  }
+  if (elementEl) {
+    elementEl.textContent = spell.element ? capitalize(spell.element) : '-';
+    elementEl.classList.toggle('empty', !spell.element);
+  }
+  if (originEl) {
+    const origin = spell.castingOrigin?.replace(/_/g, ' ');
+    originEl.textContent = origin ? capitalize(origin) : '-';
+    originEl.classList.toggle('empty', !spell.castingOrigin);
+  }
+  if (magicWordEl) {
+    magicWordEl.textContent = spell.magicWord ?? '-';
+    magicWordEl.classList.toggle('empty', !spell.magicWord);
+  }
+  if (confidenceFill) {
+    confidenceFill.style.width = `${Math.round(spell.confidence * 100)}%`;
+  }
+}
+
+/**
+ * Add a message to the Merlin conversation
+ */
+function addMerlinMessage(role: 'user' | 'assistant', content: string): void {
+  const conversation = document.getElementById('merlin-conversation');
+  if (!conversation) return;
+
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `merlin-message ${role}`;
+
+  const roleLabel = role === 'user' ? 'You' : 'Merlin';
+  msgDiv.innerHTML = `
+    <div class="merlin-message-role">${roleLabel}</div>
+    <div>${content}</div>
+  `;
+
+  conversation.appendChild(msgDiv);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+/**
+ * Clear Merlin conversation
+ */
+function clearMerlinUI(): void {
+  const conversation = document.getElementById('merlin-conversation');
+  if (conversation) conversation.innerHTML = '';
+
+  // Reset spell state display
+  const emptySpell: SpellState = {
+    intent: null,
+    element: null,
+    tone: null,
+    energy: 0.3,
+    complexity: 0.2,
+    castingOrigin: null,
+    visualArchetype: null,
+    palette: null,
+    magicWord: null,
+    confidence: 0,
+  };
+  updateMerlinSpellUI(emptySpell);
+}
+
+/**
+ * Start Merlin mode
+ */
+async function startMerlinMode(): Promise<void> {
+  if (merlinModeActive) return;
+  if (!window.electronAPI) {
+    console.error('Electron API not available');
+    return;
+  }
+
+  const ts = () => new Date().toISOString().slice(11, 23);
+  console.log(`[Merlin ${ts()}] Starting...`);
+  merlinModeActive = true;
+
+  // Activate UI
+  const sidebar = document.getElementById('sidebar');
+  const panel = document.getElementById('merlin-panel');
+  sidebar?.classList.add('merlin-active');
+  panel?.classList.add('active');
+
+  clearMerlinUI();
+
+  // Update status
+  const voiceStatus = document.getElementById('merlin-voice-status');
+  if (voiceStatus) {
+    voiceStatus.textContent = 'Starting session...';
+    voiceStatus.className = 'merlin-voice-status processing';
+  }
+
+  try {
+    // Start session with Gemini
+    const response = await window.electronAPI.merlinStart();
+    console.log(`[Merlin ${ts()}] Session started:`, response.text);
+
+    // Add intro message
+    addMerlinMessage('assistant', response.text);
+
+    // Update spell state
+    updateMerlinSpellUI(response.spell);
+
+    // Update phase display
+    const phaseSpan = document.getElementById('merlin-phase');
+    if (phaseSpan) phaseSpan.textContent = capitalize(response.phase);
+
+    // Speak the intro aloud (streaming for lower latency)
+    if (ttsReady && response.text) {
+      await speakWithStreaming(response.text, 'wizard');
+    }
+
+    // Start continuous listening (after TTS finishes)
+    merlinIsListening = true;
+    await startContinuousListening(handleMerlinTranscript);
+
+    // Register speech start callback to begin analysis capture early
+    setSpeechStartCallback(() => {
+      if (!merlinModeActive || pendingAnalysisCapture) return;
+
+      console.log(`[Merlin ${ts()}] Speech started - beginning analysis capture...`);
+      pendingAnalysisCapture = Promise.all([
+        captureQuickFaceAnalysis(),
+        captureQuickBodyAnalysis(),
+      ]).then(([face, body]) => ({ face, body }));
+    });
+
+    console.log(`[Merlin ${ts()}] Continuous listening started`);
+
+  } catch (error) {
+    console.error('[Merlin] Failed to start:', error);
+    stopMerlinMode();
+  }
+}
+
+/**
+ * Stop Merlin mode
+ */
+async function stopMerlinMode(): Promise<void> {
+  if (!merlinModeActive) return;
+
+  console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Stopping...`);
+
+  // Stop continuous listening and clear callbacks
+  stopContinuousListening();
+  setSpeechStartCallback(null);
+  pendingAnalysisCapture = null;
+  merlinIsListening = false;
+
+  // End session
+  if (window.electronAPI) {
+    try {
+      const response = await window.electronAPI.merlinEnd();
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Session ended:`, response.text);
+
+      // Add finale message
+      addMerlinMessage('assistant', response.text);
+
+      // Speak the finale aloud with wizard voice
+      if (ttsReady && response.text) {
+        await speakWithStreaming(response.text, 'wizard');
+      }
+    } catch (error) {
+      console.error('[Merlin] Error ending session:', error);
+    }
+  }
+
+  // Deactivate UI after a short delay to show finale
+  setTimeout(() => {
+    merlinModeActive = false;
+    const sidebar = document.getElementById('sidebar');
+    const panel = document.getElementById('merlin-panel');
+    sidebar?.classList.remove('merlin-active');
+    panel?.classList.remove('active');
+  }, 3000);
+}
+
+/**
+ * Toggle Merlin mode
+ */
+async function toggleMerlinMode(): Promise<void> {
+  if (merlinModeActive) {
+    await stopMerlinMode();
+  } else {
+    await startMerlinMode();
+  }
+}
+
+// Lock to prevent concurrent Merlin transcript processing
+let isProcessingMerlinTranscript = false;
+
+/**
+ * Handle transcript from continuous listening in Merlin mode
+ */
+async function handleMerlinTranscript(transcript: string): Promise<void> {
+  if (!merlinModeActive || !window.electronAPI) return;
+
+  // Prevent concurrent processing - drop if already processing
+  if (isProcessingMerlinTranscript) {
+    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Dropping transcript (busy): "${transcript}"`);
+    return;
+  }
+
+  isProcessingMerlinTranscript = true;
+  const ts = () => new Date().toISOString().slice(11, 23);
+  console.log(`[Merlin ${ts()}] User said: "${transcript}"`);
+
+  // Add user message to UI
+  addMerlinMessage('user', transcript);
+
+  // Update UI to show processing
+  merlinIsProcessing = true;
+  const voiceStatus = document.getElementById('merlin-voice-status');
+  if (voiceStatus) {
+    voiceStatus.textContent = 'Processing...';
+    voiceStatus.className = 'merlin-voice-status processing';
+  }
+
+  // Use the pre-started analysis capture if available
+  let analysisPromise: Promise<{ face: MicroExpressionAnalysis | null; body: BodyLanguageAnalysis | null }>;
+
+  if (pendingAnalysisCapture) {
+    console.log(`[Merlin ${ts()}] Using pre-started analysis capture`);
+    analysisPromise = pendingAnalysisCapture;
+    pendingAnalysisCapture = null;
+  } else {
+    console.log(`[Merlin ${ts()}] No pre-started capture, starting now...`);
+    analysisPromise = Promise.all([
+      captureQuickFaceAnalysis(),
+      captureQuickBodyAnalysis(),
+    ]).then(([face, body]) => ({ face, body }));
+  }
+
+  try {
+    // Await analysis
+    const { face: freshFace, body: freshBody } = await analysisPromise;
+    console.log(`[Merlin ${ts()}] Analysis ready:`, {
+      face: freshFace?.primaryEmotion,
+      body: freshBody?.primaryPosture,
+    });
+
+    // Show analysis bubbles
+    addAnalysisBubbles(freshFace, freshBody);
+
+    // Update cached analysis in main process
+    window.electronAPI.merlinUpdateAnalysis({
+      body: freshBody ?? undefined,
+      face: freshFace ?? undefined,
+    });
+
+    // Call Gemini
+    console.log(`[Merlin ${ts()}] Calling Gemini...`);
+    const response = await window.electronAPI.merlinProcessSpeech(transcript);
+    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Response:`, response.text);
+
+    // Add response to conversation
+    addMerlinMessage('assistant', response.text);
+
+    // Update spell state
+    updateMerlinSpellUI(response.spell);
+
+    // Update phase in UI
+    const phaseSpan = document.getElementById('merlin-phase');
+    const header = document.getElementById('merlin-header');
+    if (phaseSpan) phaseSpan.textContent = capitalize(response.phase);
+    if (header && response.spell.element) {
+      header.className = `merlin-header element-${response.spell.element}`;
+    }
+
+    // Speak the response aloud (pause listening during TTS)
+    if (ttsReady && response.text) {
+      stopContinuousListening();
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Paused listening for TTS`);
+
+      await speakWithStreaming(response.text, 'wizard');
+
+      // Resume listening after TTS finishes
+      if (merlinModeActive) {
+        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after TTS`);
+        await startContinuousListening(handleMerlinTranscript);
+      }
+    }
+
+  } catch (error) {
+    console.error('[Merlin] Error processing speech:', error);
+    if (statusDisplay) statusDisplay.textContent = `Merlin error: ${error}`;
+  } finally {
+    isProcessingMerlinTranscript = false;
+    merlinIsProcessing = false;
+
+    // Resume listening indicator
+    if (voiceStatus && merlinModeActive) {
+      voiceStatus.textContent = 'Listening...';
+      voiceStatus.className = 'merlin-voice-status listening';
+    }
+  }
+}
+
+/**
+ * Update Merlin UI to show speaking state
+ */
+function updateMerlinSpeakingIndicator(speaking: boolean): void {
+  const voiceStatus = document.getElementById('merlin-voice-status');
+  if (voiceStatus && merlinModeActive) {
     if (speaking) {
       voiceStatus.textContent = 'Speaking...';
-      voiceStatus.className = 'mentalist-voice-status speaking';
-    } else if (mentalistIsListening) {
+      voiceStatus.className = 'merlin-voice-status speaking';
+    } else if (merlinIsListening) {
       voiceStatus.textContent = 'Listening...';
-      voiceStatus.className = 'mentalist-voice-status listening';
+      voiceStatus.className = 'merlin-voice-status listening';
     }
   }
 }
@@ -1741,12 +1728,6 @@ if (window.electronAPI) {
     }
   });
 
-  // Listen for mentalist UI updates from main process
-  window.electronAPI.onMentalistUpdate((update: MentalistUIUpdate) => {
-    console.log('[Mentalist] UI update received:', update);
-    updateMentalistUI(update);
-  });
-
   // Listen for analysis requests from main process (when Gemini tools need fresh data)
   window.electronAPI.onRequestAnalysis(async (data) => {
     console.log(`[Analysis ${new Date().toISOString().slice(11, 23)}] Main process requested fresh ${data.type} analysis`);
@@ -1762,10 +1743,16 @@ if (window.electronAPI) {
     window.electronAPI.sendAnalysisResult(data.requestId, result);
   });
 
-  // Listen for auto-end signal when session completes (turn limit reached)
-  window.electronAPI.onMentalistAutoEnd(() => {
-    console.log(`[Mentalist ${new Date().toISOString().slice(11, 23)}] Session complete - auto-ending...`);
-    stopMentalistMode();
+  // Listen for Merlin UI updates from main process
+  window.electronAPI.onMerlinUpdate((update: MerlinUIUpdate) => {
+    console.log('[Merlin] UI update received:', update);
+    updateMerlinUI(update);
+  });
+
+  // Listen for auto-end signal when Merlin session completes
+  window.electronAPI.onMerlinAutoEnd(() => {
+    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Session complete - auto-ending...`);
+    stopMerlinMode();
   });
 }
 

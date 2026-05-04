@@ -137,22 +137,27 @@ export function pushTrackingFrame(frame: TrackingFrame): boolean {
   return send(message);
 }
 
-// ===== Mentalist State =====
+// ===== Merlin State =====
 
-export interface MentalistStateUpdate {
+export interface MerlinStateUpdate {
   active: boolean;
   phase?: string;
-  mood?: string;
-  colorAccent?: string;
-  particleBehavior?: string;
+  spell?: {
+    intent?: string | null;
+    element?: string | null;
+    energy?: number;
+    castingOrigin?: string | null;
+    palette?: string | null;
+    confidence?: number;
+  };
 }
 
 /**
- * Update the mentalist session state
- * Replaces OSC-based mentalist updates
+ * Update the Merlin session state
+ * Sends spell-casting state to TD for visual effects
  */
-export function pushMentalistState(state: MentalistStateUpdate): boolean {
-  return guardedSend({ type: 'mentalist_state', ...state }, 'push mentalist state');
+export function pushMerlinState(state: MerlinStateUpdate): boolean {
+  return guardedSend({ type: 'merlin_state', ...state }, 'push merlin state');
 }
 
 // ===== Analysis =====

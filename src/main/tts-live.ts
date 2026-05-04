@@ -8,14 +8,15 @@
 import WebSocket, { MessageEvent, ErrorEvent, CloseEvent } from 'ws';
 import { BrowserWindow } from 'electron';
 
-// Live API model - must use a model that supports bidiGenerateContent
-const MODEL_NAME = 'gemini-3.1-flash-live-preview';
+// Live API model - must use native audio model for voice selection to work
+// gemini-2.5-flash-native-audio-preview-12-2025 supports 30 HD voices
+const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-12-2025';
 
 let ws: WebSocket | null = null;
 let mainWindow: BrowserWindow | null = null;
 let isConnected = false;
 let pendingText: string | null = null;
-let currentMood: string = 'mysterious';
+let currentMood: string = 'wizard';  // Default to wizard voice for Merlin
 let lastActivityTime: number = 0;
 let apiKeyCache: string | null = null;
 
@@ -23,14 +24,22 @@ let apiKeyCache: string | null = null;
 const IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 
 // Voice mapping for different moods
+// Available Gemini voices with characteristics:
+// - Gacrux: Mature (old wizard)
+// - Algenib: Gravelly (wizened)
+// - Sadaltager: Knowledgeable (wise)
+// - Charon: Informative
+// - Sulafat: Warm
 const MOOD_VOICES: Record<string, string> = {
-  mysterious: 'Charon',
-  revelation: 'Charon',
-  warm: 'Kore',
-  contemplative: 'Kore',
-  tension: 'Fenrir',
-  intense: 'Fenrir',
+  mysterious: 'Algenib',
+  revelation: 'Sadaltager',
+  warm: 'Sulafat',
+  contemplative: 'Algenib',
+  tension: 'Algenib',
+  intense: 'Algenib',
   playful: 'Puck',
+  wizard: 'Algenib',       // Gravelly voice - deep, wizened
+  merlin: 'Algenib',       // Merlin specifically
 };
 
 /**
@@ -74,8 +83,9 @@ function connect(apiKey: string): void {
     isConnected = true;
     lastActivityTime = Date.now();
 
-    // Send config message for TTS - system instruction makes it read text verbatim
-    const voice = MOOD_VOICES[currentMood] || 'Charon';
+    // Send config message for TTS
+    const voice = MOOD_VOICES[currentMood] || 'Gacrux';
+    console.log(`[LiveTTS ${ts()}] Configuring with mood="${currentMood}" -> voice="${voice}" on model="${MODEL_NAME}"`);
     const configMessage = {
       setup: {
         model: `models/${MODEL_NAME}`,
@@ -88,12 +98,12 @@ function connect(apiKey: string): void {
           },
         },
         systemInstruction: {
-          parts: [{ text: 'You are a text-to-speech reader. When given text, read it aloud EXACTLY as written. Do not respond conversationally, do not add commentary, do not change the words. Simply speak the exact text you receive, word for word.' }],
+          parts: [{ text: 'You are a text-to-speech system. Read the EXACT text given to you, word for word. Speak at a natural conversational pace with gravitas and wisdom, like a knowledgeable sage.' }],
         },
       },
     };
     socket.send(JSON.stringify(configMessage));
-    console.log(`[LiveTTS ${ts()}] Config sent (voice: ${voice})`);
+    console.log(`[LiveTTS ${ts()}] Setup message sent:`, JSON.stringify(configMessage, null, 2).slice(0, 500));
 
     // If there's pending text, send it now
     if (pendingText) {
@@ -212,10 +222,13 @@ function sendTextInternal(text: string): void {
   const ts = () => new Date().toISOString().slice(11, 23);
   console.log(`[LiveTTS ${ts()}] Sending: "${text.slice(0, 50)}..."`);
 
+  // Wrap text with explicit read instruction to ensure verbatim reading
+  const wrappedText = `READ THIS EXACT TEXT ALOUD, WORD FOR WORD: "${text}"`;
+
   // Send text via realtimeInput for TTS
   const message = {
     realtimeInput: {
-      text: text,
+      text: wrappedText,
     },
   };
   ws.send(JSON.stringify(message));

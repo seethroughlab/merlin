@@ -5,9 +5,9 @@ import { existsSync } from 'fs';
 // OSC removed - all communication now via WebSocket (td-bridge)
 import { createSpoutSender, wireWindowToSender, closeSpout, resizeSpoutSender } from './spout';
 import { initGemini, analyzeMicroExpressions, analyzeBodyLanguage, interpretVoiceCommand, isGeminiAvailable } from './gemini';
-import { initTTS as initGeminiTTS, generateMentalistSpeech, isTTSAvailable } from './tts';
+import { initTTS as initGeminiTTS, generateMentalistSpeech as generateSpeech, isTTSAvailable } from './tts';
 import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './tts-live';
-import { MentalistSession } from './mentalist';
+import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
 import {
   initTDBridge,
   closeTDBridge,
@@ -18,12 +18,11 @@ import {
   pushRevealEffect,
   pushOrientationUpdate,
   pushTrackingFrame,
-  pushMentalistState,
+  pushMerlinState,
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis } from '../shared/types';
-import type { MentalistUIUpdate, RevealTriggerParams, SetMoodParams } from './mentalist';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -42,7 +41,7 @@ for (const envPath of envPaths) {
 }
 
 if (!process.env.GEMINI_API_KEY) {
-  console.log('GEMINI_API_KEY not found. Place .env file next to Parlor.exe with: GEMINI_API_KEY=your_key');
+  console.log('GEMINI_API_KEY not found. Place .env file next to Merlin.exe with: GEMINI_API_KEY=your_key');
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -54,16 +53,16 @@ let maskWindow: BrowserWindow | null = null;
 // Spout configuration
 const spoutConfig = {
   enabled: true,
-  senderName: 'Parlor',
+  senderName: 'Merlin',
   width: 1280,
   height: 720,
   frameRate: 30,
 };
 
-// Mentalist session (singleton)
-let mentalistSession: MentalistSession | null = null;
+// Merlin session (singleton)
+let merlinSession: MerlinSession | null = null;
 
-// Cached analysis for mentalist mode
+// Cached analysis for mentalist/merlin mode
 let lastBodyAnalysis: Partial<BodyLanguageAnalysis> | null = null;
 let lastFaceAnalysis: Partial<MicroExpressionAnalysis> | null = null;
 
@@ -103,38 +102,42 @@ async function requestFreshAnalysis(
 }
 
 /**
- * Send mentalist UI update to all windows
+ * Send Merlin UI update to all windows
  */
-function broadcastMentalistUpdate(update: MentalistUIUpdate): void {
+function broadcastMerlinUpdate(update: MerlinUIUpdate): void {
   const windows = [mainWindow, spoutWindow, maskWindow];
   for (const win of windows) {
     if (win && !win.isDestroyed()) {
-      win.webContents.send('mentalist-update', update);
+      win.webContents.send('merlin-update', update);
     }
   }
 }
 
 /**
- * Create a MentalistSession with callbacks
+ * Create a MerlinSession with callbacks
  */
-function createMentalistSession(): MentalistSession {
-  return new MentalistSession({
-    onReveal: (params: RevealTriggerParams) => {
-      console.log(`[Mentalist] Reveal triggered: ${params.type} - "${params.text}"`);
-      // WebSocket reveal effect
-      if (isTDConnected()) {
-        pushRevealEffect(params.type, params.intensity, 2);
-      }
-    },
-    onMoodChange: (params: SetMoodParams) => {
-      console.log(`[Mentalist] Mood changed: ${params.mood}`);
+function createMerlinSession(): MerlinSession {
+  return createMerlinSessionInstance({
+    onSpellUpdate: (spell: SpellState) => {
+      console.log(`[Merlin] Spell updated: intent=${spell.intent}, element=${spell.element}, confidence=${spell.confidence}`);
       // WebSocket
       if (isTDConnected()) {
-        pushMentalistState({
+        pushMerlinState({
           active: true,
-          mood: params.mood,
-          colorAccent: params.colorAccent,
-          particleBehavior: params.particleBehavior,
+          spell,
+        });
+      }
+    },
+    onPhaseChange: (phase) => {
+      console.log(`[Merlin] Phase changed: ${phase}`);
+      // Broadcast phase change
+      if (merlinSession) {
+        broadcastMerlinUpdate({
+          phase,
+          turnCount: merlinSession.getState().turnCount,
+          spell: merlinSession.getSpell(),
+          isListening: false,
+          isProcessing: false,
         });
       }
     },
@@ -142,11 +145,34 @@ function createMentalistSession(): MentalistSession {
       // Request fresh analysis from renderer (or fall back to cached)
       return requestFreshAnalysis(type);
     },
+    onCaptureFrame: async () => {
+      // Capture current camera frame as base64 for personalized intro
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return null;
+      }
+      try {
+        const frameData = await mainWindow.webContents.executeJavaScript(`
+          (function() {
+            const video = document.getElementById('video');
+            if (!video || video.videoWidth === 0) return null;
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+          })()
+        `);
+        return frameData;
+      } catch (e) {
+        console.error('[Merlin] Frame capture failed:', e);
+        return null;
+      }
+    },
     onSessionComplete: () => {
-      // Session reached finale - notify renderer to end
-      console.log(`[Mentalist ${ts()}] Session complete (auto-end triggered)`);
+      // Session reached outro - notify renderer to end
+      console.log(`[Merlin ${ts()}] Session complete (auto-end triggered)`);
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('mentalist-auto-end');
+        mainWindow.webContents.send('merlin-auto-end');
       }
     },
   });
@@ -163,7 +189,7 @@ function createMainWindow(): void {
     y: bounds.y,
     width: bounds.width,
     height: bounds.height,
-    title: 'Parlor - Preview',
+    title: 'Merlin - Preview',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -220,7 +246,7 @@ function createMainWindow(): void {
  */
 async function createSpoutWindow(): Promise<void> {
   const spoutAvailable = await createSpoutSender({
-    name: 'Parlor',
+    name: 'Merlin',
     width: spoutConfig.width,
     height: spoutConfig.height,
   });
@@ -233,7 +259,7 @@ async function createSpoutWindow(): Promise<void> {
     width: spoutConfig.width,
     height: spoutConfig.height,
     show: false,
-    title: 'Parlor - Spout Video',
+    title: 'Merlin - Spout Video',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -242,7 +268,7 @@ async function createSpoutWindow(): Promise<void> {
     },
   });
 
-  wireWindowToSender(spoutWindow, 'Parlor', spoutConfig.frameRate);
+  wireWindowToSender(spoutWindow, 'Merlin', spoutConfig.frameRate);
 
   if (process.env.VITE_DEV_SERVER_URL) {
     spoutWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?spout=1`);
@@ -264,7 +290,7 @@ async function createSpoutWindow(): Promise<void> {
  */
 async function createMaskWindow(): Promise<void> {
   const maskAvailable = await createSpoutSender({
-    name: 'Parlor Mask',
+    name: 'Merlin Mask',
     width: spoutConfig.width,
     height: spoutConfig.height,
   });
@@ -277,7 +303,7 @@ async function createMaskWindow(): Promise<void> {
     width: spoutConfig.width,
     height: spoutConfig.height,
     show: false,
-    title: 'Parlor - Spout Mask',
+    title: 'Merlin - Spout Mask',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -286,7 +312,7 @@ async function createMaskWindow(): Promise<void> {
     },
   });
 
-  wireWindowToSender(maskWindow, 'Parlor Mask', spoutConfig.frameRate);
+  wireWindowToSender(maskWindow, 'Merlin Mask', spoutConfig.frameRate);
 
   // Build URL with mask param
   const maskUrl = process.env.VITE_DEV_SERVER_URL
@@ -419,18 +445,18 @@ ipcMain.on('set-portrait-mode', async (_event, portrait: boolean) => {
   const height = portrait ? 1280 : 720;
 
   // Resize Spout senders
-  await resizeSpoutSender('Parlor', width, height);
-  await resizeSpoutSender('Parlor Mask', width, height);
+  await resizeSpoutSender('Merlin', width, height);
+  await resizeSpoutSender('Merlin Mask', width, height);
 
   // Resize Spout windows
   if (spoutWindow && !spoutWindow.isDestroyed()) {
     spoutWindow.setSize(width, height);
     // Re-wire the window to the new sender
-    wireWindowToSender(spoutWindow, 'Parlor', 30);
+    wireWindowToSender(spoutWindow, 'Merlin', 30);
   }
   if (maskWindow && !maskWindow.isDestroyed()) {
     maskWindow.setSize(width, height);
-    wireWindowToSender(maskWindow, 'Parlor Mask', 30);
+    wireWindowToSender(maskWindow, 'Merlin Mask', 30);
   }
 
   // Broadcast to all windows
@@ -448,157 +474,8 @@ ipcMain.on('set-portrait-mode', async (_event, portrait: boolean) => {
   }
 });
 
-// ============ MENTALIST IPC HANDLERS ============
-
 // Helper for timestamped logs
 const ts = () => new Date().toISOString().slice(11, 23);
-
-// Start a mentalist session
-ipcMain.handle('mentalist-start', async () => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log(`[Mentalist ${ts()}] Starting session...`);
-  mentalistSession = createMentalistSession();
-
-  try {
-    const response = await mentalistSession.startSession();
-
-    // WebSocket
-    if (isTDConnected()) {
-      pushMentalistState({
-        active: true,
-        phase: response.phase,
-        mood: response.mood,
-      });
-    }
-
-    // Broadcast UI update (no lastMessage - renderer adds it directly)
-    broadcastMentalistUpdate({
-      phase: response.phase,
-      mood: response.mood,
-      turnCount: 0,
-      revealedInsights: [],
-      isListening: false,
-      isProcessing: false,
-    });
-
-    return response;
-  } catch (error) {
-    console.error(`[Mentalist ${ts()}] Failed to start session:`, error);
-    mentalistSession = null;
-    throw error;
-  }
-});
-
-// Process user speech in mentalist session
-ipcMain.handle('mentalist-process-speech', async (_event, transcript: string) => {
-  if (!mentalistSession || !mentalistSession.isActive()) {
-    throw new Error('Mentalist session not active');
-  }
-
-  console.log(`[Mentalist ${ts()}] Processing: "${transcript}"`);
-
-  try {
-    const response = await mentalistSession.processUserSpeech(
-      transcript,
-      lastBodyAnalysis,
-      lastFaceAnalysis
-    );
-
-    const state = mentalistSession.getState();
-
-    // WebSocket
-    if (isTDConnected()) {
-      pushMentalistState({
-        active: true,
-        phase: response.phase,
-        mood: response.mood,
-      });
-    }
-
-    // Broadcast UI update (no lastMessage - renderer adds it directly)
-    broadcastMentalistUpdate({
-      phase: response.phase,
-      mood: response.mood,
-      turnCount: state.turnCount,
-      revealedInsights: mentalistSession.getRevealedInsights(),
-      isListening: false,
-      isProcessing: false,
-    });
-
-    return response;
-  } catch (error) {
-    console.error(`[Mentalist ${ts()}] Failed to process speech:`, error);
-    throw error;
-  }
-});
-
-// End mentalist session
-ipcMain.handle('mentalist-end', async () => {
-  if (!mentalistSession) {
-    return { text: 'Session was not active.', phase: 'idle', mood: 'warm', newInsights: [] };
-  }
-
-  console.log(`[Mentalist ${ts()}] Ending session...`);
-
-  try {
-    const response = await mentalistSession.endSession();
-
-    // WebSocket
-    if (isTDConnected()) {
-      pushMentalistState({
-        active: false,
-        phase: 'idle',
-        mood: 'warm',
-      });
-    }
-
-    // Broadcast final UI update (no lastMessage - renderer adds it directly)
-    broadcastMentalistUpdate({
-      phase: 'idle',
-      mood: 'warm',
-      turnCount: 0,
-      revealedInsights: [],
-      isListening: false,
-      isProcessing: false,
-    });
-
-    mentalistSession = null;
-    return response;
-  } catch (error) {
-    console.error('[Mentalist] Failed to end session:', error);
-    mentalistSession = null;
-    throw error;
-  }
-});
-
-// Get mentalist session state
-ipcMain.handle('mentalist-get-state', () => {
-  if (!mentalistSession) {
-    return null;
-  }
-  return {
-    state: mentalistSession.getState(),
-    history: mentalistSession.getConversationHistory(),
-    revealedInsights: mentalistSession.getRevealedInsights(),
-    isActive: mentalistSession.isActive(),
-  };
-});
-
-// Update cached analysis for mentalist (called from renderer periodically)
-ipcMain.on('mentalist-update-analysis', (_event, data: {
-  body?: Partial<BodyLanguageAnalysis>;
-  face?: Partial<MicroExpressionAnalysis>;
-}) => {
-  if (data.body) {
-    lastBodyAnalysis = data.body;
-  }
-  if (data.face) {
-    lastFaceAnalysis = data.face;
-  }
-});
 
 // Receive analysis result from renderer (response to request-analysis)
 ipcMain.on('analysis-result', (_event, data: { requestId: string; result: unknown }) => {
@@ -607,6 +484,151 @@ ipcMain.on('analysis-result', (_event, data: { requestId: string; result: unknow
     console.log(`[Analysis ${ts()}] Received result for ${data.requestId}`);
     pendingAnalysisRequests.delete(data.requestId);
     resolver(data.result);
+  }
+});
+
+// ============ MERLIN IPC HANDLERS ============
+
+// Start a Merlin session
+ipcMain.handle('merlin-start', async () => {
+  if (!isGeminiAvailable()) {
+    throw new Error('Gemini not available - check GEMINI_API_KEY');
+  }
+
+  console.log(`[Merlin ${ts()}] Starting session...`);
+  merlinSession = createMerlinSession();
+
+  try {
+    const response = await merlinSession.startSession();
+
+    // WebSocket
+    if (isTDConnected()) {
+      pushMerlinState({
+        active: true,
+        phase: response.phase,
+        spell: response.spell,
+      });
+    }
+
+    // Broadcast UI update
+    broadcastMerlinUpdate({
+      phase: response.phase,
+      turnCount: 0,
+      spell: response.spell,
+      isListening: false,
+      isProcessing: false,
+    });
+
+    return response;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Failed to start session:`, error);
+    merlinSession = null;
+    throw error;
+  }
+});
+
+// Process user speech in Merlin session
+ipcMain.handle('merlin-process-speech', async (_event, transcript: string) => {
+  if (!merlinSession || !merlinSession.isActive()) {
+    throw new Error('Merlin session not active');
+  }
+
+  console.log(`[Merlin ${ts()}] Processing: "${transcript}"`);
+
+  try {
+    const response = await merlinSession.processUserSpeech(
+      transcript,
+      lastBodyAnalysis,
+      lastFaceAnalysis
+    );
+
+    const state = merlinSession.getState();
+
+    // WebSocket
+    if (isTDConnected()) {
+      pushMerlinState({
+        active: true,
+        phase: response.phase,
+        spell: response.spell,
+      });
+    }
+
+    // Broadcast UI update
+    broadcastMerlinUpdate({
+      phase: response.phase,
+      turnCount: state.turnCount,
+      spell: response.spell,
+      isListening: false,
+      isProcessing: false,
+    });
+
+    return response;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Failed to process speech:`, error);
+    throw error;
+  }
+});
+
+// End Merlin session
+ipcMain.handle('merlin-end', async () => {
+  if (!merlinSession) {
+    return { text: 'Session was not active.', phase: 'idle', spell: null };
+  }
+
+  console.log(`[Merlin ${ts()}] Ending session...`);
+
+  try {
+    const response = await merlinSession.endSession();
+
+    // WebSocket
+    if (isTDConnected()) {
+      pushMerlinState({
+        active: false,
+        phase: 'idle',
+      });
+    }
+
+    // Broadcast final UI update
+    broadcastMerlinUpdate({
+      phase: 'idle',
+      turnCount: 0,
+      spell: response.spell,
+      isListening: false,
+      isProcessing: false,
+    });
+
+    merlinSession = null;
+    return response;
+  } catch (error) {
+    console.error('[Merlin] Failed to end session:', error);
+    merlinSession = null;
+    throw error;
+  }
+});
+
+// Get Merlin session state
+ipcMain.handle('merlin-get-state', () => {
+  if (!merlinSession) {
+    return null;
+  }
+  return {
+    state: merlinSession.getState(),
+    spell: merlinSession.getSpell(),
+    history: merlinSession.getConversationHistory(),
+    isActive: merlinSession.isActive(),
+  };
+});
+
+// Update cached analysis for Merlin (same handler as mentalist)
+ipcMain.on('merlin-update-analysis', (_event, data: {
+  body?: Partial<BodyLanguageAnalysis>;
+  face?: Partial<MicroExpressionAnalysis>;
+}) => {
+  if (data.body) {
+    lastBodyAnalysis = data.body;
+  }
+  if (data.face) {
+    lastFaceAnalysis = data.face;
   }
 });
 
@@ -623,7 +645,7 @@ ipcMain.handle('generate-speech', async (_event, text: string, mood?: string) =>
   const startTime = Date.now();
 
   try {
-    const result = await generateMentalistSpeech(
+    const result = await generateSpeech(
       text,
       (mood as 'mysterious' | 'warm' | 'intense' | 'playful') || 'mysterious'
     );
@@ -678,7 +700,7 @@ ipcMain.on('td-push-reveal', (_event, { effect_type, intensity, duration, landma
 });
 
 app.whenReady().then(async () => {
-  console.log('=== Parlor Starting ===');
+  console.log('=== Merlin Starting ===');
 
   // Initialize Gemini (for LLM analysis)
   const geminiReady = initGemini();

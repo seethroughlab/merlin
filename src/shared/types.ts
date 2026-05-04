@@ -159,79 +159,123 @@ export type VoiceCommandAction =
   | { type: 'set_face_interval'; seconds: number }
   | { type: 'set_body_interval'; seconds: number };
 
-// ============ MENTALIST TYPES ============
+// ============ MERLIN TYPES ============
 
 /**
- * Phases of the mentalist reading
+ * Phases of the Merlin Mirror experience
  */
-export type MentalistPhase = 'idle' | 'intro' | 'reading' | 'reveal' | 'finale';
+export type MerlinPhase =
+  | 'idle'
+  | 'wake'
+  | 'intro'
+  | 'discovery'
+  | 'formation'
+  | 'ready_to_cast'
+  | 'casting'
+  | 'outro';
 
 /**
- * Visual mood settings
+ * What the user seeks from the spell
  */
-export type MentalistMood = 'mysterious' | 'tension' | 'revelation' | 'warm' | 'contemplative';
+export type SpellIntent =
+  | 'confidence'
+  | 'calm'
+  | 'protection'
+  | 'clarity'
+  | 'creativity'
+  | 'transformation'
+  | 'release'
+  | 'focus'
+  | 'joy'
+  | 'wonder';
 
 /**
- * Types of insights the mentalist can reveal
+ * Elemental nature of the spell
  */
-export type InsightType = 'emotion' | 'trait' | 'prediction' | 'observation' | 'secret';
+export type SpellElement =
+  | 'fire'
+  | 'water'
+  | 'air'
+  | 'earth'
+  | 'light'
+  | 'shadow'
+  | 'crystal'
+  | 'storm'
+  | 'flora'
+  | 'cosmic';
 
 /**
- * A single insight accumulated during the reading
+ * Body part that casts the spell
  */
-export interface MentalistInsight {
-  id: string;
-  type: InsightType;
-  content: string;
+export type CastingOrigin = 'hands' | 'heart' | 'eyes' | 'whole_body' | 'wand';
+
+/**
+ * Emotional tone/character of the spell
+ */
+export type SpellTone = 'gentle' | 'playful' | 'mysterious' | 'heroic' | 'calm' | 'wild';
+
+/**
+ * Core spell state that accumulates during the Merlin session
+ */
+export interface SpellState {
+  intent: SpellIntent | null;
+  element: SpellElement | null;
+  tone: SpellTone | null;
+  /** Energy level 0-1 */
+  energy: number;
+  /** Complexity level 0-1 */
+  complexity: number;
+  castingOrigin: CastingOrigin | null;
+  /** Visual archetype name e.g. 'rising_embers' */
+  visualArchetype: string | null;
+  /** Hex color for the spell palette */
+  palette: string | null;
+  /** The magic word to trigger casting */
+  magicWord: string | null;
+  /** Confidence in the spell formation 0-1 */
   confidence: number;
-  timestamp: number;
-  revealed: boolean;
 }
 
 /**
- * Response from the mentalist
+ * Response from the Merlin session
  */
-export interface MentalistResponse {
+export interface MerlinResponse {
   text: string;
-  phase: MentalistPhase;
-  mood: MentalistMood;
-  newInsights: MentalistInsight[];
-  revealedInsight?: MentalistInsight;
+  phase: MerlinPhase;
+  spell: SpellState;
 }
 
 /**
- * Conversation message
+ * Conversation message in Merlin session
  */
-export interface MentalistConversationMessage {
+export interface MerlinConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
 }
 
 /**
- * Data sent to renderer for UI updates
+ * Data sent to renderer for Merlin UI updates
  */
-export interface MentalistUIUpdate {
-  phase: MentalistPhase;
-  mood: MentalistMood;
+export interface MerlinUIUpdate {
+  phase: MerlinPhase;
   turnCount: number;
-  lastMessage?: MentalistConversationMessage;
-  revealedInsights: MentalistInsight[];
+  spell: SpellState;
+  lastMessage?: MerlinConversationMessage;
   isListening: boolean;
   isProcessing: boolean;
 }
 
 /**
- * Mentalist session state (for IPC)
+ * Merlin session state (for IPC)
  */
-export interface MentalistSessionInfo {
+export interface MerlinSessionInfo {
   state: {
-    phase: MentalistPhase;
+    phase: MerlinPhase;
     turnCount: number;
-    currentMood: MentalistMood;
+    spell: SpellState;
   };
-  history: MentalistConversationMessage[];
-  revealedInsights: MentalistInsight[];
+  history: MerlinConversationMessage[];
   isActive: boolean;
 }
 

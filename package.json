@@ -1,7 +1,7 @@
 {
-  "name": "parlor",
+  "name": "merlin",
   "version": "0.1.0",
-  "description": "Reaction capture with GPU-accelerated MediaPipe and Spout output",
+  "description": "Merlin Mirror - AI-powered spell casting experience",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "vite",
@@ -38,8 +38,8 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "build": {
-    "appId": "com.fivestone.parlor",
-    "productName": "Parlor",
+    "appId": "com.fivestone.merlin",
+    "productName": "Merlin",
     "directories": {
       "output": "release",
       "buildResources": "build"

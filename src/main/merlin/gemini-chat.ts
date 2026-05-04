@@ -1,5 +1,5 @@
 /**
- * Gemini Multi-Turn Chat Wrapper
+ * Gemini Multi-Turn Chat Wrapper for Merlin
  *
  * Manages a stateful conversation with Gemini including tool calling.
  */
@@ -12,8 +12,8 @@ import {
   GenerateContentResult,
   Part,
 } from '@google/generative-ai';
-import { MENTALIST_SYSTEM_PROMPT, MENTALIST_TOOLS } from './prompts';
-import type { MentalistToolCall } from './types';
+import { MERLIN_SYSTEM_PROMPT, MERLIN_TOOLS, INTRO_WITH_IMAGE_PROMPT, MERLIN_CLOSING_PROMPT } from './prompts';
+import type { MerlinToolCall } from './types';
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -36,28 +36,28 @@ function ensureGenAI(): GoogleGenerativeAI {
  */
 export interface ChatTurnResult {
   text: string;
-  toolCalls: MentalistToolCall[];
+  toolCalls: MerlinToolCall[];
   finishReason: string;
 }
 
 /**
- * MentalistChat - manages multi-turn conversation with Gemini
+ * MerlinChat - manages multi-turn conversation with Gemini
  */
-export class MentalistChat {
+export class MerlinChat {
   private chat: ChatSession | null = null;
   private history: Content[] = [];
 
   /**
-   * Start a new chat session
-   * Returns full ChatTurnResult so caller can handle tool calls
+   * Start a new chat session with an image of the person
+   * The image is used to personalize the intro observation
    */
-  async startChat(): Promise<ChatTurnResult> {
+  async startChatWithImage(imageBase64: string): Promise<ChatTurnResult> {
     const ai = ensureGenAI();
 
     const model = ai.getGenerativeModel({
       model: 'gemini-2.5-flash',
-      systemInstruction: MENTALIST_SYSTEM_PROMPT,
-      tools: [{ functionDeclarations: MENTALIST_TOOLS }],
+      systemInstruction: MERLIN_SYSTEM_PROMPT,
+      tools: [{ functionDeclarations: MERLIN_TOOLS }],
       toolConfig: {
         functionCallingConfig: {
           mode: FunctionCallingMode.AUTO,
@@ -70,18 +70,59 @@ export class MentalistChat {
       history: this.history,
     });
 
-    // Send initial message to get intro - must end with an engaging question
-    const initPrompt = `Begin the reading. The participant has just sat down and is ready.
+    // Send image + intro prompt together
+    const messageParts: Part[] = [
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: imageBase64,
+        },
+      },
+      { text: INTRO_WITH_IMAGE_PROMPT },
+    ];
 
-IMPORTANT: Your response MUST end with an engaging question or prompt for them to respond to. Don't just observe - draw them into conversation.`;
+    const result = await this.chat.sendMessage(messageParts);
+    const response = this.parseResult(result);
 
-    const result = await this.chat.sendMessage(initPrompt);
+    // Update history (store text representation for history)
+    this.history.push(
+      { role: 'user', parts: [{ text: '[Image of person] ' + INTRO_WITH_IMAGE_PROMPT }] },
+      { role: 'model', parts: [{ text: response.text || '[processing tools]' }] }
+    );
+
+    return response;
+  }
+
+  /**
+   * Start a new chat session without an image (fallback)
+   */
+  async startChat(): Promise<ChatTurnResult> {
+    const ai = ensureGenAI();
+
+    const model = ai.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      systemInstruction: MERLIN_SYSTEM_PROMPT,
+      tools: [{ functionDeclarations: MERLIN_TOOLS }],
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingMode.AUTO,
+        },
+      },
+    });
+
+    this.history = [];
+    this.chat = model.startChat({
+      history: this.history,
+    });
+
+    // Send opening prompt without image
+    const result = await this.chat.sendMessage(INTRO_WITH_IMAGE_PROMPT);
 
     const response = this.parseResult(result);
 
-    // Update history with this exchange (text may be filled in after tool processing)
+    // Update history with this exchange
     this.history.push(
-      { role: 'user', parts: [{ text: initPrompt }] },
+      { role: 'user', parts: [{ text: INTRO_WITH_IMAGE_PROMPT }] },
       { role: 'model', parts: [{ text: response.text || '[processing tools]' }] }
     );
 
@@ -128,16 +169,14 @@ IMPORTANT: Your response MUST end with an engaging question or prompt for them t
   }
 
   /**
-   * End the session with a finale message
+   * End the session with a closing message
    */
   async endSession(): Promise<string> {
     if (!this.chat) {
       return 'Session was not active.';
     }
 
-    const result = await this.chat.sendMessage(
-      '[The participant is ready to conclude. Provide a warm, memorable finale that summarizes key insights.]'
-    );
+    const result = await this.chat.sendMessage(MERLIN_CLOSING_PROMPT);
 
     const response = this.parseResult(result);
     this.chat = null;
@@ -183,12 +222,12 @@ IMPORTANT: Your response MUST end with an engaging question or prompt for them t
     const text = textParts.join('');
 
     // Extract function calls
-    const toolCalls: MentalistToolCall[] = parts
+    const toolCalls: MerlinToolCall[] = parts
       .filter((p) => 'functionCall' in p)
       .map((p) => {
         const fc = (p as { functionCall: { name: string; args: Record<string, unknown> } }).functionCall;
         return {
-          name: fc.name as MentalistToolCall['name'],
+          name: fc.name as MerlinToolCall['name'],
           args: fc.args,
         };
       });

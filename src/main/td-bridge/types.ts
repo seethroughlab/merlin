@@ -31,15 +31,27 @@ export type TDOutboundMessage =
   | { type: 'zone_update'; zone: ZoneName; glsl_code: string }
   | { type: 'orientation_update'; portrait: boolean; width: number; height: number }
   | { type: 'tracking_frame'; timestamp: number; fps: number; frame: FrameInfo; pose: PoseData; face: FaceData }
-  | { type: 'mentalist_state'; active: boolean; phase?: string; mood?: string; colorAccent?: string; particleBehavior?: string }
+  | { type: 'merlin_state'; active: boolean; phase?: string; spell?: MerlinSpellState }
   | { type: 'analysis_update'; valence: number; arousal: number; tension: number; openness: number; engagement: number; primary_emotion: string }
   | { type: 'ping' };
+
+/**
+ * Spell state for Merlin mode (subset for TD communication)
+ */
+export interface MerlinSpellState {
+  intent?: string | null;
+  element?: string | null;
+  energy?: number;
+  castingOrigin?: string | null;
+  palette?: string | null;
+  confidence?: number;
+}
 
 // ===== Analysis Data (for visuals) =====
 
 /**
  * Psychological analysis values sent to TD to drive visuals.
- * Sent after each mentalist turn when AI provides analysis.
+ * Sent after each turn when AI provides analysis.
  */
 export interface AnalysisUpdate {
   /** Emotional valence: -1 (negative) to 1 (positive) */
