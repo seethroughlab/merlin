@@ -6,6 +6,7 @@
 
 import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
 import type { CastingOrigin } from '../../shared/types';
+import type { PlaybackMode, DriveSource } from '../merlin/asset-manager';
 
 // ===== Connection State =====
 
@@ -41,7 +42,11 @@ export type TDOutboundMessage =
   | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope; program: ParticleSpellProgram }
   | { type: 'ping' }
   | { type: 'request_screenshot' }
-  | { type: 'request_metrics' };
+  | { type: 'request_metrics' }
+  // Sprite system messages
+  | { type: 'sprite_texture'; assetId: string; texturePath: string }
+  | { type: 'flipbook_config'; config: FlipbookConfigMessage }
+  | { type: 'render_mode'; mode: RenderMode };
 
 /**
  * Spell state for Merlin mode (subset for TD communication)
@@ -122,6 +127,25 @@ export interface SceneParams {
   background_mood?: 'mysterious' | 'warm' | 'cold' | 'electric' | 'transcendent';
 }
 
+// ===== Sprite System Types =====
+
+/**
+ * Render mode for particle visualization
+ */
+export type RenderMode = 'mesh' | 'billboard';
+
+/**
+ * Flipbook configuration message sent to TD
+ */
+export interface FlipbookConfigMessage {
+  atlasCols: number;
+  atlasRows: number;
+  frameCount: number;
+  playbackMode: PlaybackMode;
+  frameDuration: number;
+  driveSource: DriveSource;
+}
+
 // ===== Inbound Messages (TD → Parlor) =====
 
 export type TDInboundMessage =
@@ -130,6 +154,7 @@ export type TDInboundMessage =
   | { type: 'metrics'; fps: number; particle_count: number; coverage: number }
   | { type: 'visibility'; visible_particles: number; culled_particles: number; avg_brightness: number }
   | { type: 'screenshot_result'; base64: string; width: number; height: number }
+  | { type: 'sprite_loaded'; assetId: string; success: boolean; error?: string }
   | { type: 'pong' };
 
 // ===== Callbacks =====
@@ -140,5 +165,6 @@ export interface TDBridgeCallbacks {
   onReady?: (capabilities: TDCapabilities) => void;
   onMetrics?: (metrics: { fps: number; particle_count: number; coverage: number }) => void;
   onCompileResult?: (result: { zone: string; success: boolean; error?: string }) => void;
+  onSpriteLoaded?: (result: { assetId: string; success: boolean; error?: string }) => void;
   onError?: (error: string) => void;
 }

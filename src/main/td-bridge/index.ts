@@ -42,6 +42,10 @@ export {
   pushParticleSpellProgram,
   pushSpellCharge,
   pushSpellCast,
+  // Sprite system push methods
+  pushSpriteTexture,
+  pushFlipbookConfig,
+  pushRenderMode,
 } from './push';
 
 // Re-export push types

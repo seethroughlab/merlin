@@ -5,7 +5,7 @@
  */
 
 import { send, isConnected } from './connection';
-import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate } from './types';
+import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate, FlipbookConfigMessage, RenderMode } from './types';
 import type { TrackingFrame, CastingOrigin } from '../../shared/types';
 import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
@@ -326,5 +326,46 @@ export function pushSpellCast(
   return guardedSend(
     { type: 'spell_cast', origin, intensity, durationMs, envelope, program },
     'push spell cast'
+  );
+}
+
+// ===== Sprite System =====
+
+/**
+ * Push a sprite texture to TouchDesigner.
+ * TD will load the texture from the specified path and apply it to particles.
+ */
+export function pushSpriteTexture(assetId: string, texturePath: string): boolean {
+  console.log(`[TDBridge ${ts()}] Pushing sprite texture: ${assetId}`);
+  return guardedSend(
+    { type: 'sprite_texture', assetId, texturePath },
+    'push sprite texture'
+  );
+}
+
+/**
+ * Push flipbook configuration to TouchDesigner.
+ * This configures the atlas grid, playback mode, and frame timing.
+ */
+export function pushFlipbookConfig(config: FlipbookConfigMessage): boolean {
+  console.log(
+    `[TDBridge ${ts()}] Pushing flipbook config: ${config.atlasCols}x${config.atlasRows} ` +
+    `(${config.frameCount} frames, ${config.playbackMode}, drive=${config.driveSource})`
+  );
+  return guardedSend(
+    { type: 'flipbook_config', config },
+    'push flipbook config'
+  );
+}
+
+/**
+ * Push render mode change to TouchDesigner.
+ * Switches between mesh-based and billboard-based particle rendering.
+ */
+export function pushRenderMode(mode: RenderMode): boolean {
+  console.log(`[TDBridge ${ts()}] Pushing render mode: ${mode}`);
+  return guardedSend(
+    { type: 'render_mode', mode },
+    'push render mode'
   );
 }
