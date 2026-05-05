@@ -14,9 +14,12 @@ const ts = () => new Date().toISOString().slice(11, 23);
 
 // ============ TYPES ============
 
+import type { PlaybackMode, DriveSource, FlipbookConfig } from '../../shared/types';
+// Re-export so existing consumers (td-bridge, sprite-generator, ...) don't
+// have to change their import path.
+export type { PlaybackMode, DriveSource, FlipbookConfig };
+
 export type SpriteAssetType = 'single' | 'flipbook';
-export type PlaybackMode = 'loop' | 'once' | 'pingpong' | 'random';
-export type DriveSource = 'age' | 'life' | 'velocity' | 'id' | 'time';
 
 export interface SpriteAsset {
   assetId: string;
@@ -35,15 +38,6 @@ export interface SpriteAsset {
     element?: string;
     intent?: string;
   };
-}
-
-export interface FlipbookConfig {
-  atlasCols: number;
-  atlasRows: number;
-  frameCount: number;
-  playbackMode: PlaybackMode;
-  frameDuration: number;
-  driveSource: DriveSource;
 }
 
 // Flipbook layouts: frameCount → (cols, rows)

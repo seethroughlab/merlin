@@ -331,11 +331,21 @@ export interface TestShaderResult {
   error?: string;
 }
 
-// ============ TEST SPRITE TYPES ============
+// ============ SPRITE / FLIPBOOK TYPES ============
 
+/**
+ * Canonical playback / drive enums. Used by sprite generation, the
+ * flipbook config message to TD, and the Render Mode tab.
+ */
+export type PlaybackMode = 'loop' | 'once' | 'pingpong' | 'random';
+export type DriveSource = 'age' | 'life' | 'velocity' | 'id' | 'time';
+
+/** Atlas frame counts the sprite generator supports. */
 export type SpriteFrameCount = 4 | 8 | 9 | 12 | 16 | 25;
-export type SpritePlaybackMode = 'loop' | 'once' | 'pingpong' | 'random';
-export type SpriteDriveSource = 'age' | 'life' | 'velocity' | 'id' | 'time';
+
+/** Backward-compat aliases — prefer the unprefixed names above. */
+export type SpritePlaybackMode = PlaybackMode;
+export type SpriteDriveSource = DriveSource;
 
 /**
  * Direct-spec input for sprite test mode. Mirrors the args of the
@@ -352,16 +362,22 @@ export interface SpriteTestSpec {
 }
 
 /**
- * Flipbook config returned to the renderer (matches FlipbookConfigMessage / FlipbookConfig).
+ * Canonical flipbook configuration. Same shape used by the
+ * `flipbook_config` WebSocket message and the local TD-state mirror.
  */
-export interface SpriteFlipbookConfig {
+export interface FlipbookConfig {
   atlasCols: number;
   atlasRows: number;
   frameCount: number;
-  playbackMode: SpritePlaybackMode;
+  playbackMode: PlaybackMode;
   frameDuration: number;
-  driveSource: SpriteDriveSource;
+  driveSource: DriveSource;
 }
+
+/** Backward-compat alias — prefer FlipbookConfig. */
+export type SpriteFlipbookConfig = FlipbookConfig;
+/** Backward-compat alias — prefer FlipbookConfig. */
+export type FlipbookConfigMessage = FlipbookConfig;
 
 /**
  * Result of a sprite test generation.

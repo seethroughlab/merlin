@@ -5,8 +5,12 @@
  */
 
 import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
-import type { CastingOrigin } from '../../shared/types';
-import type { PlaybackMode, DriveSource } from '../merlin/asset-manager';
+import type { CastingOrigin, PlaybackMode, DriveSource, RenderMode, FlipbookConfig } from '../../shared/types';
+
+// Re-export so existing td-bridge consumers don't have to change their import path.
+export type { PlaybackMode, DriveSource, RenderMode, FlipbookConfig };
+/** @deprecated use FlipbookConfig from shared/types */
+export type FlipbookConfigMessage = FlipbookConfig;
 
 // ===== Connection State =====
 
@@ -127,24 +131,8 @@ export interface SceneParams {
   background_mood?: 'mysterious' | 'warm' | 'cold' | 'electric' | 'transcendent';
 }
 
-// ===== Sprite System Types =====
-
-/**
- * Render mode for particle visualization
- */
-export type RenderMode = 'mesh' | 'billboard';
-
-/**
- * Flipbook configuration message sent to TD
- */
-export interface FlipbookConfigMessage {
-  atlasCols: number;
-  atlasRows: number;
-  frameCount: number;
-  playbackMode: PlaybackMode;
-  frameDuration: number;
-  driveSource: DriveSource;
-}
+// (Sprite system types — RenderMode, PlaybackMode, DriveSource,
+// FlipbookConfig — are re-exported from shared/types at the top.)
 
 // ===== Inbound Messages (TD → Merlin) =====
 
