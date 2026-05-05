@@ -1103,6 +1103,44 @@
       .sprite-state-readout .readout-value {
         color: #cdf;
       }
+
+      /* ============ SHADER ZONE PICKER ============ */
+
+      .zones-row {
+        align-items: flex-start !important;
+      }
+
+      .zones-row label:first-child {
+        padding-top: 4px;
+      }
+
+      .zone-checkboxes {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px 12px;
+      }
+
+      .zone-checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 12px;
+        color: #aaa;
+        cursor: pointer;
+      }
+
+      .zone-checkbox-label input[type="checkbox"] {
+        accent-color: #6af;
+        cursor: pointer;
+      }
+
+      .zone-checkbox-label:hover {
+        color: #ccc;
+      }
+
+      /* Preset row uses the existing config-row layout, no overrides needed */
     </style>
   </head>
   <body>

@@ -71,7 +71,9 @@ import type {
   SpriteFlipbookConfig,
   RenderModeTestResult,
   MirroredTDState,
+  ShaderTestPreset,
 } from '../shared/types';
+import { SHADER_TEST_PRESETS } from '../shared/test-shader-presets';
 
 // DOM Elements
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -1273,6 +1275,27 @@ function createTestShaderPanel(): HTMLElement {
   const elements = ['fire', 'water', 'air', 'earth', 'light', 'shadow', 'crystal', 'storm', 'flora', 'cosmic'];
   const elementOptions = elements.map(e => `<option value="${e}">${e}</option>`).join('');
 
+  // Shader preset dropdown options
+  const presetOptions = [
+    `<option value="">Custom (no preset)</option>`,
+    ...SHADER_TEST_PRESETS.map(p => `<option value="${p.id}">${p.label}</option>`),
+  ].join('');
+
+  // Marker-bearing zones (excludes billboard_vertex per Phase 4)
+  const shaderZones = [
+    'force_field',
+    'color_over_life',
+    'size_over_life',
+    'spawn_behavior',
+    'velocity_modifier',
+    'post_fx',
+    'material_pixel',
+    'billboard_pixel',
+  ];
+  const zoneCheckboxes = shaderZones
+    .map(z => `<label class="zone-checkbox-label"><input type="checkbox" data-zone="${z}" checked> ${z}</label>`)
+    .join('');
+
   // Sprite dropdowns
   const frameCountOptions = [4, 8, 9, 12, 16, 25]
     .map(n => `<option value="${n}"${n === 16 ? ' selected' : ''}>${n}</option>`)
@@ -1297,6 +1320,10 @@ function createTestShaderPanel(): HTMLElement {
 
     <div class="test-shader-tab-content" data-tab="shaders">
       <div class="test-shader-config">
+        <div class="config-row preset-row">
+          <label>Preset:</label>
+          <select id="test-preset">${presetOptions}</select>
+        </div>
         <div class="config-row">
           <label>Intent:</label>
           <select id="test-intent">${intentOptions}</select>
@@ -1309,6 +1336,10 @@ function createTestShaderPanel(): HTMLElement {
           <label>Energy:</label>
           <input type="range" id="test-energy" min="0" max="1" step="0.1" value="0.7">
           <span id="test-energy-value">0.7</span>
+        </div>
+        <div class="config-row zones-row">
+          <label>Zones:</label>
+          <div class="zone-checkboxes">${zoneCheckboxes}</div>
         </div>
         <button id="generate-shaders-btn" class="generate-btn">Generate Shaders</button>
       </div>
@@ -1406,11 +1437,21 @@ function createTestShaderPanel(): HTMLElement {
     </div>
   `;
 
-  // === Shader tab event listeners (unchanged behavior) ===
+  // === Shader tab event listeners ===
   const energySlider = panel.querySelector('#test-energy') as HTMLInputElement;
   const energyValue = panel.querySelector('#test-energy-value') as HTMLSpanElement;
   energySlider.addEventListener('input', () => {
     energyValue.textContent = energySlider.value;
+  });
+
+  const presetSelect = panel.querySelector('#test-preset') as HTMLSelectElement;
+  presetSelect.addEventListener('change', () => {
+    const preset = SHADER_TEST_PRESETS.find(p => p.id === presetSelect.value);
+    if (!preset) return;
+    (panel.querySelector('#test-intent') as HTMLSelectElement).value = preset.intent;
+    (panel.querySelector('#test-element') as HTMLSelectElement).value = preset.element;
+    energySlider.value = String(preset.energy);
+    energyValue.textContent = String(preset.energy);
   });
 
   const generateBtn = panel.querySelector('#generate-shaders-btn') as HTMLButtonElement;
@@ -1481,16 +1522,31 @@ async function runTestShaderGeneration(): Promise<void> {
   const resultsDiv = document.getElementById('test-shader-results') as HTMLDivElement;
   const generateBtn = document.getElementById('generate-shaders-btn') as HTMLButtonElement;
 
+  // Gather selected zones from the checkbox grid
+  const zoneCheckboxes = document.querySelectorAll<HTMLInputElement>(
+    '.zone-checkboxes input[type="checkbox"]'
+  );
+  const zones = Array.from(zoneCheckboxes)
+    .filter(c => c.checked)
+    .map(c => c.dataset.zone || '');
+
+  if (zones.length === 0) {
+    statusDiv.textContent = 'Pick at least one zone';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+
   const config = {
     intent: intentSelect.value,
     element: elementSelect.value,
     energy: parseFloat(energySlider.value),
+    zones,
   };
 
   // Update UI to loading state
   generateBtn.disabled = true;
   generateBtn.textContent = 'Generating...';
-  statusDiv.textContent = `Generating ${config.element}/${config.intent} shaders at ${config.energy} energy...`;
+  statusDiv.textContent = `Generating ${zones.length} zone(s): ${config.element}/${config.intent} at ${config.energy} energy...`;
   statusDiv.className = 'test-shader-status loading';
   resultsDiv.innerHTML = '';
 
