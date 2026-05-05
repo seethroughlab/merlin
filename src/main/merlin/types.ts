@@ -74,7 +74,8 @@ export interface MerlinToolCall {
     | 'set_spell_profile'
     | 'prepare_casting'
     | 'set_zone_shader'
-    | 'request_visual_feedback';
+    | 'request_visual_feedback'
+    | 'generate_sprite';
   args: Record<string, unknown>;
 }
 
