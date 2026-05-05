@@ -65,6 +65,8 @@ void main()
     vec4 viewPos = uTDMats[camIdx].cam * worldOrigin;
     viewPos.xy += localPos.xy * finalScale;
 
+    // {zone_code}
+
     gl_Position = uTDMats[camIdx].proj * viewPos;
 #ifndef TD_PICKING_ACTIVE
 #else

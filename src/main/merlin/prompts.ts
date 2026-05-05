@@ -587,6 +587,81 @@ Examples:
 };
 
 /**
+ * Tool: Generate a particle spell program (test mode + future live use)
+ *
+ * Used by the Shift+T Spell Program tab. All fields optional — Gemini
+ * fills what it sees fit; the test-mode caller backfills the rest from
+ * createBuildupProgram / createReleaseProgram defaults.
+ */
+export const GENERATE_SPELL_PROGRAM_TOOL: FunctionDeclaration = {
+  name: 'set_spell_program',
+  description: `Given a free-text spell description, fill out the visual parameters of a particle spell program — archetype, energy, palette, per-zone overrides, and (for release mode) cast envelope timing.
+
+Available archetypes:
+- rising_embers: warm upward flames, sharp accents, dynamic
+- breathing_aura_mist: soft pulsing aura, calm, ambient
+- orbiting_stardust: cosmic swirl, mystical, rotational
+
+Energy ranges:
+- buildup mode: 0.0–0.55 (clamped). Slow accumulation.
+- release mode: 0.0–1.0. Peaks at the cast moment.
+
+Palette: three hex colors (#RRGGBB). Primary is the dominant tone, secondary supports, accent is the highlight.
+
+Zone overrides (all optional, all numeric ranges as documented):
+- spawnRadius (0.1–0.5), spawnRate (0.5–3.0), forceStrength (0–1)
+- forceDirection: 'inward' | 'outward' | 'tangential' | 'upward'
+- orbitSpeed (0–2), turbulence (0–1), velocityScale (0.5–3.0), damping (0–1)
+- baseSize (0.01–0.15), sizeVariation (0–1)
+- saturation (0–1), brightness (0–1), alphaFade (0–1)
+
+Cast envelope (release only):
+- ignitionMs: rise at casting origin, default 400
+- projectionMs: peak burst projected outward, default 1200
+- afterglowMs: decay back to calm, default 2900
+- peakIntensity: 0–1`,
+  parameters: {
+    type: 'object' as SchemaType,
+    properties: {
+      archetype: {
+        type: 'string' as SchemaType,
+        enum: ['rising_embers', 'breathing_aura_mist', 'orbiting_stardust'],
+        description: 'Which visual archetype best matches the spell description.',
+      },
+      energy: {
+        type: 'number' as SchemaType,
+        description: '0–1 overall energy. Clamped to 0.55 in buildup, peaks at 1.0 in release.',
+      },
+      palette: {
+        type: 'object' as SchemaType,
+        description: 'Three hex #RRGGBB colors.',
+        properties: {
+          primary: { type: 'string' as SchemaType, description: 'Hex #RRGGBB' },
+          secondary: { type: 'string' as SchemaType, description: 'Hex #RRGGBB' },
+          accent: { type: 'string' as SchemaType, description: 'Hex #RRGGBB' },
+        },
+      },
+      zoneOverrides: {
+        type: 'object' as SchemaType,
+        description:
+          'Optional per-zone overrides. Top-level keys: force_field, color_over_life, size_over_life, spawn_behavior, velocity_modifier. Each value is a partial of the documented zone params.',
+      },
+      castEnvelope: {
+        type: 'object' as SchemaType,
+        description: 'Only honored in release mode.',
+        properties: {
+          ignitionMs: { type: 'number' as SchemaType },
+          projectionMs: { type: 'number' as SchemaType },
+          afterglowMs: { type: 'number' as SchemaType },
+          peakIntensity: { type: 'number' as SchemaType },
+        },
+      },
+    },
+    required: [],
+  },
+};
+
+/**
  * Get tools available for a given phase
  */
 export function getToolsForPhase(phase: MerlinPhase): FunctionDeclaration[] {

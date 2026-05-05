@@ -16,6 +16,8 @@ import type {
   SpriteFlipbookConfig,
   RenderModeTestResult,
   MirroredTDState,
+  SpellProgramTestInput,
+  SpellProgramTestResult,
 } from '@shared/types';
 
 // Expose protected methods to the renderer process
@@ -158,6 +160,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-test-get-mirrored-state');
   },
 
+  // Test spell program generation (Shift+T Spell Program tab)
+  merlinTestSpellProgram: (input: SpellProgramTestInput): Promise<SpellProgramTestResult> => {
+    return ipcRenderer.invoke('merlin-test-spell-program', input);
+  },
+
   // ============ TTS ============
 
   // Generate speech using Gemini TTS (batch mode - waits for full audio)
@@ -267,6 +274,7 @@ declare global {
       merlinTestRenderMode: (mode: RenderMode) => Promise<RenderModeTestResult>;
       merlinTestFlipbookConfig: (config: SpriteFlipbookConfig) => Promise<RenderModeTestResult>;
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
+      merlinTestSpellProgram: (input: SpellProgramTestInput) => Promise<SpellProgramTestResult>;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;
       streamSpeech: (text: string, mood?: string) => void;

@@ -11,6 +11,7 @@ import { MerlinSession, createMerlinSession as createMerlinSessionInstance } fro
 import { testShaderGeneration } from './merlin/test-shader';
 import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
 import { setRenderMode, applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-render-mode';
+import { generateSpellProgramWithGemini } from './merlin/test-spell-program';
 import {
   initTDBridge,
   closeTDBridge,
@@ -25,7 +26,7 @@ import {
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, RenderMode, SpriteFlipbookConfig } from '../shared/types';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, RenderMode, SpriteFlipbookConfig, SpellProgramTestInput } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -703,6 +704,25 @@ ipcMain.handle('merlin-test-flipbook-config', async (_event, config: SpriteFlipb
 // Get the current mirrored TD state (last-pushed snapshot)
 ipcMain.handle('merlin-test-get-mirrored-state', async () => {
   return getCurrentMirroredState();
+});
+
+// Test spell program generation - Gemini interpretation (Shift+T Spell Program tab)
+ipcMain.handle('merlin-test-spell-program', async (_event, input: SpellProgramTestInput) => {
+  if (!isGeminiAvailable()) {
+    throw new Error('Gemini not available - check GEMINI_API_KEY');
+  }
+
+  console.log(`[Merlin ${ts()}] Test spell program: mode=${input.mode} prompt="${input.prompt}"`);
+  const startTime = Date.now();
+
+  try {
+    const result = await generateSpellProgramWithGemini(input);
+    console.log(`[Merlin ${ts()}] Test spell program complete in ${Date.now() - startTime}ms, success=${result.success} pushed=${result.pushed}`);
+    return result;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Test spell program failed:`, error);
+    throw error;
+  }
 });
 
 // ============ TTS IPC HANDLERS ============

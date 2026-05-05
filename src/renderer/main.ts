@@ -72,6 +72,9 @@ import type {
   RenderModeTestResult,
   MirroredTDState,
   ShaderTestPreset,
+  SpellProgramTestInput,
+  SpellProgramTestResult,
+  SpellProgramMode,
 } from '../shared/types';
 import { SHADER_TEST_PRESETS } from '../shared/test-shader-presets';
 
@@ -1281,7 +1284,8 @@ function createTestShaderPanel(): HTMLElement {
     ...SHADER_TEST_PRESETS.map(p => `<option value="${p.id}">${p.label}</option>`),
   ].join('');
 
-  // Marker-bearing zones (excludes billboard_vertex per Phase 4)
+  // Marker-bearing zones for the Shaders tab. After Phase 4 added the
+  // billboard_vertex marker, all 9 zones are eligible.
   const shaderZones = [
     'force_field',
     'color_over_life',
@@ -1291,9 +1295,16 @@ function createTestShaderPanel(): HTMLElement {
     'post_fx',
     'material_pixel',
     'billboard_pixel',
+    'billboard_vertex',
   ];
   const zoneCheckboxes = shaderZones
     .map(z => `<label class="zone-checkbox-label"><input type="checkbox" data-zone="${z}" checked> ${z}</label>`)
+    .join('');
+
+  // Casting origin options for the Spell Program tab.
+  const castingOrigins = ['hands', 'heart', 'eyes', 'whole_body', 'wand'];
+  const castingOriginOptions = castingOrigins
+    .map(o => `<option value="${o}">${o}</option>`)
     .join('');
 
   // Sprite dropdowns
@@ -1314,6 +1325,7 @@ function createTestShaderPanel(): HTMLElement {
         <button class="test-shader-tab active" data-tab="shaders">Shaders</button>
         <button class="test-shader-tab" data-tab="sprites">Sprites</button>
         <button class="test-shader-tab" data-tab="render-mode">Render Mode</button>
+        <button class="test-shader-tab" data-tab="spell-program">Spell Program</button>
       </div>
       <button class="close-btn">×</button>
     </div>
@@ -1435,6 +1447,36 @@ function createTestShaderPanel(): HTMLElement {
         <div class="readout-grid" id="rm-readout-grid"></div>
       </div>
     </div>
+
+    <div class="test-shader-tab-content" data-tab="spell-program" style="display: none;">
+      <div class="spell-program-mode-toggle">
+        <label><input type="radio" name="spell-program-mode" value="buildup" checked> Buildup</label>
+        <label><input type="radio" name="spell-program-mode" value="release"> Release</label>
+      </div>
+
+      <div class="test-shader-config spell-program-form">
+        <div class="config-row">
+          <label>Prompt:</label>
+          <textarea id="sp-prompt" rows="3" placeholder="a slow-pulsing protective shield that explodes outward at release"></textarea>
+        </div>
+        <div class="config-row">
+          <label>Intent:</label>
+          <select id="sp-intent"><option value="">(let Gemini decide)</option>${intentOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Element:</label>
+          <select id="sp-element"><option value="">(let Gemini decide)</option>${elementOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Origin:</label>
+          <select id="sp-origin"><option value="">(default)</option>${castingOriginOptions}</select>
+        </div>
+        <button id="sp-generate-btn" class="generate-btn">Interpret &amp; Push</button>
+      </div>
+
+      <div id="sp-status" class="test-shader-status"></div>
+      <div id="sp-results" class="test-shader-results"></div>
+    </div>
   `;
 
   // === Shader tab event listeners ===
@@ -1484,6 +1526,10 @@ function createTestShaderPanel(): HTMLElement {
 
   const applyFlipbookBtn = panel.querySelector('#rm-apply-flipbook-btn') as HTMLButtonElement;
   applyFlipbookBtn.addEventListener('click', runApplyFlipbookConfig);
+
+  // === Spell Program tab event listeners ===
+  const spGenerateBtn = panel.querySelector('#sp-generate-btn') as HTMLButtonElement;
+  spGenerateBtn.addEventListener('click', runSpellProgramGenerate);
 
   // === Tab switching ===
   panel.querySelectorAll('.test-shader-tab').forEach(tabBtn => {
@@ -1871,6 +1917,97 @@ async function runApplyFlipbookConfig(): Promise<void> {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ============ SPELL PROGRAM TAB ============
+
+async function runSpellProgramGenerate(): Promise<void> {
+  const btn = document.getElementById('sp-generate-btn') as HTMLButtonElement;
+  const statusDiv = document.getElementById('sp-status') as HTMLDivElement;
+  const resultsDiv = document.getElementById('sp-results') as HTMLDivElement;
+  const promptEl = document.getElementById('sp-prompt') as HTMLTextAreaElement;
+  const intentEl = document.getElementById('sp-intent') as HTMLSelectElement;
+  const elementEl = document.getElementById('sp-element') as HTMLSelectElement;
+  const originEl = document.getElementById('sp-origin') as HTMLSelectElement;
+
+  const modeRadio = document.querySelector<HTMLInputElement>(
+    'input[name="spell-program-mode"]:checked'
+  );
+  const mode = (modeRadio?.value ?? 'buildup') as SpellProgramMode;
+
+  const prompt = promptEl.value.trim();
+  if (!prompt) {
+    statusDiv.textContent = 'Prompt is required';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+
+  const input: SpellProgramTestInput = {
+    mode,
+    prompt,
+    intent: intentEl.value ? (intentEl.value as SpellProgramTestInput['intent']) : null,
+    element: elementEl.value ? (elementEl.value as SpellProgramTestInput['element']) : null,
+    castingOrigin: originEl.value ? (originEl.value as SpellProgramTestInput['castingOrigin']) : null,
+  };
+
+  btn.disabled = true;
+  btn.textContent = 'Interpreting...';
+  statusDiv.textContent = `Asking Gemini to interpret a ${mode} program...`;
+  statusDiv.className = 'test-shader-status loading';
+  resultsDiv.innerHTML = '';
+
+  try {
+    const result: SpellProgramTestResult = await window.electronAPI.merlinTestSpellProgram(input);
+    renderSpellProgramResult(result, statusDiv, resultsDiv);
+  } catch (error) {
+    statusDiv.textContent = `Error: ${error}`;
+    statusDiv.className = 'test-shader-status error';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Interpret & Push';
+}
+
+function renderSpellProgramResult(
+  result: SpellProgramTestResult,
+  statusDiv: HTMLDivElement,
+  resultsDiv: HTMLDivElement
+): void {
+  if (!result.success) {
+    statusDiv.textContent = result.error || 'Generation failed';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+
+  if (result.pushed) {
+    statusDiv.textContent = 'Spell program pushed to TD';
+    statusDiv.className = 'test-shader-status success';
+  } else {
+    statusDiv.textContent = 'Generated, but TD not connected — program not pushed';
+    statusDiv.className = 'test-shader-status error';
+  }
+
+  const parts: string[] = [];
+
+  if (result.geminiArgs) {
+    parts.push(`
+      <div class="gemini-args">
+        <div class="gemini-args-title">Gemini chose:</div>
+        <pre>${escapeHtml(JSON.stringify(result.geminiArgs, null, 2))}</pre>
+      </div>
+    `);
+  }
+
+  if (result.program) {
+    parts.push(`
+      <div class="gemini-args">
+        <div class="gemini-args-title">Final program (pushed):</div>
+        <pre>${escapeHtml(JSON.stringify(result.program, null, 2))}</pre>
+      </div>
+    `);
+  }
+
+  resultsDiv.innerHTML = parts.join('');
 }
 
 /**

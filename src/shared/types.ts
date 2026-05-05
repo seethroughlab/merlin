@@ -413,6 +413,39 @@ export interface RenderModeTestResult {
   error?: string;
 }
 
+// ============ TEST SPELL PROGRAM TYPES ============
+
+export type SpellProgramMode = 'buildup' | 'release';
+
+/**
+ * Input for the Spell Program test tab. The user picks a mode and a
+ * free-text prompt; intent/element/origin are optional steering hints.
+ * Gemini fills in the visual parameters via the set_spell_program tool.
+ */
+export interface SpellProgramTestInput {
+  prompt: string;
+  mode: SpellProgramMode;
+  intent?: SpellIntent | null;
+  element?: SpellElement | null;
+  castingOrigin?: CastingOrigin | null;
+}
+
+/**
+ * Result of a spell-program test push. `pushed` is false when TD is
+ * disconnected. `geminiArgs` carries the raw structured args Gemini
+ * returned (for UI inspection); `program` is the merged final payload
+ * that was actually pushed.
+ */
+export interface SpellProgramTestResult {
+  success: boolean;
+  pushed: boolean;
+  /** Final ParticleSpellProgram pushed to TD (typed loosely here so shared/ doesn't depend on main/merlin/types). */
+  program?: Record<string, unknown>;
+  /** Raw structured args Gemini chose. */
+  geminiArgs?: Record<string, unknown>;
+  error?: string;
+}
+
 // ============ TTS TYPES ============
 
 /**

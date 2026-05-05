@@ -88,11 +88,11 @@ beforeEach(() => {
 });
 
 describe('testShaderGeneration', () => {
-  it('defaults to all 8 marker-bearing zones when zones is omitted', async () => {
+  it('defaults to all 9 marker-bearing zones when zones is omitted', async () => {
     const expected = [
       'force_field', 'color_over_life', 'size_over_life',
       'spawn_behavior', 'velocity_modifier', 'post_fx',
-      'material_pixel', 'billboard_pixel',
+      'material_pixel', 'billboard_pixel', 'billboard_vertex',
     ];
     mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(expected));
 
@@ -100,16 +100,16 @@ describe('testShaderGeneration', () => {
     const result = await testShaderGeneration({ intent: 'calm', element: 'air', energy: 0.5 });
 
     expect(result.success).toBe(true);
-    expect(result.zones).toHaveLength(8);
+    expect(result.zones).toHaveLength(9);
     expect(result.zones.map(z => z.zone).sort()).toEqual([...expected].sort());
 
-    // Tool config built with all 8 — confirm via the model call
+    // Tool config built with all 9 — confirm via the model call
     const modelArgs = mockGetGenerativeModel.mock.calls[0][0];
     const toolEnum = modelArgs.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
     expect(toolEnum.sort()).toEqual([...expected].sort());
 
     // Each returned zone went through pushZoneUpdateWithValidation
-    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(8);
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
   });
 
   it('honors explicit zone subset', async () => {
@@ -136,8 +136,8 @@ describe('testShaderGeneration', () => {
     expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledWith('post_fx', expect.any(String));
   });
 
-  it('drops billboard_vertex from selection (no marker yet)', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['force_field']));
+  it('billboard_vertex is now allowed (Phase 4 added the marker)', async () => {
+    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['billboard_vertex']));
 
     const { testShaderGeneration } = await import('./test-shader');
     await testShaderGeneration({
@@ -147,7 +147,7 @@ describe('testShaderGeneration', () => {
 
     const modelArgs = mockGetGenerativeModel.mock.calls[0][0];
     const toolEnum = modelArgs.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
-    expect(toolEnum).toEqual(['force_field']);
+    expect(toolEnum).toEqual(['force_field', 'billboard_vertex']);
   });
 
   it('loads templates from disk for each selected zone', async () => {

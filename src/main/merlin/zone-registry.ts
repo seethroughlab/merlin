@@ -91,9 +91,9 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     maxLines: 35,
   },
   billboard_vertex: {
-    description: 'Billboard particle vertex shader (camera-facing quads)',
-    modifies: ['worldOffset'],
-    availableVars: ['localPos', 'instancePos', 'instanceScale', 'camRight', 'camUp', 'worldOffset', 'vel', 'age', 'life', 'id'],
+    description: 'Billboard particle vertex shader. Snippet runs in view space after the camera-facing quad has been positioned, before final projection — typically used to perturb viewPos for wobble, jitter, or other position effects.',
+    modifies: 'viewPos',
+    availableVars: ['localPos', 'worldOrigin', 'viewPos', 'instanceScale', 'finalScale', 'vel', 'age', 'life', 'id'],
     uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
     maxLines: 20,
   },

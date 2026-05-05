@@ -39,10 +39,12 @@ function ensureGenAI(): GoogleGenerativeAI {
 const ts = () => new Date().toISOString().slice(11, 23);
 
 /**
- * billboard_vertex has no {zone_code} marker today, so the WS pipeline
- * would fail to merge a snippet into it. Phase 4 will close this gap.
+ * Zones whose templates have no {zone_code} marker — the WS pipeline
+ * would fail to merge a snippet into them. Empty after Phase 4 added
+ * the billboard_vertex marker; kept as the extension point for any
+ * future marker-less templates.
  */
-const ZONES_WITHOUT_MARKER = new Set(['billboard_vertex']);
+const ZONES_WITHOUT_MARKER = new Set<string>();
 
 /**
  * All zones the test panel can ask Gemini to fill (marker-bearing).
