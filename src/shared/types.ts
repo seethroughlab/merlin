@@ -536,6 +536,27 @@ export interface GeminiTurn {
   final?: boolean;
 }
 
+// ============ RESET TD ============
+
+/**
+ * One step of a TD baseline reset (e.g. "zone:force_field", "sprite",
+ * "render_mode", "flipbook", "idle_program").
+ */
+export interface ResetTDStep {
+  label: string;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Result of a Reset to Baseline action. `success` is true only if every
+ * step succeeded; the renderer can show per-step ✓/✗ from `steps`.
+ */
+export interface ResetTDResult {
+  success: boolean;
+  steps: ResetTDStep[];
+}
+
 // ============ TTS TYPES ============
 
 /**

@@ -50,7 +50,8 @@ export type TDOutboundMessage =
   // Sprite system messages
   | { type: 'sprite_texture'; assetId: string; texturePath: string }
   | { type: 'flipbook_config'; config: FlipbookConfigMessage }
-  | { type: 'render_mode'; mode: RenderMode };
+  | { type: 'render_mode'; mode: RenderMode }
+  | { type: 'reset_sprite' };
 
 /**
  * Spell state for Merlin mode (subset for TD communication)

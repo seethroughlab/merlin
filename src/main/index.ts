@@ -13,6 +13,7 @@ import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sp
 import { setRenderMode, applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-render-mode';
 import { generateSpellProgramWithGemini } from './merlin/test-spell-program';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
+import { resetTDBaseline } from './merlin/reset-td';
 import {
   initTDBridge,
   closeTDBridge,
@@ -709,6 +710,21 @@ ipcMain.handle('merlin-test-flipbook-config', async (_event, config: SpriteFlipb
 // Get the current mirrored TD state (last-pushed snapshot)
 ipcMain.handle('merlin-test-get-mirrored-state', async () => {
   return getCurrentMirroredState();
+});
+
+// Reset TD shaders / sprite / render mode / flipbook / spell program to baseline
+ipcMain.handle('merlin-reset-td-baseline', async () => {
+  console.log(`[Merlin ${ts()}] Reset TD baseline`);
+  const startTime = Date.now();
+  try {
+    const result = await resetTDBaseline();
+    const failed = result.steps.filter(s => !s.ok).length;
+    console.log(`[Merlin ${ts()}] Reset complete in ${Date.now() - startTime}ms (${failed} failed)`);
+    return result;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Reset failed:`, error);
+    throw error;
+  }
 });
 
 // Test spell program generation - Gemini interpretation (Shift+T Spell Program tab)

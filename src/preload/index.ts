@@ -19,6 +19,7 @@ import type {
   SpellProgramTestInput,
   SpellProgramTestResult,
   GeminiTurn,
+  ResetTDResult,
 } from '@shared/types';
 
 // Expose protected methods to the renderer process
@@ -166,6 +167,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-test-spell-program', input);
   },
 
+  // Reset TD shaders / sprite / render mode / flipbook / program to baseline
+  merlinResetTDBaseline: (): Promise<ResetTDResult> => {
+    return ipcRenderer.invoke('merlin-reset-td-baseline');
+  },
+
   // Listen for Gemini conversation events (used by the unified sidebar)
   onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => {
     const handler = (_event: unknown, turn: Partial<GeminiTurn>) => callback(turn);
@@ -283,6 +289,7 @@ declare global {
       merlinTestFlipbookConfig: (config: SpriteFlipbookConfig) => Promise<RenderModeTestResult>;
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
       merlinTestSpellProgram: (input: SpellProgramTestInput) => Promise<SpellProgramTestResult>;
+      merlinResetTDBaseline: () => Promise<ResetTDResult>;
       onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => () => void;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;

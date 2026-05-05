@@ -1302,6 +1302,52 @@
         border-radius: 2px;
         font-family: 'Monaco', 'Consolas', monospace;
       }
+
+      /* ============ TD CONTROLS (sidebar) ============ */
+
+      /* Stay visible during live Merlin / test mode (overrides the
+         generic merlin-active hide). */
+      #sidebar.merlin-active > section#td-controls {
+        display: block;
+      }
+
+      .td-reset-btn {
+        width: 100%;
+        background: #2a1a1a;
+        border: 1px solid #553333;
+        color: #faa;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.15s;
+      }
+
+      .td-reset-btn:hover {
+        background: #3a2020;
+        border-color: #774444;
+        color: #fcc;
+      }
+
+      .td-reset-btn:disabled {
+        background: #1a1a1a;
+        border-color: #333;
+        color: #555;
+        cursor: not-allowed;
+      }
+
+      .td-reset-status {
+        margin-top: 6px;
+        font-size: 11px;
+        font-family: 'Monaco', 'Consolas', monospace;
+        color: #777;
+        line-height: 1.4;
+      }
+
+      .td-reset-status.success { color: #6c8; }
+      .td-reset-status.partial { color: #fc6; }
+      .td-reset-status.error   { color: #d77; }
     </style>
   </head>
   <body>
@@ -1451,6 +1497,15 @@
             <div class="merlin-voice-status" id="merlin-voice-status">Shift+M to begin</div>
             <div class="merlin-hint">Say "Hello Merlin" or Shift+M</div>
           </div>
+        </section>
+
+        <!-- TD-level controls (always visible, even during Merlin/test mode) -->
+        <section id="td-controls">
+          <h3>TouchDesigner</h3>
+          <button id="td-reset-btn" class="td-reset-btn" title="Push baseline shaders, default sprite, mesh mode, and idle program to TD">
+            Reset to Baseline
+          </button>
+          <div id="td-reset-status" class="td-reset-status"></div>
         </section>
 
         <!-- Fivestone branding -->

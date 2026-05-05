@@ -46,6 +46,7 @@ export {
   pushSpriteTexture,
   pushFlipbookConfig,
   pushRenderMode,
+  pushResetSprite,
 } from './push';
 
 // Re-export push types

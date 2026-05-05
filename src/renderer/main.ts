@@ -849,7 +849,46 @@ function setupSidebar(): void {
   // Device choosers (camera + mic)
   setupDeviceChoosers();
 
+  // TD reset button
+  setupTDResetButton();
+
   console.log('Sidebar controls initialized');
+}
+
+/**
+ * Wire the "Reset to Baseline" button. Pushes a known-good clean state
+ * to TD: default shaders, default sprite, mesh mode, idle program.
+ */
+function setupTDResetButton(): void {
+  const btn = document.getElementById('td-reset-btn') as HTMLButtonElement | null;
+  const statusEl = document.getElementById('td-reset-status') as HTMLDivElement | null;
+  if (!btn || !statusEl) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Resetting...';
+    statusEl.textContent = 'Pushing baseline to TD...';
+    statusEl.className = 'td-reset-status';
+
+    try {
+      const result = await window.electronAPI.merlinResetTDBaseline();
+      const failed = result.steps.filter(s => !s.ok);
+      if (result.success) {
+        statusEl.textContent = `✓ ${result.steps.length} step(s) reset`;
+        statusEl.className = 'td-reset-status success';
+      } else {
+        const summary = failed.map(s => `${s.label}: ${s.error ?? 'failed'}`).join('; ');
+        statusEl.textContent = `✗ ${failed.length}/${result.steps.length} failed — ${summary}`;
+        statusEl.className = failed.length === result.steps.length ? 'td-reset-status error' : 'td-reset-status partial';
+      }
+    } catch (error) {
+      statusEl.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      statusEl.className = 'td-reset-status error';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Reset to Baseline';
+    }
+  });
 }
 
 /**

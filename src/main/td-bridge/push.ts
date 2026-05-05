@@ -369,3 +369,12 @@ export function pushRenderMode(mode: RenderMode): boolean {
     'push render mode'
   );
 }
+
+/**
+ * Tell TouchDesigner to revert to its default sprite (the radial-gradient
+ * dot). Handled by handle_reset_sprite in ws_callbacks.py.
+ */
+export function pushResetSprite(): boolean {
+  console.log(`[TDBridge ${ts()}] Pushing reset_sprite`);
+  return guardedSend({ type: 'reset_sprite' }, 'push reset sprite');
+}
