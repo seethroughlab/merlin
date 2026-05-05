@@ -17,6 +17,24 @@ The system maps psychological analysis values to particle behavior:
 
 ---
 
+## Shader Templates Location
+
+Shader templates are stored at the project root in `/shaders/` (shared between Electron and TD):
+
+| File | Zone | Type |
+|------|------|------|
+| `pop_force.glsl` | force_field | POP compute |
+| `pop_spawn.glsl` | spawn_behavior | POP compute |
+| `pop_velmod.glsl` | velocity_modifier | POP compute |
+| `pop_color.glsl` | color_over_life | POP compute |
+| `pop_size.glsl` | size_over_life | POP compute |
+| `top_postfx.glsl` | post_fx | TOP pixel |
+| `mat_pixel.glsl` | material_pixel | MAT pixel |
+
+**Note:** TD's `ws_callbacks.py` loads these via `../shaders/` path. Gemini sees these templates in prompts so it understands the context when writing `zone_code` snippets.
+
+---
+
 ## What's Already Done (Python)
 
 The `td/scripts/ws_callbacks.py` file has been updated with:
@@ -571,6 +589,61 @@ Or:
 ```python
 op.ws_parlor_callbacks.module.get_force_mode()
 ```
+
+---
+
+## Step 11: Post-Processing Effects
+
+The post-FX system applies screen-space effects after compositing.
+
+### Node Chain
+
+```
+comp2 → glsl_postfx (glslTOP) → out_final
+```
+
+### glsl_postfx Configuration
+
+The `glsl_postfx` node is a glslTOP with these settings:
+
+**Shader DATs:**
+- Pixel: `glsl_postfx_pixel`
+- Compute: `glsl_postfx_compute` (not used in vertex/pixel mode)
+
+**Uniforms (Vec page):**
+
+| Name | Expression/Value | Description |
+|------|-----------------|-------------|
+| uTime | `absTime.seconds` | Animation time |
+| uSpellEnergy | `float(op('/project1/spell_state')['energy', 1])` | 0-1 spell energy |
+| uSpellMode | `float(op('/project1/spell_state')['mode_float', 1])` | Mode as float |
+| uBloomIntensity | `0.5` | Bloom strength (0-1) |
+| uVignetteStrength | `0.3` | Edge darkening (0-1) |
+| uChromaticAberration | `0.5` | Color fringing (0-1) |
+
+### Default Effects
+
+The built-in shader provides:
+- **Chromatic aberration**: RGB channel separation at edges, scaled by spell energy
+- **Bloom**: Brightens already-bright areas for a glow effect
+- **Vignette**: Darkens edges for focus effect
+
+### Custom Effects via Gemini
+
+Gemini can inject custom GLSL code at the `// {zone_code}` marker in the shader. The zone system handles this via the `set_zone_shader` tool with `zone: "post_fx"`.
+
+Example custom effects:
+- Color grading (warm/cool shifts)
+- Film grain
+- Scan lines
+- Custom blur patterns
+
+### Adjusting Effect Strength
+
+For real-time control, you can:
+1. Link uniforms to CHOPs for animation
+2. Use `uSpellEnergy` to scale effects with spell intensity
+3. Add a lagCHOP for smooth transitions
 
 ---
 
