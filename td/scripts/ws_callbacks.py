@@ -435,19 +435,23 @@ def handle_top_zone_update(dat, zone, full_shader):
 
 
 def handle_mat_zone_update(dat, zone, full_shader):
-    """Handle MAT zone (material pixel shader) update."""
-    if zone not in ZONE_MAT_CODE_PATHS:
+    """Handle MAT zone (material pixel or vertex shader) update."""
+    # Vertex zones (e.g. billboard_vertex) target a separate textDAT.
+    if zone in ZONE_MAT_VERTEX_PATHS:
+        code_dat = op(ZONE_MAT_VERTEX_PATHS[zone])
+    elif zone in ZONE_MAT_CODE_PATHS:
+        code_dat = op(ZONE_MAT_CODE_PATHS[zone])
+    else:
         send_compile_result(dat, zone, False, f"Unknown MAT zone: {zone}")
         return
 
-    code_dat = op(ZONE_MAT_CODE_PATHS[zone])
     glsl_mat = op(ZONE_MAT_PATHS[zone])
 
     if not code_dat or not glsl_mat:
         send_compile_result(dat, zone, False, f"MAT zone not found: {zone}")
         return
 
-    # Write shader to pixel code DAT
+    # Write shader to the appropriate code DAT (pixel or vertex)
     code_dat.text = full_shader
     glsl_mat.cook(force=True)
 
