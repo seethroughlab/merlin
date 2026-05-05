@@ -1060,6 +1060,15 @@ def handle_render_mode(dat, msg):
         update_scene_state(table, 'render_mode', mode)
         update_scene_state(table, 'render_mode_float', str(sprite_state['render_mode_float']))
 
+    # Update billboard material uniform so the shader sees the new mode
+    # immediately. uFlipbook2 = (frameDuration, driveSource, renderMode, 0)
+    billboard_mat = op('/project1/glsl_billboard')
+    if billboard_mat:
+        try:
+            billboard_mat.par.vec2valuez = sprite_state['render_mode_float']
+        except Exception as e:
+            print(f"[WS] Error setting render mode uniform: {e}")
+
     # TODO: Toggle render paths in TD based on mode
     # This would switch between mesh-based and billboard-based rendering
     # Implementation depends on TD project structure
