@@ -24,6 +24,7 @@ import { GENERATE_SPRITE_TOOL } from './prompts';
 import { getSpriteGenerator } from './sprite-generator';
 import { getFlipbookConfig } from './asset-manager';
 import { pushSpriteTexture, pushFlipbookConfig } from '../td-bridge';
+import { recordFlipbookConfigPush } from './td-state-mirror';
 import type {
   SpriteTestSpec,
   SpriteTestResult,
@@ -102,6 +103,7 @@ export async function generateSpriteDirect(spec: SpriteTestSpec): Promise<Sprite
 
     const texturePushed = pushSpriteTexture(asset.assetId, asset.texturePath);
     const flipbookPushed = pushFlipbookConfig(flipbook);
+    if (flipbookPushed) recordFlipbookConfigPush(flipbook);
 
     return {
       success: true,

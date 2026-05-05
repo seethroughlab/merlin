@@ -67,6 +67,10 @@ import type {
   SpriteFrameCount,
   SpritePlaybackMode,
   SpriteDriveSource,
+  RenderMode,
+  SpriteFlipbookConfig,
+  RenderModeTestResult,
+  MirroredTDState,
 } from '../shared/types';
 
 // DOM Elements
@@ -1286,6 +1290,7 @@ function createTestShaderPanel(): HTMLElement {
       <div class="test-shader-tabs">
         <button class="test-shader-tab active" data-tab="shaders">Shaders</button>
         <button class="test-shader-tab" data-tab="sprites">Sprites</button>
+        <button class="test-shader-tab" data-tab="render-mode">Render Mode</button>
       </div>
       <button class="close-btn">×</button>
     </div>
@@ -1360,6 +1365,45 @@ function createTestShaderPanel(): HTMLElement {
       <div id="sprite-status" class="test-shader-status"></div>
       <div id="sprite-results" class="test-shader-results"></div>
     </div>
+
+    <div class="test-shader-tab-content" data-tab="render-mode" style="display: none;">
+      <div class="render-mode-toggle">
+        <button class="render-mode-btn" data-mode="mesh">Mesh</button>
+        <button class="render-mode-btn" data-mode="billboard">Billboard</button>
+      </div>
+
+      <div class="test-shader-config flipbook-reconfig-form">
+        <div class="config-row">
+          <label>Atlas:</label>
+          <input type="text" id="rm-atlas-cols" readonly value="1"> ×
+          <input type="text" id="rm-atlas-rows" readonly value="1">
+        </div>
+        <div class="config-row">
+          <label>Frames:</label>
+          <input type="text" id="rm-frame-count" readonly value="1">
+        </div>
+        <div class="config-row">
+          <label>Playback:</label>
+          <select id="rm-playback">${playbackOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Drive:</label>
+          <select id="rm-drive">${driveOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Frame dur:</label>
+          <input type="number" id="rm-frame-duration" value="0.1" step="0.01" min="0.001">
+        </div>
+        <button id="rm-apply-flipbook-btn" class="generate-btn">Apply Flipbook Config</button>
+      </div>
+
+      <div id="rm-status" class="test-shader-status"></div>
+
+      <div class="sprite-state-readout" id="rm-readout">
+        <div class="readout-title">Last pushed to TD</div>
+        <div class="readout-grid" id="rm-readout-grid"></div>
+      </div>
+    </div>
   `;
 
   // === Shader tab event listeners (unchanged behavior) ===
@@ -1389,6 +1433,17 @@ function createTestShaderPanel(): HTMLElement {
     });
   });
 
+  // === Render Mode tab event listeners ===
+  panel.querySelectorAll('.render-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = (btn as HTMLButtonElement).dataset.mode as RenderMode;
+      runRenderModeToggle(mode);
+    });
+  });
+
+  const applyFlipbookBtn = panel.querySelector('#rm-apply-flipbook-btn') as HTMLButtonElement;
+  applyFlipbookBtn.addEventListener('click', runApplyFlipbookConfig);
+
   // === Tab switching ===
   panel.querySelectorAll('.test-shader-tab').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
@@ -1399,6 +1454,9 @@ function createTestShaderPanel(): HTMLElement {
         const el = content as HTMLElement;
         el.style.display = el.dataset.tab === tabName ? '' : 'none';
       });
+      if (tabName === 'render-mode') {
+        refreshRenderModeTabFromMirror();
+      }
     });
   });
 
@@ -1638,6 +1696,125 @@ function renderSpriteResult(
   `);
 
   resultsDiv.innerHTML = parts.join('');
+}
+
+// ============ RENDER MODE TAB ============
+
+/**
+ * Pull the latest mirrored TD state from the main process and paint it
+ * into the readout + the read-only atlas/frame-count fields. Called on
+ * tab open and after every push.
+ */
+async function refreshRenderModeTabFromMirror(): Promise<void> {
+  try {
+    const state = await window.electronAPI.merlinTestGetMirroredState();
+    paintMirroredState(state);
+  } catch (error) {
+    console.error('[RenderMode] Failed to fetch mirrored state:', error);
+  }
+}
+
+function paintMirroredState(state: MirroredTDState): void {
+  // Highlight the active render-mode button
+  document.querySelectorAll('.render-mode-btn').forEach(btn => {
+    const isActive = (btn as HTMLButtonElement).dataset.mode === state.renderMode;
+    btn.classList.toggle('active', isActive);
+  });
+
+  // Read-only atlas display
+  const setVal = (id: string, value: string | number) => {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (el) el.value = String(value);
+  };
+  setVal('rm-atlas-cols', state.flipbook.atlasCols);
+  setVal('rm-atlas-rows', state.flipbook.atlasRows);
+  setVal('rm-frame-count', state.flipbook.frameCount);
+
+  // Pre-fill the editable fields with current values so Apply doesn't
+  // surprise the user by reverting to defaults.
+  setVal('rm-frame-duration', state.flipbook.frameDuration);
+  const playbackEl = document.getElementById('rm-playback') as HTMLSelectElement | null;
+  if (playbackEl) playbackEl.value = state.flipbook.playbackMode;
+  const driveEl = document.getElementById('rm-drive') as HTMLSelectElement | null;
+  if (driveEl) driveEl.value = state.flipbook.driveSource;
+
+  // Readout grid
+  const grid = document.getElementById('rm-readout-grid');
+  if (!grid) return;
+  const ago = state.lastUpdatedAt ? `${Math.round((Date.now() - state.lastUpdatedAt) / 1000)}s ago` : 'never';
+  const rows: Array<[string, string]> = [
+    ['render_mode', state.renderMode],
+    ['atlas', `${state.flipbook.atlasCols} × ${state.flipbook.atlasRows}`],
+    ['frame_count', String(state.flipbook.frameCount)],
+    ['playback_mode', state.flipbook.playbackMode],
+    ['frame_duration', String(state.flipbook.frameDuration)],
+    ['drive_source', state.flipbook.driveSource],
+    ['last_source', state.lastSource ? `${state.lastSource} (${ago})` : 'never pushed'],
+  ];
+  grid.innerHTML = rows
+    .map(
+      ([k, v]) =>
+        `<div class="readout-key">${k}:</div><div class="readout-value">${escapeHtml(v)}</div>`
+    )
+    .join('');
+}
+
+function setRenderModeStatus(text: string, kind: 'loading' | 'success' | 'error'): void {
+  const statusDiv = document.getElementById('rm-status') as HTMLDivElement | null;
+  if (!statusDiv) return;
+  statusDiv.textContent = text;
+  statusDiv.className = `test-shader-status ${kind}`;
+}
+
+async function runRenderModeToggle(mode: RenderMode): Promise<void> {
+  setRenderModeStatus(`Pushing render_mode=${mode}...`, 'loading');
+  try {
+    const result = await window.electronAPI.merlinTestRenderMode(mode);
+    paintMirroredState(result.state);
+    if (result.pushed) {
+      setRenderModeStatus(`render_mode set to ${mode}`, 'success');
+    } else {
+      setRenderModeStatus('TD not connected — render_mode not pushed', 'error');
+    }
+  } catch (error) {
+    setRenderModeStatus(`Error: ${error}`, 'error');
+  }
+}
+
+async function runApplyFlipbookConfig(): Promise<void> {
+  const atlasCols = parseInt((document.getElementById('rm-atlas-cols') as HTMLInputElement).value, 10);
+  const atlasRows = parseInt((document.getElementById('rm-atlas-rows') as HTMLInputElement).value, 10);
+  const frameCount = parseInt((document.getElementById('rm-frame-count') as HTMLInputElement).value, 10);
+  const playbackMode = (document.getElementById('rm-playback') as HTMLSelectElement).value as SpritePlaybackMode;
+  const driveSource = (document.getElementById('rm-drive') as HTMLSelectElement).value as SpriteDriveSource;
+  const frameDuration = parseFloat((document.getElementById('rm-frame-duration') as HTMLInputElement).value);
+
+  const config: SpriteFlipbookConfig = {
+    atlasCols,
+    atlasRows,
+    frameCount,
+    playbackMode,
+    frameDuration,
+    driveSource,
+  };
+
+  const btn = document.getElementById('rm-apply-flipbook-btn') as HTMLButtonElement;
+  btn.disabled = true;
+  setRenderModeStatus('Pushing flipbook_config...', 'loading');
+
+  try {
+    const result: RenderModeTestResult = await window.electronAPI.merlinTestFlipbookConfig(config);
+    paintMirroredState(result.state);
+    if (result.pushed) {
+      setRenderModeStatus('flipbook_config applied', 'success');
+    } else {
+      setRenderModeStatus('TD not connected — flipbook_config not pushed', 'error');
+    }
+  } catch (error) {
+    setRenderModeStatus(`Error: ${error}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /**

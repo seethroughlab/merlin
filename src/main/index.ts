@@ -10,6 +10,7 @@ import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './t
 import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
 import { testShaderGeneration } from './merlin/test-shader';
 import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
+import { setRenderMode, applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-render-mode';
 import {
   initTDBridge,
   closeTDBridge,
@@ -24,7 +25,7 @@ import {
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec } from '../shared/types';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, RenderMode, SpriteFlipbookConfig } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -685,6 +686,23 @@ ipcMain.handle('merlin-test-sprite-gemini', async (_event, prompt: string) => {
     console.error(`[Merlin ${ts()}] Test sprite (gemini) failed:`, error);
     throw error;
   }
+});
+
+// Test render mode toggle (Shift+T Render Mode tab)
+ipcMain.handle('merlin-test-render-mode', async (_event, mode: RenderMode) => {
+  console.log(`[Merlin ${ts()}] Test render mode: ${mode}`);
+  return setRenderMode(mode);
+});
+
+// Test flipbook re-config without regenerating texture (Shift+T Render Mode tab)
+ipcMain.handle('merlin-test-flipbook-config', async (_event, config: SpriteFlipbookConfig) => {
+  console.log(`[Merlin ${ts()}] Test flipbook config: ${JSON.stringify(config)}`);
+  return applyFlipbookConfig(config);
+});
+
+// Get the current mirrored TD state (last-pushed snapshot)
+ipcMain.handle('merlin-test-get-mirrored-state', async () => {
+  return getCurrentMirroredState();
 });
 
 // ============ TTS IPC HANDLERS ============

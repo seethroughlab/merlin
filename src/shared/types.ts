@@ -366,6 +366,37 @@ export interface SpriteTestResult {
   pushed: { texture: boolean; flipbook: boolean };
 }
 
+// ============ TEST RENDER MODE TYPES ============
+
+export type RenderMode = 'mesh' | 'billboard';
+
+/**
+ * Local mirror of the most recent state we pushed to TD. Used by the
+ * Render Mode tab readout. NOT authoritative — TD's actual state may
+ * have drifted (e.g. user changed something in TD directly), but for
+ * a developer test panel this reflects what the test mode last sent.
+ */
+export interface MirroredTDState {
+  renderMode: RenderMode;
+  flipbook: SpriteFlipbookConfig;
+  /** ms epoch of last update, or null if never pushed in this process. */
+  lastUpdatedAt: number | null;
+  /** Which test-mode action produced the most recent update. */
+  lastSource: 'render_mode' | 'flipbook_config' | null;
+}
+
+/**
+ * Result of a render-mode or flipbook-config test push. `success: true`
+ * even when `pushed: false` — the operation completed locally; the
+ * message just didn't reach TD because we're not connected.
+ */
+export interface RenderModeTestResult {
+  success: boolean;
+  pushed: boolean;
+  state: MirroredTDState;
+  error?: string;
+}
+
 // ============ TTS TYPES ============
 
 /**
