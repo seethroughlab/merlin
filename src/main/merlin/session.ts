@@ -471,6 +471,99 @@ export class MerlinSession {
           break;
         }
 
+        case 'generate_sprite': {
+          const {
+            description,
+            style,
+            animation,
+            frameCount,
+            playbackMode,
+            driveSource,
+          } = call.args as {
+            description: string;
+            style?: string;
+            animation?: string;
+            frameCount?: number;
+            playbackMode?: string;
+            driveSource?: string;
+          };
+
+          console.log(`[MerlinSession] generate_sprite: description="${description}"${animation ? `, animation=${animation}` : ''}`);
+
+          try {
+            // Import sprite generator and push functions
+            const { getSpriteGenerator } = await import('./sprite-generator');
+            const { pushSpriteTexture, pushFlipbookConfig } = await import('../td-bridge');
+            const { getFlipbookConfig } = await import('./asset-manager');
+
+            const generator = getSpriteGenerator();
+
+            // Determine if this is a flipbook request
+            const isFlipbook = animation || (frameCount && frameCount > 1);
+
+            if (isFlipbook) {
+              // Generate flipbook
+              const validFrameCount = (frameCount ?? 16) as 4 | 8 | 9 | 12 | 16 | 25;
+              const result = await generator.generateFlipbookSync(description, {
+                frameCount: validFrameCount,
+                style,
+                animation,
+                playbackMode: (playbackMode ?? 'loop') as 'loop' | 'once' | 'pingpong' | 'random',
+                driveSource: (driveSource ?? 'age') as 'age' | 'life' | 'velocity' | 'id' | 'time',
+              });
+
+              if (result.success && result.asset) {
+                // Push texture and flipbook config to TD
+                pushSpriteTexture(result.asset.assetId, result.asset.texturePath);
+                if (result.flipbookConfig) {
+                  pushFlipbookConfig(result.flipbookConfig);
+                }
+
+                response = {
+                  success: true,
+                  assetId: result.asset.assetId,
+                  assetType: 'flipbook',
+                  frameCount: result.asset.frameCount,
+                  message: `Generated ${result.asset.frameCount}-frame flipbook sprite: "${description}"`,
+                };
+              } else {
+                response = {
+                  success: false,
+                  error: result.error ?? 'Failed to generate flipbook sprite',
+                };
+              }
+            } else {
+              // Generate single sprite
+              const result = await generator.generateSpriteSync(description, { style });
+
+              if (result.success && result.asset) {
+                // Push texture to TD
+                pushSpriteTexture(result.asset.assetId, result.asset.texturePath);
+
+                response = {
+                  success: true,
+                  assetId: result.asset.assetId,
+                  assetType: 'single',
+                  message: `Generated sprite: "${description}"`,
+                };
+              } else {
+                response = {
+                  success: false,
+                  error: result.error ?? 'Failed to generate sprite',
+                };
+              }
+            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[MerlinSession] generate_sprite error: ${errorMessage}`);
+            response = {
+              success: false,
+              error: errorMessage,
+            };
+          }
+          break;
+        }
+
         default:
           response = { error: `Unknown tool: ${call.name}` };
       }

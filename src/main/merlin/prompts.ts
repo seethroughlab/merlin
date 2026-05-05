@@ -522,6 +522,71 @@ Only call this when you want to visually verify your shader changes - it adds la
 };
 
 /**
+ * Tool: Generate custom particle sprite
+ */
+const GENERATE_SPRITE_TOOL: FunctionDeclaration = {
+  name: 'generate_sprite',
+  description: `Generate a custom AI-generated sprite texture for the particles. Use this to create unique visual textures that match the spell's intent and element.
+
+For static sprites: Generates a single soft-dot particle texture
+For animated flipbooks: Generates a sprite sheet atlas with multiple frames
+
+Frame counts and their grid layouts:
+- 4 frames: 2x2 atlas
+- 9 frames: 3x3 atlas
+- 16 frames: 4x4 atlas (default for animations)
+- 25 frames: 5x5 atlas
+
+Playback modes:
+- loop: Continuously repeat the animation
+- once: Play once, hold the last frame
+- pingpong: Bounce back and forth
+- random: Random frame per particle (good for variety)
+
+Drive sources (what controls frame selection):
+- age: Particle age in seconds
+- life: Normalized life (0 at birth to 1 at death)
+- velocity: Particle speed
+- id: Unique particle ID (for random variety)
+- time: Global time
+
+Examples:
+- For fire spell: "glowing ember with flickering edges" with animation="pulse", frameCount=9
+- For water spell: "soft blue droplet with ripple" with animation="expand"
+- For protection: "crystalline shield fragment" with style="sharp geometric"`,
+  parameters: {
+    type: 'object' as SchemaType,
+    properties: {
+      description: {
+        type: 'string' as SchemaType,
+        description: 'Description of the sprite appearance (e.g., "glowing ember", "soft blue orb")',
+      },
+      style: {
+        type: 'string' as SchemaType,
+        description: 'Visual style: "soft glow", "sharp edges", "crystalline", "ethereal", "textured"',
+      },
+      animation: {
+        type: 'string' as SchemaType,
+        description: 'For flipbooks: "pulse", "rotate", "flicker", "expand", "morph"',
+      },
+      frameCount: {
+        type: 'number' as SchemaType,
+        description: 'Number of animation frames: 4, 9, 16, or 25 (default 16 for animations)',
+      },
+      playbackMode: {
+        type: 'string' as SchemaType,
+        description: 'Animation playback: "loop", "once", "pingpong", "random"',
+      },
+      driveSource: {
+        type: 'string' as SchemaType,
+        description: 'What drives frame selection: "age", "life", "velocity", "id", "time"',
+      },
+    },
+    required: ['description'],
+  },
+};
+
+/**
  * Get tools available for a given phase
  */
 export function getToolsForPhase(phase: MerlinPhase): FunctionDeclaration[] {
@@ -536,6 +601,7 @@ export function getToolsForPhase(phase: MerlinPhase): FunctionDeclaration[] {
     tools.push(SET_SPELL_PROFILE_TOOL);
     tools.push(SET_ZONE_SHADER_TOOL);
     tools.push(REQUEST_VISUAL_FEEDBACK_TOOL);
+    tools.push(GENERATE_SPRITE_TOOL);
   }
 
   // Add prepare_casting in formation
@@ -556,6 +622,7 @@ export const MERLIN_TOOLS: FunctionDeclaration[] = [
   PREPARE_CASTING_TOOL,
   SET_ZONE_SHADER_TOOL,
   REQUEST_VISUAL_FEEDBACK_TOOL,
+  GENERATE_SPRITE_TOOL,
 ];
 
 // ============ LAYER 4: OUTPUT CONTRACT ============
