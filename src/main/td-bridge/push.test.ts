@@ -12,8 +12,9 @@ vi.mock('./connection', () => ({
 }));
 
 // Mock the GLSL validator
+type MockValidationResult = { isValid: boolean; error?: string | null; warnings: string[] };
 const { mockValidateGlslSnippet } = vi.hoisted(() => ({
-  mockValidateGlslSnippet: vi.fn(() => ({ isValid: true, warnings: [] })),
+  mockValidateGlslSnippet: vi.fn<() => MockValidationResult>(() => ({ isValid: true, warnings: [] as string[] })),
 }));
 
 vi.mock('../merlin/glsl-validator', () => ({
@@ -43,8 +44,8 @@ const { mockZoneStateManager } = vi.hoisted(() => ({
   mockZoneStateManager: {
     updateZone: vi.fn(),
     waitForCompileResult: vi.fn(() => Promise.resolve(true)),
-    getZoneError: vi.fn(() => null),
-    rollbackZone: vi.fn(() => null),
+    getZoneError: vi.fn<() => string | null>(() => null),
+    rollbackZone: vi.fn<() => string | null>(() => null),
   },
 }));
 
@@ -448,11 +449,11 @@ describe('push', () => {
 
   describe('pushSpellCharge', () => {
     it('should send spell charge message', () => {
-      pushSpellCharge('right_hand', 0.75, [15, 16, 17]);
+      pushSpellCharge('hands', 0.75, [15, 16, 17]);
 
       expect(mockSend).toHaveBeenCalledWith({
         type: 'spell_charge',
-        origin: 'right_hand',
+        origin: 'hands',
         intensity: 0.75,
         castingLandmarks: [15, 16, 17],
       });
@@ -470,11 +471,11 @@ describe('push', () => {
         colorCode: '',
       };
 
-      pushSpellCast('both_hands', 1.0, 3000, envelope as any, program as any);
+      pushSpellCast('whole_body', 1.0, 3000, envelope as any, program as any);
 
       expect(mockSend).toHaveBeenCalledWith({
         type: 'spell_cast',
-        origin: 'both_hands',
+        origin: 'whole_body',
         intensity: 1.0,
         durationMs: 3000,
         envelope,
