@@ -29,6 +29,17 @@ import {
   defaultOriginForIntent,
   paletteForElement,
 } from './spell-state';
+import {
+  createBuildupProgram,
+  createReleaseProgram,
+  createIdleProgram,
+  getCastDuration,
+} from './particle-program';
+import {
+  pushParticleSpellProgram,
+  pushSpellCast,
+  pushZoneUpdateWithValidation,
+} from '../td-bridge';
 
 /**
  * Callback for when spell state updates
@@ -360,6 +371,9 @@ export class MerlinSession {
             this.config.onSpellUpdate(this.state.spell);
           }
 
+          // Push updated buildup program to TD
+          this.pushCurrentBuildupProgram();
+
           response = {
             success: true,
             spell: this.state.spell,
@@ -389,6 +403,71 @@ export class MerlinSession {
             gestureHint: params.gestureHint,
             spell: this.state.spell,
           };
+          break;
+        }
+
+        case 'set_zone_shader': {
+          const { zone, glsl_code, description } = call.args as {
+            zone: string;
+            glsl_code: string;
+            description?: string;
+          };
+
+          // Push the GLSL code with full validation pipeline
+          const result = await pushZoneUpdateWithValidation(zone, glsl_code);
+
+          console.log(
+            `[MerlinSession] set_zone_shader: zone=${zone}, success=${result.success}, ` +
+            `desc=${description || 'none'}${result.error ? `, error=${result.error}` : ''}`
+          );
+
+          if (result.success) {
+            response = {
+              success: true,
+              zone,
+              description: description || 'Custom shader applied',
+              warnings: result.warnings,
+            };
+          } else {
+            response = {
+              success: false,
+              zone,
+              error: result.error,
+              warnings: result.warnings,
+            };
+          }
+          break;
+        }
+
+        case 'request_visual_feedback': {
+          const { intent } = call.args as { intent: string };
+
+          console.log(`[MerlinSession] request_visual_feedback: intent=${intent}`);
+
+          // Request screenshot from TD
+          const { send } = await import('../td-bridge/connection');
+          const { requestScreenshot } = await import('../td-bridge/metrics');
+
+          const screenshot = await requestScreenshot(send, 5000);
+
+          if (screenshot) {
+            // Return screenshot data for Gemini to analyze
+            response = {
+              success: true,
+              intent,
+              screenshot: {
+                base64: screenshot.base64,
+                width: screenshot.width,
+                height: screenshot.height,
+              },
+              instruction: 'Analyze this screenshot. Does it match the intended effect? If not, use set_zone_shader to refine.',
+            };
+          } else {
+            response = {
+              success: false,
+              error: 'Failed to capture screenshot from TouchDesigner',
+            };
+          }
           break;
         }
 
@@ -431,9 +510,21 @@ export class MerlinSession {
 
     // Trigger phase change callback if phase changed
     if (newPhase !== this.previousPhase) {
+      const wasDiscovery = this.previousPhase === 'discovery';
       this.previousPhase = newPhase;
+
       if (this.config.onPhaseChange) {
         this.config.onPhaseChange(newPhase);
+      }
+
+      // Push initial buildup program when entering discovery
+      if (newPhase === 'discovery' && !wasDiscovery) {
+        this.pushCurrentBuildupProgram();
+      }
+
+      // Push idle program when session ends
+      if (newPhase === 'outro') {
+        this.pushIdleProgram();
       }
     }
 
@@ -520,6 +611,49 @@ export class MerlinSession {
    */
   isActive(): boolean {
     return this.chat.isActive();
+  }
+
+  // ===== Particle Program Integration =====
+
+  /**
+   * Push the current buildup program to TouchDesigner
+   */
+  private pushCurrentBuildupProgram(): void {
+    const program = createBuildupProgram(this.state.spell);
+    pushParticleSpellProgram('buildup', program);
+  }
+
+  /**
+   * Push idle program to TouchDesigner (for session end)
+   */
+  private pushIdleProgram(): void {
+    const program = createIdleProgram();
+    pushParticleSpellProgram('idle', program);
+  }
+
+  /**
+   * Trigger the spell cast effect
+   * Called when magic word + casting gesture are detected
+   */
+  triggerCast(): void {
+    if (!this.state.castReady || this.state.castCompleted) {
+      console.log('[MerlinSession] Cannot cast: not ready or already completed');
+      return;
+    }
+
+    const releaseProgram = createReleaseProgram(this.state.spell);
+    const envelope = releaseProgram.castEnvelope!;
+    const durationMs = getCastDuration(envelope);
+
+    pushSpellCast(
+      this.state.spell.castingOrigin!,
+      1.0,
+      durationMs,
+      envelope,
+      releaseProgram
+    );
+
+    this.markCastCompleted();
   }
 }
 

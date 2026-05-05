@@ -11,6 +11,7 @@
 import type { FunctionDeclaration, SchemaType } from '@google/generative-ai';
 import type { MerlinPhase, SpellState } from '../../shared/types';
 import type { MerlinSessionState } from './types';
+import { formatTemplatesForSystemPrompt } from './shader-templates';
 
 // ============ LAYER 1: SYSTEM IDENTITY ============
 
@@ -75,17 +76,85 @@ You receive body language and facial expression data. Use it sparingly:
 - Use perception to GUIDE, not to display your abilities
 - Fresh data comes from get_posture and get_expression tools`;
 
+const SHADER_AUTHORSHIP = `## Visual Authorship
+
+You CREATE the spell's visual effects by writing GLSL shader code with set_zone_shader.
+This is how you shape what the participant sees - expressive, creative effects that embody their spell.
+
+Call set_zone_shader on EVERY turn during discovery and formation to evolve the visuals.
+Start subtle in discovery, build intensity through formation.
+
+Available uniforms in all zones:
+- uTime (float): Animation timing (ALWAYS use for animation!)
+- uSpellEnergy (float): Spell intensity 0-1
+- uSpellMode (float): -1=idle, 0=buildup, 1=release
+
+Zone output variables to modify:
+- force_field: PartForce (vec3) - particle acceleration direction
+- spawn_behavior: P (vec3), PartVel (vec3) - spawn position and initial velocity
+- color_over_life: Cd (vec4) - RGBA color
+- size_over_life: pscale (float) - particle size
+- velocity_modifier: PartVel (vec3) - velocity multiplier
+
+Example patterns by element:
+- fire: upward spiral forces, warm orange-to-red gradients, flickering size
+- water: gentle wave motion, blue-green hues, smooth transitions
+- air: swirling circular motion, light pastels, wispy particles
+- light: radiant expansion, golden-white colors, pulsing brightness
+- cosmic: orbiting patterns, deep purples, scattered stardust
+
+### CRITICAL SHADER RULES - AVOID THESE MISTAKES:
+
+1. **spawn_behavior: Random seeds MUST include uTime**
+   Particle IDs are REUSED when particles die. Using only idx for randomization creates static patterns.
+   BAD:  float seed = fract(sin(float(idx) * 12.9898) * 43758.5453);
+   GOOD: float seed = fract(sin((uTime + float(idx) * 0.001) * 12.9898) * 43758.5453);
+
+2. **Always use uTime for animation**
+   Static patterns look lifeless. Add uTime to create movement.
+   BAD:  float wave = sin(pos.x * 10.0);
+   GOOD: float wave = sin(pos.x * 10.0 + uTime * 2.0);
+
+3. **Force magnitudes for visible motion**
+   - Too small (< 0.01): particles appear static
+   - Good range: 0.03 - 0.15 for gentle, 0.15 - 0.3 for energetic
+   - Too large (> 0.5): motion too fast to perceive
+
+### ITERATIVE REFINEMENT
+
+If set_zone_shader returns an error, analyze the error message and FIX the code:
+- "Unbalanced braces": Check opening/closing { } pairs
+- "Unbalanced parens": Check opening/closing ( ) pairs
+- "Unknown zone": Use only valid zones: force_field, color_over_life, size_over_life, spawn_behavior, velocity_modifier, post_fx
+- Compilation errors: Check for syntax issues, undefined variables, type mismatches
+
+When an error occurs:
+1. Read the error message carefully
+2. Identify the specific issue
+3. Generate CORRECTED GLSL code
+4. Call set_zone_shader again with the fixed code
+
+Do NOT give up after one failure. The visual magic depends on successful shaders!`;
+
 /**
  * Build the complete system prompt
  */
 export function buildSystemPrompt(): string {
+  // Load shader templates to include in prompt
+  // This ensures Gemini sees the full template context when writing zone_code
+  const templatesSection = formatTemplatesForSystemPrompt();
+
   return [
     MERLIN_PERSONA,
     MERLIN_RITUAL_STRUCTURE,
     MERLIN_TONE_CONSTRAINTS,
     MERLIN_SAFETY_RULES,
     PERCEPTION_ETHIC,
-  ].join('\n\n');
+    SHADER_AUTHORSHIP,
+    templatesSection,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export const MERLIN_SYSTEM_PROMPT = buildSystemPrompt();
@@ -385,6 +454,74 @@ const PREPARE_CASTING_TOOL: FunctionDeclaration = {
 };
 
 /**
+ * Tool: Set custom GLSL shader code for a particle zone
+ */
+const SET_ZONE_SHADER_TOOL: FunctionDeclaration = {
+  name: 'set_zone_shader',
+  description: `Set custom GLSL code for a particle zone. Called to create visual effects that reflect the spell.
+
+Each zone has these uniforms available:
+- uTime (float): Current time in seconds - USE THIS FOR ALL ANIMATION
+- uAnalysis1 (vec4): valence, arousal, tension, openness
+- uAnalysis2 (vec4): engagement, emotion_index, 0, 0
+- uSpellEnergy (float): Spell intensity 0-1
+- uSpellMode (float): -1=idle, 0=buildup, 1=release
+
+Zone outputs (modify these variables):
+- force_field: PartForce (vec3) - particle acceleration
+- spawn_behavior: P (vec3) and PartVel (vec3) - spawn position/velocity
+- color_over_life: Cd (vec4) - particle color with alpha
+- size_over_life: pscale (float) - particle scale
+- velocity_modifier: PartVel (vec3) - velocity scaling
+
+CRITICAL RULES:
+1. spawn_behavior: Random seeds MUST include uTime (e.g., fract(sin((uTime + float(idx)*0.001) * 12.9898) * 43758.5453)) - particle IDs are reused!
+2. Always use uTime for animation - static patterns look lifeless
+3. Force magnitudes: 0.03-0.15 for gentle motion, 0.15-0.3 for energetic
+
+Write expressive GLSL that matches the spell's intent and element. Call on each turn to evolve the visuals.`,
+  parameters: {
+    type: 'object' as SchemaType,
+    properties: {
+      zone: {
+        type: 'string' as SchemaType,
+        enum: ['force_field', 'spawn_behavior', 'color_over_life', 'size_over_life', 'velocity_modifier'],
+        description: 'Which shader zone to customize',
+      },
+      glsl_code: {
+        type: 'string' as SchemaType,
+        description: 'GLSL code snippet to insert into the zone template. Use available uniforms and modify the output variables.',
+      },
+      description: {
+        type: 'string' as SchemaType,
+        description: 'Brief description of the visual effect',
+      },
+    },
+    required: ['zone', 'glsl_code'],
+  },
+};
+
+/**
+ * Tool: Request visual feedback
+ */
+const REQUEST_VISUAL_FEEDBACK_TOOL: FunctionDeclaration = {
+  name: 'request_visual_feedback',
+  description: `Capture the current visual effect and receive an image to assess if it matches your intent.
+Use this after set_zone_shader to verify the effect looks right. Returns a screenshot of the current particle system.
+Only call this when you want to visually verify your shader changes - it adds latency.`,
+  parameters: {
+    type: 'object' as SchemaType,
+    properties: {
+      intent: {
+        type: 'string' as SchemaType,
+        description: 'What visual effect you expect to see (e.g., "fire rising in spirals", "gentle blue waves")',
+      },
+    },
+    required: ['intent'],
+  },
+};
+
+/**
  * Get tools available for a given phase
  */
 export function getToolsForPhase(phase: MerlinPhase): FunctionDeclaration[] {
@@ -397,6 +534,8 @@ export function getToolsForPhase(phase: MerlinPhase): FunctionDeclaration[] {
   // Add set_spell_profile in discovery phases
   if (phase === 'intro' || phase === 'discovery' || phase === 'formation') {
     tools.push(SET_SPELL_PROFILE_TOOL);
+    tools.push(SET_ZONE_SHADER_TOOL);
+    tools.push(REQUEST_VISUAL_FEEDBACK_TOOL);
   }
 
   // Add prepare_casting in formation
@@ -415,6 +554,8 @@ export const MERLIN_TOOLS: FunctionDeclaration[] = [
   GET_EXPRESSION_TOOL,
   SET_SPELL_PROFILE_TOOL,
   PREPARE_CASTING_TOOL,
+  SET_ZONE_SHADER_TOOL,
+  REQUEST_VISUAL_FEEDBACK_TOOL,
 ];
 
 // ============ LAYER 4: OUTPUT CONTRACT ============
