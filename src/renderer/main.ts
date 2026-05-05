@@ -1272,6 +1272,16 @@ function hideTestShaderPanel(): void {
     panel.classList.remove('visible');
   }
   testShaderPanelVisible = false;
+
+  // Restore the regular sidebar UNLESS a live Merlin session is active —
+  // in that case the sidebar should stay in Merlin mode for the live
+  // conversation.
+  if (!merlinModeActive) {
+    const sidebar = document.getElementById('sidebar');
+    const merlinPanel = document.getElementById('merlin-panel');
+    sidebar?.classList.remove('merlin-active');
+    merlinPanel?.classList.remove('active');
+  }
 }
 
 /**
@@ -1559,11 +1569,11 @@ function createTestShaderPanel(): HTMLElement {
     });
   });
 
-  // Close handler
+  // Close handler — route through hideTestShaderPanel so the sidebar
+  // is restored cleanly when no live session is active.
   const closeBtn = panel.querySelector('.close-btn') as HTMLButtonElement;
   closeBtn.addEventListener('click', () => {
-    panel.classList.remove('visible');
-    testShaderPanelVisible = false;
+    hideTestShaderPanel();
   });
 
   return panel;
@@ -2212,11 +2222,15 @@ function addMerlinMessage(role: 'user' | 'assistant', content: string): void {
   const msgDiv = document.createElement('div');
   msgDiv.className = `merlin-message ${role}`;
 
-  const roleLabel = role === 'user' ? 'You' : 'Merlin';
-  msgDiv.innerHTML = `
-    <div class="merlin-message-role">${roleLabel}</div>
-    <div>${content}</div>
-  `;
+  // Build with textContent so Gemini/user-supplied content can't inject HTML.
+  const roleDiv = document.createElement('div');
+  roleDiv.className = 'merlin-message-role';
+  roleDiv.textContent = role === 'user' ? 'You' : 'Merlin';
+  msgDiv.appendChild(roleDiv);
+
+  const contentDiv = document.createElement('div');
+  contentDiv.textContent = content;
+  msgDiv.appendChild(contentDiv);
 
   conversation.appendChild(msgDiv);
   conversation.scrollTop = conversation.scrollHeight;
@@ -2242,12 +2256,20 @@ function ensureTurnCard(turn: Partial<GeminiTurn> & { id: string; source: Gemini
   card.className = 'gemini-turn';
   card.dataset.turnId = turn.id;
   card.dataset.source = turn.source;
-  card.innerHTML = `
-    <div class="gemini-turn-header">
-      <span class="gemini-turn-source">${SOURCE_LABELS[turn.source] ?? turn.source}</span>
-    </div>
-    <div class="gemini-turn-body"></div>
-  `;
+
+  const header = document.createElement('div');
+  header.className = 'gemini-turn-header';
+  const sourceSpan = document.createElement('span');
+  sourceSpan.className = 'gemini-turn-source';
+  // textContent escapes the fallback if a future code path emits an unknown source.
+  sourceSpan.textContent = SOURCE_LABELS[turn.source] ?? turn.source;
+  header.appendChild(sourceSpan);
+  card.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'gemini-turn-body';
+  card.appendChild(body);
+
   conversation.appendChild(card);
   return card;
 }

@@ -588,7 +588,13 @@ export class MerlinSession {
                 // Push texture and flipbook config to TD
                 pushSpriteTexture(result.asset.assetId, result.asset.texturePath);
                 if (result.flipbookConfig) {
-                  pushFlipbookConfig(result.flipbookConfig);
+                  const flipbookPushed = pushFlipbookConfig(result.flipbookConfig);
+                  // Reflect into the test-mode mirror so the Render Mode tab
+                  // readout shows what live just sent (not the defaults).
+                  if (flipbookPushed) {
+                    const { recordFlipbookConfigPush } = await import('./td-state-mirror');
+                    recordFlipbookConfigPush(result.flipbookConfig);
+                  }
                 }
 
                 response = {
