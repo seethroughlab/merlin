@@ -2,7 +2,7 @@
 
 Implementation Plan
 
-*Aligned with Merlin_Mirror_PRD.docx  ·  Fivestone Studios  ·  May 2026*
+*Aligned with `docs/Merlin Mirror PRD.md`  ·  Fivestone Studios  ·  May 2026*
 
 # **Purpose**
 
