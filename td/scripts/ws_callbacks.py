@@ -347,29 +347,33 @@ def merge_shader_template(template, zone_code):
 def _check_glsl_compile(glsl_op):
     """Determine compile success for a GLSL op (POP / TOP / MAT).
 
-    glsl_op.errors() can be empty even when only the pixel shader failed
-    to compile (the truth lives in a sibling _info DAT). Pattern borrowed
-    from vibe-agent/td/ws_client_callbacks.py — production-validated.
+    Strategy:
+    1. ALWAYS scan the sibling `_info` DAT first for "ERROR:" lines. The
+       info DAT contains the actual GLSL compiler output — line numbers,
+       offending identifiers, type mismatches — which is what Gemini
+       needs to fix the shader. The .errors() method only returns a
+       generic "Compile failed (/project1/glsl_force)" summary that is
+       useless for retry guidance.
+    2. Fall back to .errors() text if there are no ERROR lines in _info
+       (covers TD versions / op types where the info DAT layout differs).
+    3. Fall back to warnings() containing "compile error".
 
     Returns (ok, error_text_or_none).
     """
-    errors = glsl_op.errors()
-    if errors:
-        return False, errors
-    warnings = glsl_op.warnings() if hasattr(glsl_op, 'warnings') else ''
-    if warnings and 'compile error' in str(warnings).lower():
-        info_dat = op(glsl_op.path + '_info')
-        if info_dat and info_dat.text:
-            return False, info_dat.text
-        return False, str(warnings)
-    # Belt-and-suspenders: even if warnings is empty, the _info DAT may
-    # still contain ERROR lines (we observed this with post_fx vignette
-    # redefinition). Scan for any "ERROR" lines and treat as compile fail.
     info_dat = op(glsl_op.path + '_info')
     if info_dat and info_dat.text:
         error_lines = [l for l in info_dat.text.splitlines() if 'ERROR' in l]
         if error_lines:
             return False, '\n'.join(error_lines)
+
+    errors = glsl_op.errors()
+    if errors:
+        return False, errors
+
+    warnings = glsl_op.warnings() if hasattr(glsl_op, 'warnings') else ''
+    if warnings and 'compile error' in str(warnings).lower():
+        return False, str(warnings)
+
     return True, None
 
 

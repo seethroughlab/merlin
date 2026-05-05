@@ -336,14 +336,21 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
         );
 
         while (!push.success && attempt <= MAX_RETRIES) {
-          // Phrasing borrowed from vibe-agent/server/gemini_session.py:338-357
+          const contract = ZONE_CONTRACTS[zone as keyof typeof ZONE_CONTRACTS];
+          const maxLines = contract?.maxLines;
+          // Phrasing borrowed from vibe-agent/server/gemini_session.py:338-357,
+          // extended with line-cap guidance because the validator rejects
+          // snippets exceeding ZONE_CONTRACTS[zone].maxLines.
           const retryMsg =
             `COMPILE ERROR (iteration ${attempt}/${MAX_RETRIES}):\n\n` +
             `Tool result for "${zone}": ${push.error ?? 'unknown error'}\n\n` +
-            `CRITICAL: The GLSL zone "${zone}" failed to compile. The zone code was reverted to defaults.\n` +
+            `CRITICAL: The GLSL zone "${zone}" failed. The zone code was reverted to defaults.\n` +
             `You MUST call set_zone_shader again with corrected GLSL for zone "${zone}".\n` +
             `Common fixes: check for syntax errors, undefined variables, missing semicolons, ` +
             `redeclaration of template-provided variables, or invalid GLSL.\n` +
+            (maxLines
+              ? `This zone has a hard cap of ${maxLines} lines — keep the snippet shorter than that.\n`
+              : '') +
             `Explain what you think went wrong and provide fixed code.`;
           emitGeminiTurn({
             id: turnId,
