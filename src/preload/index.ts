@@ -8,6 +8,8 @@ import type {
   MerlinResponse,
   MerlinUIUpdate,
   TTSResult,
+  TestShaderConfig,
+  TestShaderResult,
 } from '@shared/types';
 
 // Expose protected methods to the renderer process
@@ -120,6 +122,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     });
   },
 
+  // Test shader generation (Shift+T debug mode)
+  merlinTestShader: (config: TestShaderConfig): Promise<TestShaderResult> => {
+    return ipcRenderer.invoke('merlin-test-shader', config);
+  },
+
   // ============ TTS ============
 
   // Generate speech using Gemini TTS (batch mode - waits for full audio)
@@ -183,6 +190,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeAllListeners('td-status');
   },
 
+  // Listen for zone compile results
+  onZoneCompileResult: (callback: (result: { zone: string; success: boolean; error?: string }) => void) => {
+    ipcRenderer.on('zone-compile-result', (_event, result) => {
+      callback(result);
+    });
+    return () => ipcRenderer.removeAllListeners('zone-compile-result');
+  },
+
   // Platform info
   platform: process.platform,
 });
@@ -215,6 +230,7 @@ declare global {
       }) => void;
       onMerlinUpdate: (callback: (update: MerlinUIUpdate) => void) => void;
       onMerlinAutoEnd: (callback: () => void) => void;
+      merlinTestShader: (config: TestShaderConfig) => Promise<TestShaderResult>;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;
       streamSpeech: (text: string, mood?: string) => void;
@@ -233,6 +249,7 @@ declare global {
       }) => void;
       tdPushReveal: (effect_type: string, intensity: number, duration: number, landmark?: number) => void;
       onTDStatus: (callback: (status: { connected: boolean; ready: boolean; capabilities?: unknown }) => void) => () => void;
+      onZoneCompileResult: (callback: (result: { zone: string; success: boolean; error?: string }) => void) => () => void;
       platform: NodeJS.Platform;
     };
   }

@@ -101,8 +101,8 @@ let lastFaceStripUrl: string | null = null;
 let lastBodyStripUrl: string | null = null;
 
 // Spout sender names
-let spoutVideoName = 'Parlor';
-let spoutMaskName = 'Parlor Mask';
+let spoutVideoName = 'Merlin';
+let spoutMaskName = 'Merlin Mask';
 
 // Camera orientation (landscape or portrait)
 let isPortraitMode = false;
@@ -1186,7 +1186,7 @@ function addAnalysisBubbles(
 function setupKeyboardHandlers(): void {
   document.addEventListener('keydown', (event) => {
     // Ignore if typing in an input
-    if (event.target instanceof HTMLInputElement) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
 
     // Shift+M toggles Merlin mode
     if (event.code === 'KeyM' && !event.repeat && event.shiftKey) {
@@ -1195,9 +1195,185 @@ function setupKeyboardHandlers(): void {
         toggleMerlinMode();
       }
     }
+
+    // Shift+T opens test shader panel
+    if (event.code === 'KeyT' && !event.repeat && event.shiftKey) {
+      event.preventDefault();
+      toggleTestShaderPanel();
+    }
   });
 
-  console.log('Keyboard handlers ready (Shift+M = Merlin)');
+  console.log('Keyboard handlers ready (Shift+M = Merlin, Shift+T = Test Shaders)');
+}
+
+// ============ TEST SHADER PANEL ============
+
+// Test shader panel state
+let testShaderPanelVisible = false;
+
+/**
+ * Toggle the test shader panel
+ */
+function toggleTestShaderPanel(): void {
+  if (testShaderPanelVisible) {
+    hideTestShaderPanel();
+  } else {
+    showTestShaderPanel();
+  }
+}
+
+/**
+ * Show the test shader panel
+ */
+function showTestShaderPanel(): void {
+  let panel = document.getElementById('test-shader-panel');
+
+  if (!panel) {
+    panel = createTestShaderPanel();
+    document.body.appendChild(panel);
+  }
+
+  panel.classList.add('visible');
+  testShaderPanelVisible = true;
+}
+
+/**
+ * Hide the test shader panel
+ */
+function hideTestShaderPanel(): void {
+  const panel = document.getElementById('test-shader-panel');
+  if (panel) {
+    panel.classList.remove('visible');
+  }
+  testShaderPanelVisible = false;
+}
+
+/**
+ * Create the test shader panel DOM
+ */
+function createTestShaderPanel(): HTMLElement {
+  const panel = document.createElement('div');
+  panel.id = 'test-shader-panel';
+  panel.className = 'test-shader-panel';
+
+  // Intent options
+  const intents = ['confidence', 'calm', 'protection', 'clarity', 'creativity', 'transformation', 'release', 'focus', 'joy', 'wonder'];
+  const intentOptions = intents.map(i => `<option value="${i}">${i}</option>`).join('');
+
+  // Element options
+  const elements = ['fire', 'water', 'air', 'earth', 'light', 'shadow', 'crystal', 'storm', 'flora', 'cosmic'];
+  const elementOptions = elements.map(e => `<option value="${e}">${e}</option>`).join('');
+
+  panel.innerHTML = `
+    <div class="test-shader-header">
+      <h3>Test Shader Generation</h3>
+      <button class="close-btn" onclick="this.closest('.test-shader-panel').classList.remove('visible')">×</button>
+    </div>
+    <div class="test-shader-config">
+      <div class="config-row">
+        <label>Intent:</label>
+        <select id="test-intent">${intentOptions}</select>
+      </div>
+      <div class="config-row">
+        <label>Element:</label>
+        <select id="test-element">${elementOptions}</select>
+      </div>
+      <div class="config-row">
+        <label>Energy:</label>
+        <input type="range" id="test-energy" min="0" max="1" step="0.1" value="0.7">
+        <span id="test-energy-value">0.7</span>
+      </div>
+      <button id="generate-shaders-btn" class="generate-btn">Generate Shaders</button>
+    </div>
+    <div id="test-shader-status" class="test-shader-status"></div>
+    <div id="test-shader-results" class="test-shader-results"></div>
+  `;
+
+  // Add event listeners
+  const energySlider = panel.querySelector('#test-energy') as HTMLInputElement;
+  const energyValue = panel.querySelector('#test-energy-value') as HTMLSpanElement;
+  energySlider.addEventListener('input', () => {
+    energyValue.textContent = energySlider.value;
+  });
+
+  const generateBtn = panel.querySelector('#generate-shaders-btn') as HTMLButtonElement;
+  generateBtn.addEventListener('click', runTestShaderGeneration);
+
+  // Add close handler for X button
+  const closeBtn = panel.querySelector('.close-btn') as HTMLButtonElement;
+  closeBtn.addEventListener('click', () => {
+    testShaderPanelVisible = false;
+  });
+
+  return panel;
+}
+
+/**
+ * Run the test shader generation
+ */
+async function runTestShaderGeneration(): Promise<void> {
+  const intentSelect = document.getElementById('test-intent') as HTMLSelectElement;
+  const elementSelect = document.getElementById('test-element') as HTMLSelectElement;
+  const energySlider = document.getElementById('test-energy') as HTMLInputElement;
+  const statusDiv = document.getElementById('test-shader-status') as HTMLDivElement;
+  const resultsDiv = document.getElementById('test-shader-results') as HTMLDivElement;
+  const generateBtn = document.getElementById('generate-shaders-btn') as HTMLButtonElement;
+
+  const config = {
+    intent: intentSelect.value,
+    element: elementSelect.value,
+    energy: parseFloat(energySlider.value),
+  };
+
+  // Update UI to loading state
+  generateBtn.disabled = true;
+  generateBtn.textContent = 'Generating...';
+  statusDiv.textContent = `Generating ${config.element}/${config.intent} shaders at ${config.energy} energy...`;
+  statusDiv.className = 'test-shader-status loading';
+  resultsDiv.innerHTML = '';
+
+  try {
+    const result = await window.electronAPI.merlinTestShader(config);
+
+    if (result.success) {
+      statusDiv.textContent = `Generated ${result.zones.length} zone shaders`;
+      statusDiv.className = 'test-shader-status success';
+    } else {
+      statusDiv.textContent = result.error || 'Failed to generate shaders';
+      statusDiv.className = 'test-shader-status error';
+    }
+
+    // Display results with status indicators
+    resultsDiv.innerHTML = result.zones.map(zone => `
+      <div class="shader-zone-result" data-zone="${zone.zone}">
+        <div class="zone-header">
+          <span class="zone-status ${zone.status || 'pending'}"></span>
+          <span class="zone-name">${zone.zone}</span>
+          <span class="zone-desc">${zone.description}</span>
+        </div>
+        ${zone.error ? `<div class="zone-error">${escapeHtml(zone.error)}</div>` : ''}
+        ${zone.warnings?.length ? `<div class="zone-warnings">${zone.warnings.map(w => escapeHtml(w)).join('<br>')}</div>` : ''}
+        <pre class="zone-glsl">${escapeHtml(zone.glsl_code)}</pre>
+      </div>
+    `).join('');
+
+  } catch (error) {
+    statusDiv.textContent = `Error: ${error}`;
+    statusDiv.className = 'test-shader-status error';
+  }
+
+  // Reset button
+  generateBtn.disabled = false;
+  generateBtn.textContent = 'Generate Shaders';
+}
+
+/**
+ * Escape HTML for safe display
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /**
@@ -1753,6 +1929,34 @@ if (window.electronAPI) {
   window.electronAPI.onMerlinAutoEnd(() => {
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Session complete - auto-ending...`);
     stopMerlinMode();
+  });
+
+  // Listen for zone compile results to update status indicators
+  window.electronAPI.onZoneCompileResult((result) => {
+    console.log(`[Zone ${new Date().toISOString().slice(11, 23)}] Compile result: ${result.zone} = ${result.success ? 'OK' : result.error}`);
+
+    // Update the status indicator in the test shader panel if visible
+    const zoneResult = document.querySelector(`.shader-zone-result[data-zone="${result.zone}"]`);
+    if (zoneResult) {
+      const statusIndicator = zoneResult.querySelector('.zone-status');
+      if (statusIndicator) {
+        statusIndicator.className = `zone-status ${result.success ? 'active' : 'error'}`;
+      }
+
+      // Add or remove error message
+      const existingError = zoneResult.querySelector('.zone-error');
+      if (result.success) {
+        existingError?.remove();
+      } else if (result.error && !existingError) {
+        const header = zoneResult.querySelector('.zone-header');
+        if (header) {
+          const errorDiv = document.createElement('div');
+          errorDiv.className = 'zone-error';
+          errorDiv.textContent = result.error;
+          header.insertAdjacentElement('afterend', errorDiv);
+        }
+      }
+    }
   });
 }
 

@@ -8,6 +8,7 @@ import { initGemini, analyzeMicroExpressions, analyzeBodyLanguage, interpretVoic
 import { initTTS as initGeminiTTS, generateMentalistSpeech as generateSpeech, isTTSAvailable } from './tts';
 import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './tts-live';
 import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
+import { testShaderGeneration } from './merlin/test-shader';
 import {
   initTDBridge,
   closeTDBridge,
@@ -22,7 +23,7 @@ import {
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState } from '../shared/types';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -632,6 +633,25 @@ ipcMain.on('merlin-update-analysis', (_event, data: {
   }
 });
 
+// Test shader generation (Shift+T debug mode)
+ipcMain.handle('merlin-test-shader', async (_event, config: TestShaderConfig) => {
+  if (!isGeminiAvailable()) {
+    throw new Error('Gemini not available - check GEMINI_API_KEY');
+  }
+
+  console.log(`[Merlin ${ts()}] Test shader: intent=${config.intent} element=${config.element} energy=${config.energy}`);
+  const startTime = Date.now();
+
+  try {
+    const result = await testShaderGeneration(config);
+    console.log(`[Merlin ${ts()}] Test shader complete in ${Date.now() - startTime}ms, ${result.zones.length} zones`);
+    return result;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Test shader failed:`, error);
+    throw error;
+  }
+});
+
 // ============ TTS IPC HANDLERS ============
 
 // Generate speech using Gemini TTS (batch mode)
@@ -740,6 +760,10 @@ app.whenReady().then(async () => {
       const height = isPortrait ? 1280 : 720;
       pushOrientationUpdate(isPortrait, width, height);
       console.log(`Sent initial orientation to TD: ${isPortrait ? 'portrait' : 'landscape'} ${width}x${height}`);
+    },
+    onCompileResult: (result) => {
+      // Forward zone compile results to renderer for UI updates
+      mainWindow?.webContents.send('zone-compile-result', result);
     },
     onError: (error) => {
       console.error('TD Bridge error:', error);

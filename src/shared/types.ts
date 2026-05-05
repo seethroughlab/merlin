@@ -279,6 +279,42 @@ export interface MerlinSessionInfo {
   isActive: boolean;
 }
 
+// ============ TEST SHADER TYPES ============
+
+/**
+ * Configuration for test shader generation
+ */
+export interface TestShaderConfig {
+  intent: string;
+  element: string;
+  energy: number;
+}
+
+/**
+ * Individual zone shader result
+ */
+export interface ZoneShaderResult {
+  zone: string;
+  glsl_code: string;
+  description: string;
+  /** Compile status: pending, active (compiled), or error */
+  status?: 'pending' | 'active' | 'error';
+  /** Error message if compilation failed */
+  error?: string;
+  /** Validation warnings */
+  warnings?: string[];
+}
+
+/**
+ * Result from test shader generation
+ */
+export interface TestShaderResult {
+  zones: ZoneShaderResult[];
+  rawResponse: string;
+  success: boolean;
+  error?: string;
+}
+
 // ============ TTS TYPES ============
 
 /**

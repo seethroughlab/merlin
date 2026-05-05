@@ -55,3 +55,4 @@ coverage/
 .claude
 td/Backup
 td/*.*.toe
+vibe-agent
