@@ -9,6 +9,7 @@ import { initTTS as initGeminiTTS, generateMentalistSpeech as generateSpeech, is
 import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './tts-live';
 import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
 import { testShaderGeneration } from './merlin/test-shader';
+import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
 import {
   initTDBridge,
   closeTDBridge,
@@ -23,7 +24,7 @@ import {
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig } from '../shared/types';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -648,6 +649,40 @@ ipcMain.handle('merlin-test-shader', async (_event, config: TestShaderConfig) =>
     return result;
   } catch (error) {
     console.error(`[Merlin ${ts()}] Test shader failed:`, error);
+    throw error;
+  }
+});
+
+// Test sprite generation - direct spec (Shift+T Sprites tab)
+ipcMain.handle('merlin-test-sprite-direct', async (_event, spec: SpriteTestSpec) => {
+  console.log(`[Merlin ${ts()}] Test sprite (direct): "${spec.description}"`);
+  const startTime = Date.now();
+
+  try {
+    const result = await generateSpriteDirect(spec);
+    console.log(`[Merlin ${ts()}] Test sprite (direct) complete in ${Date.now() - startTime}ms, success=${result.success}`);
+    return result;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Test sprite (direct) failed:`, error);
+    throw error;
+  }
+});
+
+// Test sprite generation - Gemini interpretation (Shift+T Sprites tab)
+ipcMain.handle('merlin-test-sprite-gemini', async (_event, prompt: string) => {
+  if (!isGeminiAvailable()) {
+    throw new Error('Gemini not available - check GEMINI_API_KEY');
+  }
+
+  console.log(`[Merlin ${ts()}] Test sprite (gemini): "${prompt}"`);
+  const startTime = Date.now();
+
+  try {
+    const result = await generateSpriteWithGemini(prompt);
+    console.log(`[Merlin ${ts()}] Test sprite (gemini) complete in ${Date.now() - startTime}ms, success=${result.success}`);
+    return result;
+  } catch (error) {
+    console.error(`[Merlin ${ts()}] Test sprite (gemini) failed:`, error);
     throw error;
   }
 });

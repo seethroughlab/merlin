@@ -315,6 +315,57 @@ export interface TestShaderResult {
   error?: string;
 }
 
+// ============ TEST SPRITE TYPES ============
+
+export type SpriteFrameCount = 4 | 8 | 9 | 12 | 16 | 25;
+export type SpritePlaybackMode = 'loop' | 'once' | 'pingpong' | 'random';
+export type SpriteDriveSource = 'age' | 'life' | 'velocity' | 'id' | 'time';
+
+/**
+ * Direct-spec input for sprite test mode. Mirrors the args of the
+ * live `generate_sprite` Gemini tool plus an explicit `frameDuration`.
+ */
+export interface SpriteTestSpec {
+  description: string;
+  style?: string;
+  animation?: string;
+  frameCount?: SpriteFrameCount;
+  playbackMode?: SpritePlaybackMode;
+  driveSource?: SpriteDriveSource;
+  frameDuration?: number;
+}
+
+/**
+ * Flipbook config returned to the renderer (matches FlipbookConfigMessage / FlipbookConfig).
+ */
+export interface SpriteFlipbookConfig {
+  atlasCols: number;
+  atlasRows: number;
+  frameCount: number;
+  playbackMode: SpritePlaybackMode;
+  frameDuration: number;
+  driveSource: SpriteDriveSource;
+}
+
+/**
+ * Result of a sprite test generation.
+ * `previewPng` is base64-encoded PNG content for inline rendering.
+ * `pushed` reports whether each TD push attempt actually went out
+ * (false when TD is disconnected — Imagen still ran).
+ */
+export interface SpriteTestResult {
+  success: boolean;
+  error?: string;
+  assetId?: string;
+  assetType?: 'single' | 'flipbook';
+  texturePath?: string;
+  previewPng?: string;
+  flipbookConfig?: SpriteFlipbookConfig;
+  /** Args Gemini chose, only set in Gemini-interpretation mode. */
+  geminiArgs?: SpriteTestSpec;
+  pushed: { texture: boolean; flipbook: boolean };
+}
+
 // ============ TTS TYPES ============
 
 /**

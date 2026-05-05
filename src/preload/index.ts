@@ -10,6 +10,8 @@ import type {
   TTSResult,
   TestShaderConfig,
   TestShaderResult,
+  SpriteTestSpec,
+  SpriteTestResult,
 } from '@shared/types';
 
 // Expose protected methods to the renderer process
@@ -127,6 +129,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-test-shader', config);
   },
 
+  // Test sprite generation - direct spec (Shift+T Sprites tab)
+  merlinTestSpriteDirect: (spec: SpriteTestSpec): Promise<SpriteTestResult> => {
+    return ipcRenderer.invoke('merlin-test-sprite-direct', spec);
+  },
+
+  // Test sprite generation - Gemini-interpretation mode
+  merlinTestSpriteGemini: (prompt: string): Promise<SpriteTestResult> => {
+    return ipcRenderer.invoke('merlin-test-sprite-gemini', prompt);
+  },
+
   // ============ TTS ============
 
   // Generate speech using Gemini TTS (batch mode - waits for full audio)
@@ -231,6 +243,8 @@ declare global {
       onMerlinUpdate: (callback: (update: MerlinUIUpdate) => void) => void;
       onMerlinAutoEnd: (callback: () => void) => void;
       merlinTestShader: (config: TestShaderConfig) => Promise<TestShaderResult>;
+      merlinTestSpriteDirect: (spec: SpriteTestSpec) => Promise<SpriteTestResult>;
+      merlinTestSpriteGemini: (prompt: string) => Promise<SpriteTestResult>;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;
       streamSpeech: (text: string, mood?: string) => void;

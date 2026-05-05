@@ -884,6 +884,147 @@
         font-size: 11px;
         color: #cc8;
       }
+
+      /* ============ TEST PANEL TABS ============ */
+
+      .test-shader-tabs {
+        display: flex;
+        gap: 4px;
+        flex: 1;
+        margin: 0 12px;
+      }
+
+      .test-shader-tab {
+        background: transparent;
+        border: 1px solid #444;
+        color: #888;
+        padding: 4px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.15s;
+      }
+
+      .test-shader-tab:hover {
+        background: #2a2a2a;
+        color: #ccc;
+      }
+
+      .test-shader-tab.active {
+        background: #2a3a4a;
+        border-color: #4af;
+        color: #6af;
+      }
+
+      /* Inputs and textareas inside test-shader-config */
+      .test-shader-config input[type="text"],
+      .test-shader-config input[type="number"],
+      .test-shader-config textarea {
+        flex: 1;
+        background: #222;
+        border: 1px solid #444;
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+
+      .test-shader-config input[type="text"]:focus,
+      .test-shader-config input[type="number"]:focus,
+      .test-shader-config textarea:focus {
+        outline: none;
+        border-color: #6af;
+      }
+
+      .test-shader-config textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+
+      /* Sprite mode toggle (Direct / Gemini) */
+      .sprite-mode-toggle {
+        display: flex;
+        gap: 16px;
+        padding: 12px 16px;
+        border-bottom: 1px solid #333;
+        font-size: 13px;
+        color: #aaa;
+      }
+
+      .sprite-mode-toggle label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+
+      .sprite-mode-toggle input[type="radio"] {
+        accent-color: #6af;
+      }
+
+      /* Sprite preview image */
+      .sprite-preview {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 12px;
+      }
+
+      .sprite-preview img {
+        max-width: 256px;
+        max-height: 256px;
+        background: #000;
+        border: 1px solid #333;
+        border-radius: 4px;
+        image-rendering: pixelated;
+      }
+
+      /* Sprite metadata key/value rows */
+      .sprite-meta {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 10px 12px;
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 11px;
+        line-height: 1.6;
+      }
+
+      .sprite-meta .meta-key {
+        color: #888;
+        display: inline-block;
+        min-width: 110px;
+      }
+
+      .sprite-meta .meta-value {
+        color: #ccc;
+        word-break: break-all;
+      }
+
+      /* Gemini args readout */
+      .gemini-args {
+        background: #1a2a3a;
+        border: 1px solid #2a3a4a;
+        border-radius: 4px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+      }
+
+      .gemini-args-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: #6af;
+        margin-bottom: 6px;
+        letter-spacing: 0.5px;
+      }
+
+      .gemini-args pre {
+        margin: 0;
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 11px;
+        color: #cdf;
+        white-space: pre-wrap;
+      }
     </style>
   </head>
   <body>

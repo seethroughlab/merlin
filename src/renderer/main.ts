@@ -1,5 +1,5 @@
 /**
- * Parlor - Renderer Process
+ * Merlin - Renderer Process
  *
  * Handles camera capture, MediaPipe processing, and canvas rendering.
  */
@@ -62,6 +62,11 @@ import type {
   MerlinUIUpdate,
   MerlinResponse,
   SpellState,
+  SpriteTestSpec,
+  SpriteTestResult,
+  SpriteFrameCount,
+  SpritePlaybackMode,
+  SpriteDriveSource,
 } from '../shared/types';
 
 // DOM Elements
@@ -953,7 +958,7 @@ function showWsFormatModal(): void {
     <div style="background: #1a1a1a; padding: 24px; border-radius: 8px; max-width: 700px; max-height: 80vh; overflow-y: auto; border: 1px solid #333;">
       <h2 style="margin: 0 0 16px; color: #fff; font-size: 18px;">WebSocket Message Format</h2>
       <p style="color: #888; font-size: 13px; margin-bottom: 16px;">
-        Parlor runs a WebSocket server on localhost. Clients connect to receive tracking data and scene control messages as JSON.
+        Merlin runs a WebSocket server on localhost. Clients connect to receive tracking data and scene control messages as JSON.
       </p>
       <h3 style="color: #0f0; font-size: 14px; margin: 16px 0 8px;">High-Frequency (30fps):</h3>
       <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
@@ -1249,7 +1254,7 @@ function hideTestShaderPanel(): void {
 }
 
 /**
- * Create the test shader panel DOM
+ * Create the test panel DOM with tabs (Shaders / Sprites)
  */
 function createTestShaderPanel(): HTMLElement {
   const panel = document.createElement('div');
@@ -1264,32 +1269,100 @@ function createTestShaderPanel(): HTMLElement {
   const elements = ['fire', 'water', 'air', 'earth', 'light', 'shadow', 'crystal', 'storm', 'flora', 'cosmic'];
   const elementOptions = elements.map(e => `<option value="${e}">${e}</option>`).join('');
 
+  // Sprite dropdowns
+  const frameCountOptions = [4, 8, 9, 12, 16, 25]
+    .map(n => `<option value="${n}"${n === 16 ? ' selected' : ''}>${n}</option>`)
+    .join('');
+  const playbackOptions = ['loop', 'once', 'pingpong', 'random']
+    .map(m => `<option value="${m}">${m}</option>`)
+    .join('');
+  const driveOptions = ['age', 'life', 'velocity', 'id', 'time']
+    .map(d => `<option value="${d}">${d}</option>`)
+    .join('');
+
   panel.innerHTML = `
     <div class="test-shader-header">
-      <h3>Test Shader Generation</h3>
-      <button class="close-btn" onclick="this.closest('.test-shader-panel').classList.remove('visible')">×</button>
+      <h3>Test Mode</h3>
+      <div class="test-shader-tabs">
+        <button class="test-shader-tab active" data-tab="shaders">Shaders</button>
+        <button class="test-shader-tab" data-tab="sprites">Sprites</button>
+      </div>
+      <button class="close-btn">×</button>
     </div>
-    <div class="test-shader-config">
-      <div class="config-row">
-        <label>Intent:</label>
-        <select id="test-intent">${intentOptions}</select>
+
+    <div class="test-shader-tab-content" data-tab="shaders">
+      <div class="test-shader-config">
+        <div class="config-row">
+          <label>Intent:</label>
+          <select id="test-intent">${intentOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Element:</label>
+          <select id="test-element">${elementOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Energy:</label>
+          <input type="range" id="test-energy" min="0" max="1" step="0.1" value="0.7">
+          <span id="test-energy-value">0.7</span>
+        </div>
+        <button id="generate-shaders-btn" class="generate-btn">Generate Shaders</button>
       </div>
-      <div class="config-row">
-        <label>Element:</label>
-        <select id="test-element">${elementOptions}</select>
-      </div>
-      <div class="config-row">
-        <label>Energy:</label>
-        <input type="range" id="test-energy" min="0" max="1" step="0.1" value="0.7">
-        <span id="test-energy-value">0.7</span>
-      </div>
-      <button id="generate-shaders-btn" class="generate-btn">Generate Shaders</button>
+      <div id="test-shader-status" class="test-shader-status"></div>
+      <div id="test-shader-results" class="test-shader-results"></div>
     </div>
-    <div id="test-shader-status" class="test-shader-status"></div>
-    <div id="test-shader-results" class="test-shader-results"></div>
+
+    <div class="test-shader-tab-content" data-tab="sprites" style="display: none;">
+      <div class="sprite-mode-toggle">
+        <label><input type="radio" name="sprite-mode" value="direct" checked> Direct Spec</label>
+        <label><input type="radio" name="sprite-mode" value="gemini"> Gemini Interpretation</label>
+      </div>
+
+      <div class="test-shader-config sprite-direct-form">
+        <div class="config-row">
+          <label>Description:</label>
+          <input type="text" id="sprite-description" placeholder="glowing blue orb">
+        </div>
+        <div class="config-row">
+          <label>Style:</label>
+          <input type="text" id="sprite-style" placeholder="soft glow">
+        </div>
+        <div class="config-row">
+          <label>Animation:</label>
+          <input type="text" id="sprite-animation" placeholder="(blank = single sprite)">
+        </div>
+        <div class="config-row">
+          <label>Frames:</label>
+          <select id="sprite-frame-count">${frameCountOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Playback:</label>
+          <select id="sprite-playback">${playbackOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Drive:</label>
+          <select id="sprite-drive">${driveOptions}</select>
+        </div>
+        <div class="config-row">
+          <label>Frame dur:</label>
+          <input type="number" id="sprite-frame-duration" value="0.1" step="0.01" min="0.001">
+        </div>
+        <button id="generate-sprite-btn" class="generate-btn">Generate Sprite</button>
+      </div>
+
+      <div class="test-shader-config sprite-gemini-form" style="display: none;">
+        <div class="config-row">
+          <label>Prompt:</label>
+          <textarea id="sprite-gemini-prompt" rows="3" placeholder="a slow-pulsing protective shield, 9 frames, plays once"></textarea>
+        </div>
+        <button id="generate-sprite-gemini-btn" class="generate-btn">Interpret &amp; Generate</button>
+      </div>
+
+      <div id="sprite-status" class="test-shader-status"></div>
+      <div id="sprite-results" class="test-shader-results"></div>
+    </div>
   `;
 
-  // Add event listeners
+  // === Shader tab event listeners (unchanged behavior) ===
   const energySlider = panel.querySelector('#test-energy') as HTMLInputElement;
   const energyValue = panel.querySelector('#test-energy-value') as HTMLSpanElement;
   energySlider.addEventListener('input', () => {
@@ -1299,9 +1372,40 @@ function createTestShaderPanel(): HTMLElement {
   const generateBtn = panel.querySelector('#generate-shaders-btn') as HTMLButtonElement;
   generateBtn.addEventListener('click', runTestShaderGeneration);
 
-  // Add close handler for X button
+  // === Sprites tab event listeners ===
+  const directBtn = panel.querySelector('#generate-sprite-btn') as HTMLButtonElement;
+  directBtn.addEventListener('click', runSpriteDirect);
+
+  const geminiBtn = panel.querySelector('#generate-sprite-gemini-btn') as HTMLButtonElement;
+  geminiBtn.addEventListener('click', runSpriteGemini);
+
+  panel.querySelectorAll('input[name="sprite-mode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const mode = (radio as HTMLInputElement).value;
+      const directForm = panel.querySelector('.sprite-direct-form') as HTMLElement;
+      const geminiForm = panel.querySelector('.sprite-gemini-form') as HTMLElement;
+      directForm.style.display = mode === 'direct' ? '' : 'none';
+      geminiForm.style.display = mode === 'gemini' ? '' : 'none';
+    });
+  });
+
+  // === Tab switching ===
+  panel.querySelectorAll('.test-shader-tab').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      const tabName = (tabBtn as HTMLButtonElement).dataset.tab;
+      panel.querySelectorAll('.test-shader-tab').forEach(b => b.classList.remove('active'));
+      tabBtn.classList.add('active');
+      panel.querySelectorAll('.test-shader-tab-content').forEach(content => {
+        const el = content as HTMLElement;
+        el.style.display = el.dataset.tab === tabName ? '' : 'none';
+      });
+    });
+  });
+
+  // Close handler
   const closeBtn = panel.querySelector('.close-btn') as HTMLButtonElement;
   closeBtn.addEventListener('click', () => {
+    panel.classList.remove('visible');
     testShaderPanelVisible = false;
   });
 
@@ -1374,6 +1478,166 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Read the Direct-mode form into a SpriteTestSpec.
+ */
+function readSpriteSpecFromForm(): SpriteTestSpec | null {
+  const description = (document.getElementById('sprite-description') as HTMLInputElement).value.trim();
+  if (!description) return null;
+
+  const style = (document.getElementById('sprite-style') as HTMLInputElement).value.trim();
+  const animation = (document.getElementById('sprite-animation') as HTMLInputElement).value.trim();
+  const frameCount = parseInt((document.getElementById('sprite-frame-count') as HTMLSelectElement).value, 10) as SpriteFrameCount;
+  const playbackMode = (document.getElementById('sprite-playback') as HTMLSelectElement).value as SpritePlaybackMode;
+  const driveSource = (document.getElementById('sprite-drive') as HTMLSelectElement).value as SpriteDriveSource;
+  const frameDuration = parseFloat((document.getElementById('sprite-frame-duration') as HTMLInputElement).value);
+
+  const spec: SpriteTestSpec = { description };
+  if (style) spec.style = style;
+  if (animation) spec.animation = animation;
+  // Only include flipbook params when there's an animation; single-sprite path ignores them.
+  if (animation) {
+    spec.frameCount = frameCount;
+    spec.playbackMode = playbackMode;
+    spec.driveSource = driveSource;
+    if (!isNaN(frameDuration)) spec.frameDuration = frameDuration;
+  }
+  return spec;
+}
+
+/**
+ * Run sprite generation in Direct mode.
+ */
+async function runSpriteDirect(): Promise<void> {
+  const btn = document.getElementById('generate-sprite-btn') as HTMLButtonElement;
+  const statusDiv = document.getElementById('sprite-status') as HTMLDivElement;
+  const resultsDiv = document.getElementById('sprite-results') as HTMLDivElement;
+
+  const spec = readSpriteSpecFromForm();
+  if (!spec) {
+    statusDiv.textContent = 'Description is required';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  statusDiv.textContent = `Generating ${spec.animation ? 'flipbook' : 'sprite'}: "${spec.description}"...`;
+  statusDiv.className = 'test-shader-status loading';
+  resultsDiv.innerHTML = '';
+
+  try {
+    const result = await window.electronAPI.merlinTestSpriteDirect(spec);
+    renderSpriteResult(result, statusDiv, resultsDiv);
+  } catch (error) {
+    statusDiv.textContent = `Error: ${error}`;
+    statusDiv.className = 'test-shader-status error';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Generate Sprite';
+}
+
+/**
+ * Run sprite generation in Gemini-interpretation mode.
+ */
+async function runSpriteGemini(): Promise<void> {
+  const btn = document.getElementById('generate-sprite-gemini-btn') as HTMLButtonElement;
+  const statusDiv = document.getElementById('sprite-status') as HTMLDivElement;
+  const resultsDiv = document.getElementById('sprite-results') as HTMLDivElement;
+  const promptEl = document.getElementById('sprite-gemini-prompt') as HTMLTextAreaElement;
+
+  const prompt = promptEl.value.trim();
+  if (!prompt) {
+    statusDiv.textContent = 'Prompt is required';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Interpreting...';
+  statusDiv.textContent = 'Asking Gemini to choose sprite parameters...';
+  statusDiv.className = 'test-shader-status loading';
+  resultsDiv.innerHTML = '';
+
+  try {
+    const result = await window.electronAPI.merlinTestSpriteGemini(prompt);
+    renderSpriteResult(result, statusDiv, resultsDiv);
+  } catch (error) {
+    statusDiv.textContent = `Error: ${error}`;
+    statusDiv.className = 'test-shader-status error';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Interpret & Generate';
+}
+
+/**
+ * Render a sprite result into the status + results panels.
+ */
+function renderSpriteResult(
+  result: SpriteTestResult,
+  statusDiv: HTMLDivElement,
+  resultsDiv: HTMLDivElement
+): void {
+  if (!result.success) {
+    statusDiv.textContent = result.error || 'Generation failed';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+
+  // Status: success, but warn if TD push failed.
+  if (result.pushed.texture === false) {
+    statusDiv.textContent = 'Generated, but TD not connected — texture not pushed';
+    statusDiv.className = 'test-shader-status error';
+  } else {
+    statusDiv.textContent = `Generated ${result.assetType} sprite (${result.assetId})`;
+    statusDiv.className = 'test-shader-status success';
+  }
+
+  const parts: string[] = [];
+
+  if (result.geminiArgs) {
+    parts.push(`
+      <div class="gemini-args">
+        <div class="gemini-args-title">Gemini chose:</div>
+        <pre>${escapeHtml(JSON.stringify(result.geminiArgs, null, 2))}</pre>
+      </div>
+    `);
+  }
+
+  if (result.previewPng) {
+    parts.push(`
+      <div class="sprite-preview">
+        <img src="data:image/png;base64,${result.previewPng}" alt="generated sprite" />
+      </div>
+    `);
+  }
+
+  const meta: Array<[string, string]> = [
+    ['assetId', result.assetId ?? '-'],
+    ['assetType', result.assetType ?? '-'],
+    ['texturePath', result.texturePath ?? '-'],
+    ['texturePushed', String(result.pushed.texture)],
+  ];
+  if (result.assetType === 'flipbook' && result.flipbookConfig) {
+    meta.push(['atlas', `${result.flipbookConfig.atlasCols}x${result.flipbookConfig.atlasRows}`]);
+    meta.push(['frameCount', String(result.flipbookConfig.frameCount)]);
+    meta.push(['playbackMode', result.flipbookConfig.playbackMode]);
+    meta.push(['frameDuration', String(result.flipbookConfig.frameDuration)]);
+    meta.push(['driveSource', result.flipbookConfig.driveSource]);
+    meta.push(['flipbookPushed', String(result.pushed.flipbook)]);
+  }
+
+  parts.push(`
+    <div class="sprite-meta">
+      ${meta.map(([k, v]) => `<div><span class="meta-key">${k}:</span> <span class="meta-value">${escapeHtml(v)}</span></div>`).join('')}
+    </div>
+  `);
+
+  resultsDiv.innerHTML = parts.join('');
 }
 
 /**
@@ -1854,7 +2118,7 @@ function updateMerlinSpeakingIndicator(speaking: boolean): void {
  * Main entry point
  */
 async function main(): Promise<void> {
-  console.log(`Parlor renderer starting... (spout: ${isSpoutMode}, mask: ${isMaskMode})`);
+  console.log(`Merlin renderer starting... (spout: ${isSpoutMode}, mask: ${isMaskMode})`);
 
   // Load saved device selections before opening any media streams
   await initDeviceSelection();

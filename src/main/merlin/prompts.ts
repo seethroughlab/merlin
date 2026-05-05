@@ -524,7 +524,7 @@ Only call this when you want to visually verify your shader changes - it adds la
 /**
  * Tool: Generate custom particle sprite
  */
-const GENERATE_SPRITE_TOOL: FunctionDeclaration = {
+export const GENERATE_SPRITE_TOOL: FunctionDeclaration = {
   name: 'generate_sprite',
   description: `Generate a custom AI-generated sprite texture for the particles. Use this to create unique visual textures that match the spell's intent and element.
 
