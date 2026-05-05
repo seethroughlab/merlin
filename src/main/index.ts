@@ -12,6 +12,7 @@ import { testShaderGeneration } from './merlin/test-shader';
 import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
 import { setRenderMode, applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-render-mode';
 import { generateSpellProgramWithGemini } from './merlin/test-spell-program';
+import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
 import {
   initTDBridge,
   closeTDBridge,
@@ -205,6 +206,10 @@ function createMainWindow(): void {
   if (bounds.isMaximized) {
     mainWindow.maximize();
   }
+
+  // Wire the Gemini conversation event publisher to this window so
+  // test-mode and live-session callers can stream activity to the sidebar.
+  setGeminiEventsMainWindow(mainWindow);
 
   // In development, load from Vite dev server
   if (process.env.VITE_DEV_SERVER_URL) {

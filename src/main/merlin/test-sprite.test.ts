@@ -39,8 +39,9 @@ vi.mock('fs', () => ({
 }));
 
 // Gemini SDK mock
-const { mockGenerateContent, mockGetGenerativeModel } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(),
+const { mockSendMessage, mockStartChat, mockGetGenerativeModel } = vi.hoisted(() => ({
+  mockSendMessage: vi.fn(),
+  mockStartChat: vi.fn(),
   mockGetGenerativeModel: vi.fn(),
 }));
 
@@ -49,6 +50,11 @@ vi.mock('@google/generative-ai', () => ({
     getGenerativeModel = mockGetGenerativeModel;
   },
   FunctionCallingMode: { ANY: 'ANY' },
+}));
+
+vi.mock('./gemini-events', () => ({
+  emitGeminiTurn: vi.fn(),
+  nextTurnId: () => 'test-turn-id',
 }));
 
 vi.mock('./prompts', () => ({
@@ -104,7 +110,8 @@ beforeEach(() => {
     generateSpriteSync: mockGenerateSpriteSync,
     generateFlipbookSync: mockGenerateFlipbookSync,
   });
-  mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent });
+  mockStartChat.mockReturnValue({ sendMessage: mockSendMessage });
+  mockGetGenerativeModel.mockReturnValue({ startChat: mockStartChat });
 });
 
 describe('generateSpriteDirect', () => {
@@ -255,7 +262,7 @@ describe('generateSpriteWithGemini', () => {
   it('parses Gemini tool args, attaches geminiArgs, and delegates to direct path', async () => {
     const { generateSpriteWithGemini } = await import('./test-sprite');
 
-    mockGenerateContent.mockResolvedValue({
+    mockSendMessage.mockResolvedValue({
       response: {
         candidates: [
           {
@@ -302,7 +309,7 @@ describe('generateSpriteWithGemini', () => {
   it('returns failure when Gemini does not call the tool', async () => {
     const { generateSpriteWithGemini } = await import('./test-sprite');
 
-    mockGenerateContent.mockResolvedValue({
+    mockSendMessage.mockResolvedValue({
       response: {
         candidates: [
           { content: { parts: [{ text: 'I cannot help with that.' }] } },

@@ -26,8 +26,9 @@ vi.mock('./prompts', () => ({
   GENERATE_SPELL_PROGRAM_TOOL: { name: 'set_spell_program' },
 }));
 
-const { mockGenerateContent, mockGetGenerativeModel } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(),
+const { mockSendMessage, mockStartChat, mockGetGenerativeModel } = vi.hoisted(() => ({
+  mockSendMessage: vi.fn(),
+  mockStartChat: vi.fn(),
   mockGetGenerativeModel: vi.fn(),
 }));
 
@@ -36,6 +37,11 @@ vi.mock('@google/generative-ai', () => ({
     getGenerativeModel = mockGetGenerativeModel;
   },
   FunctionCallingMode: { ANY: 'ANY' },
+}));
+
+vi.mock('./gemini-events', () => ({
+  emitGeminiTurn: vi.fn(),
+  nextTurnId: () => 'test-turn-id',
 }));
 
 // === Helpers ===
@@ -87,7 +93,8 @@ function geminiToolCall(args: Record<string, unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.GEMINI_API_KEY = 'test-key';
-  mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent });
+  mockStartChat.mockReturnValue({ sendMessage: mockSendMessage });
+  mockGetGenerativeModel.mockReturnValue({ startChat: mockStartChat });
   mockCreateBuildupProgram.mockReturnValue(makeBuildupBase());
   mockCreateReleaseProgram.mockReturnValue(makeReleaseBase());
   mockPushParticleSpellProgram.mockReturnValue(true);
@@ -161,11 +168,11 @@ describe('generateSpellProgramWithGemini', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/required/i);
-    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
   });
 
   it('buildup: clamps Gemini energy to BUILDUP_ENERGY_MAX', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiToolCall({ archetype: 'rising_embers', energy: 0.95 }));
+    mockSendMessage.mockResolvedValueOnce(geminiToolCall({ archetype: 'rising_embers', energy: 0.95 }));
 
     const { generateSpellProgramWithGemini } = await import('./test-spell-program');
     const result = await generateSpellProgramWithGemini({
@@ -182,7 +189,7 @@ describe('generateSpellProgramWithGemini', () => {
   });
 
   it('release: castEnvelope from Gemini overrides default', async () => {
-    mockGenerateContent.mockResolvedValueOnce(
+    mockSendMessage.mockResolvedValueOnce(
       geminiToolCall({
         castEnvelope: { ignitionMs: 200, projectionMs: 800, afterglowMs: 1500, peakIntensity: 0.7 },
       })
@@ -205,7 +212,7 @@ describe('generateSpellProgramWithGemini', () => {
   });
 
   it('buildup: ignores castEnvelope (release-only)', async () => {
-    mockGenerateContent.mockResolvedValueOnce(
+    mockSendMessage.mockResolvedValueOnce(
       geminiToolCall({
         castEnvelope: { ignitionMs: 999, projectionMs: 999, afterglowMs: 999, peakIntensity: 1.0 },
       })
@@ -224,7 +231,7 @@ describe('generateSpellProgramWithGemini', () => {
   });
 
   it('zoneOverrides merge into base program zones (long->short name translation)', async () => {
-    mockGenerateContent.mockResolvedValueOnce(
+    mockSendMessage.mockResolvedValueOnce(
       geminiToolCall({
         zoneOverrides: {
           force_field: { forceStrength: 0.9 },
@@ -247,7 +254,7 @@ describe('generateSpellProgramWithGemini', () => {
   });
 
   it('reports pushed=false when TD is disconnected', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiToolCall({ archetype: 'rising_embers' }));
+    mockSendMessage.mockResolvedValueOnce(geminiToolCall({ archetype: 'rising_embers' }));
     mockPushParticleSpellProgram.mockReturnValueOnce(false);
 
     const { generateSpellProgramWithGemini } = await import('./test-spell-program');
@@ -261,7 +268,7 @@ describe('generateSpellProgramWithGemini', () => {
   });
 
   it('returns failure when Gemini does not call the tool', async () => {
-    mockGenerateContent.mockResolvedValueOnce({
+    mockSendMessage.mockResolvedValueOnce({
       response: {
         candidates: [{ content: { parts: [{ text: 'I cannot help.' }] } }],
       },

@@ -75,6 +75,11 @@ import type {
   SpellProgramTestInput,
   SpellProgramTestResult,
   SpellProgramMode,
+  GeminiTurn,
+  GeminiToolCall,
+  GeminiPushResult,
+  GeminiRetryMarker,
+  GeminiTurnSource,
 } from '../shared/types';
 import { SHADER_TEST_PRESETS } from '../shared/test-shader-presets';
 
@@ -1249,6 +1254,13 @@ function showTestShaderPanel(): void {
 
   panel.classList.add('visible');
   testShaderPanelVisible = true;
+
+  // Auto-open the Merlin sidebar so test-mode Gemini activity is visible.
+  // Existing CSS handles the rest of the layout once these classes are set.
+  const sidebar = document.getElementById('sidebar');
+  const merlinPanel = document.getElementById('merlin-panel');
+  sidebar?.classList.add('merlin-active');
+  merlinPanel?.classList.add('active');
 }
 
 /**
@@ -2210,6 +2222,162 @@ function addMerlinMessage(role: 'user' | 'assistant', content: string): void {
   conversation.scrollTop = conversation.scrollHeight;
 }
 
+// ============ GEMINI CONVERSATION SIDEBAR ============
+
+const SOURCE_LABELS: Record<GeminiTurnSource, string> = {
+  live: 'Live',
+  test_shader: 'Shaders',
+  test_sprite: 'Sprites',
+  test_spell_program: 'Spell Program',
+};
+
+function ensureTurnCard(turn: Partial<GeminiTurn> & { id: string; source: GeminiTurnSource }): HTMLElement | null {
+  const conversation = document.getElementById('merlin-conversation');
+  if (!conversation) return null;
+
+  let card = conversation.querySelector<HTMLElement>(`.gemini-turn[data-turn-id="${turn.id}"]`);
+  if (card) return card;
+
+  card = document.createElement('div');
+  card.className = 'gemini-turn';
+  card.dataset.turnId = turn.id;
+  card.dataset.source = turn.source;
+  card.innerHTML = `
+    <div class="gemini-turn-header">
+      <span class="gemini-turn-source">${SOURCE_LABELS[turn.source] ?? turn.source}</span>
+    </div>
+    <div class="gemini-turn-body"></div>
+  `;
+  conversation.appendChild(card);
+  return card;
+}
+
+function appendGeminiTurn(turn: Partial<GeminiTurn> & { id: string; source: GeminiTurnSource }): void {
+  const card = ensureTurnCard(turn);
+  if (!card) return;
+  const body = card.querySelector<HTMLElement>('.gemini-turn-body')!;
+
+  // System prompt — collapsed details block, only added on first sight.
+  if (turn.systemPrompt && !card.querySelector('.gemini-system-prompt')) {
+    const det = document.createElement('details');
+    det.className = 'gemini-system-prompt';
+    const summary = document.createElement('summary');
+    summary.textContent = `system prompt (${turn.systemPrompt.length.toLocaleString()} chars)`;
+    const pre = document.createElement('pre');
+    pre.textContent = turn.systemPrompt;
+    det.appendChild(summary);
+    det.appendChild(pre);
+    body.appendChild(det);
+  }
+
+  // User prompt — only on first sight.
+  if (turn.userPrompt && !card.querySelector('.gemini-user-prompt')) {
+    const userDiv = document.createElement('div');
+    userDiv.className = 'gemini-user-prompt';
+    userDiv.innerHTML = `<div class="gemini-role">You</div><div class="gemini-text"></div>`;
+    userDiv.querySelector('.gemini-text')!.textContent = turn.userPrompt;
+    body.appendChild(userDiv);
+  }
+
+  // Response text and tool calls — each emission produces a new section so
+  // retry-followup responses appear below their pushResults.
+  if (turn.responseText || (turn.toolCalls && turn.toolCalls.length > 0)) {
+    const respDiv = document.createElement('div');
+    respDiv.className = 'gemini-response';
+    respDiv.innerHTML = `<div class="gemini-role">Gemini</div>`;
+
+    if (turn.responseText) {
+      const textDiv = document.createElement('div');
+      textDiv.className = 'gemini-text';
+      textDiv.textContent = turn.responseText;
+      respDiv.appendChild(textDiv);
+    }
+
+    if (turn.toolCalls && turn.toolCalls.length > 0) {
+      const callsDiv = document.createElement('div');
+      callsDiv.className = 'gemini-tool-calls';
+      for (const tc of turn.toolCalls) {
+        callsDiv.appendChild(renderToolCall(tc));
+      }
+      respDiv.appendChild(callsDiv);
+    }
+    body.appendChild(respDiv);
+  }
+
+  // Push results — append each as a row.
+  if (turn.pushResults && turn.pushResults.length > 0) {
+    const resultsDiv = document.createElement('div');
+    resultsDiv.className = 'gemini-push-results';
+    for (const pr of turn.pushResults) {
+      resultsDiv.appendChild(renderPushResult(pr));
+    }
+    body.appendChild(resultsDiv);
+  }
+
+  // Retry marker — visual divider before the next response.
+  if (turn.retry) {
+    body.appendChild(renderRetryMarker(turn.retry));
+  }
+
+  // Final marker — purely cosmetic; could be used to "lock" the card.
+  if (turn.final) {
+    card.classList.add('final');
+  }
+
+  const conversation = document.getElementById('merlin-conversation');
+  if (conversation) conversation.scrollTop = conversation.scrollHeight;
+}
+
+function renderToolCall(tc: GeminiToolCall): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'gemini-tool-call';
+  const argsSummary = summarizeToolArgs(tc.args);
+  row.innerHTML = `<span class="gemini-tool-glyph">⊳</span> <span class="gemini-tool-name">${escapeHtml(tc.name)}</span>`;
+  if (argsSummary) {
+    const argsSpan = document.createElement('span');
+    argsSpan.className = 'gemini-tool-call-args';
+    argsSpan.textContent = ` ${argsSummary}`;
+    row.appendChild(argsSpan);
+  }
+  return row;
+}
+
+function summarizeToolArgs(args: Record<string, unknown>): string {
+  // Compact one-line summary for the row header. Long fields (glsl_code,
+  // descriptions, full programs) are elided here and shown on click via
+  // a "details" expansion if we add it later.
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === 'string') {
+      const short = v.length > 40 ? `"${v.slice(0, 37)}…"` : `"${v}"`;
+      parts.push(`${k}=${short}`);
+    } else if (typeof v === 'number' || typeof v === 'boolean') {
+      parts.push(`${k}=${v}`);
+    } else if (v && typeof v === 'object') {
+      parts.push(`${k}={…}`);
+    }
+    if (parts.join(', ').length > 100) break;
+  }
+  return parts.length > 0 ? `(${parts.join(', ')})` : '';
+}
+
+function renderPushResult(pr: GeminiPushResult): HTMLElement {
+  const row = document.createElement('div');
+  row.className = `gemini-push-result ${pr.success ? 'success' : 'error'}`;
+  const label = pr.zone ?? pr.label ?? 'unknown';
+  const glyph = pr.success ? '✓' : '✗';
+  row.textContent = `TD: ${glyph} ${label}${pr.error ? ` — ${pr.error}` : ''}`;
+  return row;
+}
+
+function renderRetryMarker(r: GeminiRetryMarker): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'gemini-retry-marker';
+  const zone = r.zone ? ` — ${r.zone}` : '';
+  div.textContent = `↻ retry ${r.attempt}/${r.total}${zone}`;
+  return div;
+}
+
 /**
  * Clear Merlin conversation
  */
@@ -2557,6 +2725,12 @@ if (window.electronAPI) {
   window.electronAPI.onMerlinUpdate((update: MerlinUIUpdate) => {
     console.log('[Merlin] UI update received:', update);
     updateMerlinUI(update);
+  });
+
+  // Listen for Gemini conversation events (sidebar turn cards)
+  window.electronAPI.onGeminiConversation((turn) => {
+    if (!turn || !turn.id || !turn.source) return;
+    appendGeminiTurn(turn as Partial<GeminiTurn> & { id: string; source: GeminiTurnSource });
   });
 
   // Listen for auto-end signal when Merlin session completes

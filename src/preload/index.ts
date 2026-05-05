@@ -18,6 +18,7 @@ import type {
   MirroredTDState,
   SpellProgramTestInput,
   SpellProgramTestResult,
+  GeminiTurn,
 } from '@shared/types';
 
 // Expose protected methods to the renderer process
@@ -165,6 +166,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-test-spell-program', input);
   },
 
+  // Listen for Gemini conversation events (used by the unified sidebar)
+  onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => {
+    const handler = (_event: unknown, turn: Partial<GeminiTurn>) => callback(turn);
+    ipcRenderer.on('gemini-conversation', handler);
+    return () => ipcRenderer.removeAllListeners('gemini-conversation');
+  },
+
   // ============ TTS ============
 
   // Generate speech using Gemini TTS (batch mode - waits for full audio)
@@ -275,6 +283,7 @@ declare global {
       merlinTestFlipbookConfig: (config: SpriteFlipbookConfig) => Promise<RenderModeTestResult>;
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
       merlinTestSpellProgram: (input: SpellProgramTestInput) => Promise<SpellProgramTestResult>;
+      onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => () => void;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;
       streamSpeech: (text: string, mood?: string) => void;

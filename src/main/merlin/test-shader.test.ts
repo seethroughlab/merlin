@@ -46,9 +46,10 @@ vi.mock('./zone-registry', () => ({
   },
 }));
 
-// Gemini SDK mock
-const { mockGenerateContent, mockGetGenerativeModel } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(),
+// Gemini SDK mock — chat-based as of Phase 5.
+const { mockSendMessage, mockStartChat, mockGetGenerativeModel } = vi.hoisted(() => ({
+  mockSendMessage: vi.fn(),
+  mockStartChat: vi.fn(),
   mockGetGenerativeModel: vi.fn(),
 }));
 
@@ -57,6 +58,11 @@ vi.mock('@google/generative-ai', () => ({
     getGenerativeModel = mockGetGenerativeModel;
   },
   FunctionCallingMode: { ANY: 'ANY' },
+}));
+
+vi.mock('./gemini-events', () => ({
+  emitGeminiTurn: vi.fn(),
+  nextTurnId: () => 'test-turn-id',
 }));
 
 // === Helpers ===
@@ -83,7 +89,8 @@ function geminiCallsForZones(zones: string[]) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.GEMINI_API_KEY = 'test-key';
-  mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent });
+  mockStartChat.mockReturnValue({ sendMessage: mockSendMessage });
+  mockGetGenerativeModel.mockReturnValue({ startChat: mockStartChat });
   mockPushZoneUpdateWithValidation.mockResolvedValue({ success: true, warnings: [] });
 });
 
@@ -94,7 +101,7 @@ describe('testShaderGeneration', () => {
       'spawn_behavior', 'velocity_modifier', 'post_fx',
       'material_pixel', 'billboard_pixel', 'billboard_vertex',
     ];
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(expected));
+    mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(expected));
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({ intent: 'calm', element: 'air', energy: 0.5 });
@@ -114,7 +121,7 @@ describe('testShaderGeneration', () => {
 
   it('honors explicit zone subset', async () => {
     const subset = ['force_field', 'post_fx'];
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(subset));
+    mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(subset));
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
@@ -137,7 +144,7 @@ describe('testShaderGeneration', () => {
   });
 
   it('billboard_vertex is now allowed (Phase 4 added the marker)', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['billboard_vertex']));
+    mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(['billboard_vertex']));
 
     const { testShaderGeneration } = await import('./test-shader');
     await testShaderGeneration({
@@ -151,7 +158,7 @@ describe('testShaderGeneration', () => {
   });
 
   it('loads templates from disk for each selected zone', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['force_field', 'post_fx']));
+    mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(['force_field', 'post_fx']));
 
     const { testShaderGeneration } = await import('./test-shader');
     await testShaderGeneration({
@@ -166,7 +173,7 @@ describe('testShaderGeneration', () => {
   it('drops Gemini tool calls for zones not in the requested set', async () => {
     // Gemini overshoots and returns force_field + billboard_pixel even though
     // we only asked for force_field.
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['force_field', 'billboard_pixel']));
+    mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(['force_field', 'billboard_pixel']));
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
@@ -179,9 +186,11 @@ describe('testShaderGeneration', () => {
     expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(1);
   });
 
-  it('surfaces per-zone push failures via status + error', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['force_field']));
-    mockPushZoneUpdateWithValidation.mockResolvedValueOnce({ success: false, error: 'compile error' });
+  it('retries on compile failure and surfaces final error after 3 attempts', async () => {
+    // All 3 attempts (initial + 2 retries) fail; sendMessage keeps
+    // returning the same shape so each retry has new code to push.
+    mockSendMessage.mockResolvedValue(geminiCallsForZones(['force_field']));
+    mockPushZoneUpdateWithValidation.mockResolvedValue({ success: false, error: 'compile error' });
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
@@ -191,10 +200,33 @@ describe('testShaderGeneration', () => {
 
     expect(result.zones[0].status).toBe('error');
     expect(result.zones[0].error).toBe('compile error');
+    // Initial attempt + 2 retries = 3 total push calls for the failing zone
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(3);
+    // Initial sendMessage + 2 retry sendMessages = 3 total
+    expect(mockSendMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('succeeds when retry succeeds after initial failure', async () => {
+    mockSendMessage.mockResolvedValue(geminiCallsForZones(['force_field']));
+    mockPushZoneUpdateWithValidation
+      .mockResolvedValueOnce({ success: false, error: 'compile error' })
+      .mockResolvedValueOnce({ success: true, warnings: [] });
+
+    const { testShaderGeneration } = await import('./test-shader');
+    const result = await testShaderGeneration({
+      intent: 'calm', element: 'air', energy: 0.3,
+      zones: ['force_field'],
+    });
+
+    expect(result.zones[0].status).toBe('active');
+    expect(result.success).toBe(true);
+    // 1 retry happened, so 2 push calls + 2 sendMessage calls
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(2);
+    expect(mockSendMessage).toHaveBeenCalledTimes(2);
   });
 
   it('reports overall failure when fewer zones returned than requested', async () => {
-    mockGenerateContent.mockResolvedValueOnce(geminiCallsForZones(['force_field']));
+    mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(['force_field']));
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({

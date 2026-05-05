@@ -1163,6 +1163,145 @@
       .spell-program-mode-toggle input[type="radio"] {
         accent-color: #6af;
       }
+
+      /* ============ GEMINI CONVERSATION CARDS (sidebar) ============ */
+
+      .gemini-turn {
+        background: #1a1a2a;
+        border: 1px solid #2a2a3a;
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .gemini-turn.final {
+        border-left: 3px solid #4af;
+      }
+
+      .gemini-turn-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+
+      .gemini-turn-source {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #6af;
+        background: #1a2a3a;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-weight: 600;
+      }
+
+      .gemini-turn[data-source="live"] .gemini-turn-source { color: #8bf; background: #1a2a4a; }
+      .gemini-turn[data-source="test_shader"] .gemini-turn-source { color: #6af; }
+      .gemini-turn[data-source="test_sprite"] .gemini-turn-source { color: #fa6; background: #2a2010; }
+      .gemini-turn[data-source="test_spell_program"] .gemini-turn-source { color: #c8a; background: #2a1a2a; }
+
+      .gemini-system-prompt {
+        margin-bottom: 8px;
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 10px;
+      }
+
+      .gemini-system-prompt summary {
+        cursor: pointer;
+        color: #777;
+        padding: 2px 0;
+      }
+
+      .gemini-system-prompt summary:hover {
+        color: #aaa;
+      }
+
+      .gemini-system-prompt pre {
+        margin: 6px 0 0 0;
+        padding: 8px;
+        background: #0f0f18;
+        border-radius: 3px;
+        max-height: 200px;
+        overflow: auto;
+        white-space: pre-wrap;
+        color: #aab;
+      }
+
+      .gemini-user-prompt,
+      .gemini-response {
+        margin: 8px 0;
+      }
+
+      .gemini-role {
+        font-size: 10px;
+        text-transform: uppercase;
+        color: #777;
+        letter-spacing: 0.4px;
+        margin-bottom: 3px;
+      }
+
+      .gemini-text {
+        color: #cdd;
+        white-space: pre-wrap;
+        margin-bottom: 4px;
+      }
+
+      .gemini-tool-calls {
+        margin-top: 4px;
+      }
+
+      .gemini-tool-call {
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 11px;
+        color: #aae;
+        padding: 2px 0;
+      }
+
+      .gemini-tool-glyph {
+        color: #6af;
+        margin-right: 4px;
+      }
+
+      .gemini-tool-name {
+        color: #cce;
+      }
+
+      .gemini-tool-call-args {
+        color: #889;
+      }
+
+      .gemini-push-results {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid #222;
+      }
+
+      .gemini-push-result {
+        font-family: 'Monaco', 'Consolas', monospace;
+        font-size: 11px;
+        padding: 1px 0;
+      }
+
+      .gemini-push-result.success {
+        color: #6c8;
+      }
+
+      .gemini-push-result.error {
+        color: #d77;
+      }
+
+      .gemini-retry-marker {
+        margin-top: 8px;
+        padding: 4px 8px;
+        font-size: 11px;
+        color: #fc6;
+        background: #2a2410;
+        border-left: 2px solid #fc6;
+        border-radius: 2px;
+        font-family: 'Monaco', 'Consolas', monospace;
+      }
     </style>
   </head>
   <body>

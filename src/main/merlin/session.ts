@@ -40,6 +40,10 @@ import {
   pushSpellCast,
   pushZoneUpdateWithValidation,
 } from '../td-bridge';
+import { emitGeminiTurn, nextTurnId } from './gemini-events';
+import type { GeminiToolCall } from '../../shared/types';
+
+const LIVE_RETRY_MAX = 2;
 
 /**
  * Callback for when spell state updates
@@ -230,16 +234,25 @@ export class MerlinSession {
     // Create context message for Gemini
     const contextMessage = createTurnContext(transcript, this.state);
 
+    // Open a sidebar turn for this user input. Per-zone retry counts
+    // live in this map for the duration of the turn (set_zone_shader
+    // failures emit retry markers for the same zone).
+    const turnId = nextTurnId();
+    const zoneAttempts = new Map<string, number>();
+    emitGeminiTurn({ id: turnId, source: 'live', userPrompt: transcript });
+
     // Send to Gemini
     let result = await this.chat.sendMessage(contextMessage);
+    this.emitChatResult(turnId, result);
 
     // Accumulate text across all responses (ignore error placeholder)
     let accumulatedText = result.text === 'No response generated' ? '' : result.text;
 
     // Handle tool calls
     while (result.toolCalls.length > 0) {
-      const toolResults = await this.handleToolCalls(result.toolCalls);
+      const toolResults = await this.handleToolCalls(result.toolCalls, turnId, zoneAttempts);
       result = await this.chat.sendToolResults(toolResults);
+      this.emitChatResult(turnId, result);
 
       // Append any new text
       if (result.text && result.text !== 'No response generated') {
@@ -250,10 +263,12 @@ export class MerlinSession {
     // If still no text after tool calls, ask for a spoken response
     if (!accumulatedText.trim()) {
       const followUp = await this.chat.sendMessage('Now respond to the user based on what you learned. Be brief.');
+      this.emitChatResult(turnId, followUp);
       accumulatedText = followUp.text === 'No response generated' ? '' : followUp.text;
     }
 
     const responseText = accumulatedText || 'I see. Tell me more.';
+    emitGeminiTurn({ id: turnId, source: 'live', responseText, final: true });
 
     // Add assistant response to history
     this.conversationHistory.push({
@@ -276,10 +291,31 @@ export class MerlinSession {
   }
 
   /**
+   * Emit Gemini's response (text + tool calls) to the sidebar.
+   */
+  private emitChatResult(turnId: string, result: ChatTurnResult): void {
+    const toolCalls: GeminiToolCall[] = result.toolCalls.map(tc => ({
+      name: tc.name,
+      args: tc.args as Record<string, unknown>,
+    }));
+    const text = result.text === 'No response generated' ? '' : result.text;
+    if (text || toolCalls.length > 0) {
+      emitGeminiTurn({
+        id: turnId,
+        source: 'live',
+        responseText: text || undefined,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      });
+    }
+  }
+
+  /**
    * Handle tool calls from Gemini
    */
   private async handleToolCalls(
-    toolCalls: MerlinToolCall[]
+    toolCalls: MerlinToolCall[],
+    turnId?: string,
+    zoneAttempts?: Map<string, number>,
   ): Promise<Array<{ name: string; response: unknown }>> {
     const results: Array<{ name: string; response: unknown }> = [];
 
@@ -413,13 +449,35 @@ export class MerlinSession {
             description?: string;
           };
 
+          // Track per-zone attempt count within this turn so we can
+          // mark retries in the sidebar and stop encouraging retries
+          // after MAX_RETRIES.
+          const priorAttempts = zoneAttempts?.get(zone) ?? 0;
+          if (turnId && priorAttempts > 0) {
+            emitGeminiTurn({
+              id: turnId,
+              source: 'live',
+              retry: { attempt: priorAttempts, total: LIVE_RETRY_MAX, zone },
+            });
+          }
+
           // Push the GLSL code with full validation pipeline
           const result = await pushZoneUpdateWithValidation(zone, glsl_code);
+          if (zoneAttempts) zoneAttempts.set(zone, priorAttempts + 1);
 
           console.log(
-            `[MerlinSession] set_zone_shader: zone=${zone}, success=${result.success}, ` +
-            `desc=${description || 'none'}${result.error ? `, error=${result.error}` : ''}`
+            `[MerlinSession] set_zone_shader: zone=${zone}, attempt=${priorAttempts + 1}, ` +
+            `success=${result.success}, desc=${description || 'none'}` +
+            `${result.error ? `, error=${result.error}` : ''}`
           );
+
+          if (turnId) {
+            emitGeminiTurn({
+              id: turnId,
+              source: 'live',
+              pushResults: [{ zone, success: result.success, error: result.error, warnings: result.warnings }],
+            });
+          }
 
           if (result.success) {
             response = {
@@ -429,11 +487,25 @@ export class MerlinSession {
               warnings: result.warnings,
             };
           } else {
+            // Use vibe-agent's iterative-refinement phrasing so Gemini
+            // produces better corrections. Capped at LIVE_RETRY_MAX
+            // attempts per zone before we stop encouraging retries.
+            const attempt = priorAttempts + 1;
+            const exhausted = attempt > LIVE_RETRY_MAX;
             response = {
               success: false,
               zone,
               error: result.error,
               warnings: result.warnings,
+              instruction: exhausted
+                ? `The zone "${zone}" has now failed ${attempt} times. Stop trying to fix this zone for now and respond to the user.`
+                : `COMPILE ERROR (iteration ${attempt}/${LIVE_RETRY_MAX}):\n\n` +
+                  `Tool result for "${zone}": ${result.error ?? 'unknown error'}\n\n` +
+                  `CRITICAL: The GLSL zone "${zone}" failed to compile. The zone code was reverted to defaults.\n` +
+                  `You MUST call set_zone_shader again with corrected GLSL for zone "${zone}".\n` +
+                  `Common fixes: check for syntax errors, undefined variables, missing semicolons, ` +
+                  `redeclaration of template-provided variables, or invalid GLSL.\n` +
+                  `Explain what you think went wrong and provide fixed code.`,
             };
           }
           break;

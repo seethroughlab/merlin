@@ -30,6 +30,8 @@ import {
   RELEASE_ENERGY_PEAK,
 } from './particle-program';
 import { pushParticleSpellProgram } from '../td-bridge';
+import { emitGeminiTurn, nextTurnId } from './gemini-events';
+import type { GeminiToolCall } from '../../shared/types';
 import type {
   CastEnvelope,
   ParticleSpellArchetype,
@@ -224,7 +226,8 @@ function mergeOverrides(
 }
 
 /**
- * Generate and push a spell program from a free-text prompt.
+ * Generate and push a spell program from a free-text prompt. Emits
+ * progressive sidebar events.
  */
 export async function generateSpellProgramWithGemini(
   input: SpellProgramTestInput
@@ -238,8 +241,21 @@ export async function generateSpellProgramWithGemini(
     return { success: false, pushed: false, error: 'Prompt is required' };
   }
 
+  const turnId = nextTurnId();
+  const userPrompt =
+    `Spell description: "${input.prompt}"\n` +
+    `Mode: ${input.mode}` +
+    (input.intent ? `\nIntent: ${input.intent}` : '') +
+    (input.element ? `\nElement: ${input.element}` : '') +
+    (input.castingOrigin ? `\nCasting origin: ${input.castingOrigin}` : '') +
+    `\n\nCall set_spell_program once with the visual parameters that best embody this spell.`;
+
+  emitGeminiTurn({ id: turnId, source: 'test_spell_program', userPrompt });
+
   let coerced: CoercedArgs = {};
   let rawArgs: Record<string, unknown> | null = null;
+  let responseText = '';
+  const rawToolCalls: GeminiToolCall[] = [];
 
   try {
     const ai = ensureGenAI();
@@ -254,26 +270,27 @@ export async function generateSpellProgramWithGemini(
       },
     });
 
-    const userPrompt =
-      `Spell description: "${input.prompt}"\n` +
-      `Mode: ${input.mode}` +
-      (input.intent ? `\nIntent: ${input.intent}` : '') +
-      (input.element ? `\nElement: ${input.element}` : '') +
-      (input.castingOrigin ? `\nCasting origin: ${input.castingOrigin}` : '') +
-      `\n\nCall set_spell_program once with the visual parameters that best embody this spell.`;
-
-    const response = await model.generateContent(userPrompt);
-    const candidate = response.response.candidates?.[0];
-    const parts = candidate?.content?.parts ?? [];
+    const chat = model.startChat();
+    const response = await chat.sendMessage(userPrompt);
+    const parts = response.response.candidates?.[0]?.content?.parts ?? [];
 
     for (const part of parts) {
+      if ('text' in part && part.text) responseText += part.text;
       if ('functionCall' in part && part.functionCall?.name === 'set_spell_program') {
         rawArgs = (part.functionCall.args ?? {}) as Record<string, unknown>;
-        break;
+        rawToolCalls.push({ name: 'set_spell_program', args: rawArgs });
       }
     }
 
+    emitGeminiTurn({
+      id: turnId,
+      source: 'test_spell_program',
+      responseText,
+      toolCalls: rawToolCalls,
+    });
+
     if (!rawArgs) {
+      emitGeminiTurn({ id: turnId, source: 'test_spell_program', final: true });
       return {
         success: false,
         pushed: false,
@@ -284,10 +301,12 @@ export async function generateSpellProgramWithGemini(
     coerced = coerceGeminiArgs(rawArgs);
     console.log(`[TestSpellProgram ${ts()}] Gemini chose: ${JSON.stringify(coerced)}`);
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    emitGeminiTurn({ id: turnId, source: 'test_spell_program', responseText: `Error: ${msg}`, final: true });
     return {
       success: false,
       pushed: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: msg,
     };
   }
 
@@ -297,6 +316,17 @@ export async function generateSpellProgramWithGemini(
   const program = mergeOverrides(base, coerced, input.mode);
 
   const pushed = pushParticleSpellProgram(input.mode, program);
+
+  emitGeminiTurn({
+    id: turnId,
+    source: 'test_spell_program',
+    pushResults: [{
+      label: `particle_spell_program (${input.mode})`,
+      success: pushed,
+      error: pushed ? undefined : 'TD not connected',
+    }],
+    final: true,
+  });
 
   return {
     success: true,

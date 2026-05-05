@@ -446,6 +446,80 @@ export interface SpellProgramTestResult {
   error?: string;
 }
 
+// ============ GEMINI CONVERSATION EVENTS ============
+
+/**
+ * Source of a Gemini conversation turn — used to tag the sidebar card
+ * so the user can tell live-session activity apart from each test-mode
+ * surface.
+ */
+export type GeminiTurnSource =
+  | 'live'
+  | 'test_shader'
+  | 'test_sprite'
+  | 'test_spell_program';
+
+/**
+ * One Gemini tool call as it appears in the sidebar — name + args, plus
+ * optional downstream effects (push to TD, validation result, etc.).
+ */
+export interface GeminiToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+/**
+ * One per-zone (or per-asset) push outcome surfaced to the sidebar so
+ * the user can see ✓ / ✗ inline with the conversation.
+ */
+export interface GeminiPushResult {
+  zone?: string;
+  label?: string;
+  success: boolean;
+  error?: string;
+  warnings?: string[];
+}
+
+/**
+ * Marks the start of a retry round — visually shown as a divider in the
+ * sidebar (e.g. "↻ retry 1/2 — force_field").
+ */
+export interface GeminiRetryMarker {
+  attempt: number;
+  total: number;
+  zone?: string;
+  reason?: string;
+}
+
+/**
+ * One progressive event in a Gemini turn. The publisher emits multiple
+ * partial events with the same `id` as the conversation evolves; the
+ * renderer merges them into a single card.
+ *
+ * Lifecycle:
+ *   1. Initial event with systemPrompt + userPrompt (turn opens)
+ *   2. Response event(s) with responseText / toolCalls
+ *   3. Push-result event(s) per zone/asset
+ *   4. Optional retry markers + further response events
+ *   5. Final event with `final: true` (turn closes)
+ */
+export interface GeminiTurn {
+  /** Stable id for the whole turn — same across all partial emissions. */
+  id: string;
+  source: GeminiTurnSource;
+  createdAt: number;
+  /** Full system instruction sent to Gemini. Empty for tool-only sources. */
+  systemPrompt?: string;
+  userPrompt?: string;
+  /** Free-text portion of Gemini's response. Concatenated across retries. */
+  responseText?: string;
+  toolCalls?: GeminiToolCall[];
+  pushResults?: GeminiPushResult[];
+  retry?: GeminiRetryMarker;
+  /** True on the final emission; lets the renderer mark the card done. */
+  final?: boolean;
+}
+
 // ============ TTS TYPES ============
 
 /**

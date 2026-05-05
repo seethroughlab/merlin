@@ -25,6 +25,8 @@ import { getSpriteGenerator } from './sprite-generator';
 import { getFlipbookConfig } from './asset-manager';
 import { pushSpriteTexture, pushFlipbookConfig } from '../td-bridge';
 import { recordFlipbookConfigPush } from './td-state-mirror';
+import { emitGeminiTurn, nextTurnId } from './gemini-events';
+import type { GeminiToolCall } from '../../shared/types';
 import type {
   SpriteTestSpec,
   SpriteTestResult,
@@ -64,14 +66,36 @@ function readPngAsBase64(path: string): string | undefined {
  * Direct-spec sprite generation: run Imagen with the given spec and
  * push to TD. `spec.animation` (truthy) or `spec.frameCount > 1`
  * triggers the flipbook path.
+ *
+ * `_turnId` lets the Gemini-interpretation wrapper share its turn id so
+ * the sidebar shows interpretation + push as one card. When omitted a
+ * fresh turn id is allocated for direct-mode invocations.
  */
-export async function generateSpriteDirect(spec: SpriteTestSpec): Promise<SpriteTestResult> {
+export async function generateSpriteDirect(
+  spec: SpriteTestSpec,
+  _turnId?: string,
+): Promise<SpriteTestResult> {
   const isFlipbook = Boolean(spec.animation) || (spec.frameCount !== undefined && spec.frameCount > 1);
   console.log(
     `[TestSprite ${ts()}] Direct: description="${spec.description}" ` +
     `mode=${isFlipbook ? 'flipbook' : 'single'}` +
     (isFlipbook ? ` frameCount=${spec.frameCount ?? 16}` : '')
   );
+
+  // If this is a standalone Direct call (no parent turn id), open a
+  // sidebar turn to surface the activity. Imagen has no chat / system
+  // prompt, so the turn is a synthetic "generate_sprite" tool call
+  // tagged with the spec.
+  const emitOwnTurn = !_turnId;
+  const turnId = _turnId ?? nextTurnId();
+  if (emitOwnTurn) {
+    emitGeminiTurn({
+      id: turnId,
+      source: 'test_sprite',
+      userPrompt: `[Direct] ${spec.description}`,
+      toolCalls: [{ name: 'generate_sprite', args: spec as unknown as Record<string, unknown> }],
+    });
+  }
 
   const generator = getSpriteGenerator();
 
@@ -87,6 +111,12 @@ export async function generateSpriteDirect(spec: SpriteTestSpec): Promise<Sprite
     });
 
     if (!result.success || !result.asset) {
+      emitGeminiTurn({
+        id: turnId,
+        source: 'test_sprite',
+        pushResults: [{ label: 'imagen', success: false, error: result.error ?? 'Flipbook generation failed' }],
+        final: emitOwnTurn,
+      });
       return {
         success: false,
         error: result.error ?? 'Flipbook generation failed',
@@ -105,6 +135,16 @@ export async function generateSpriteDirect(spec: SpriteTestSpec): Promise<Sprite
     const flipbookPushed = pushFlipbookConfig(flipbook);
     if (flipbookPushed) recordFlipbookConfigPush(flipbook);
 
+    emitGeminiTurn({
+      id: turnId,
+      source: 'test_sprite',
+      pushResults: [
+        { label: `sprite_texture (${asset.assetId})`, success: texturePushed, error: texturePushed ? undefined : 'TD not connected' },
+        { label: 'flipbook_config', success: flipbookPushed, error: flipbookPushed ? undefined : 'TD not connected' },
+      ],
+      final: emitOwnTurn,
+    });
+
     return {
       success: true,
       assetId: asset.assetId,
@@ -120,6 +160,12 @@ export async function generateSpriteDirect(spec: SpriteTestSpec): Promise<Sprite
   const result = await generator.generateSpriteSync(spec.description, { style: spec.style });
 
   if (!result.success || !result.asset) {
+    emitGeminiTurn({
+      id: turnId,
+      source: 'test_sprite',
+      pushResults: [{ label: 'imagen', success: false, error: result.error ?? 'Sprite generation failed' }],
+      final: emitOwnTurn,
+    });
     return {
       success: false,
       error: result.error ?? 'Sprite generation failed',
@@ -129,6 +175,15 @@ export async function generateSpriteDirect(spec: SpriteTestSpec): Promise<Sprite
 
   const asset = result.asset;
   const texturePushed = pushSpriteTexture(asset.assetId, asset.texturePath);
+
+  emitGeminiTurn({
+    id: turnId,
+    source: 'test_sprite',
+    pushResults: [
+      { label: `sprite_texture (${asset.assetId})`, success: texturePushed, error: texturePushed ? undefined : 'TD not connected' },
+    ],
+    final: emitOwnTurn,
+  });
 
   return {
     success: true,
@@ -171,38 +226,59 @@ export function coerceGeminiArgs(args: Record<string, unknown>): SpriteTestSpec 
  * Gemini-interpretation mode: free-text prompt → Gemini-2.5-flash with
  * the `generate_sprite` tool forced ON → coerce args → delegate to
  * generateSpriteDirect. The result includes `geminiArgs` so the UI
- * can show what Gemini picked.
+ * can show what Gemini picked. Emits sidebar events progressively.
  */
 export async function generateSpriteWithGemini(prompt: string): Promise<SpriteTestResult> {
   console.log(`[TestSprite ${ts()}] Gemini interpretation: "${prompt}"`);
 
-  const ai = ensureGenAI();
-  const model = ai.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    tools: [{ functionDeclarations: [GENERATE_SPRITE_TOOL] }],
-    toolConfig: {
-      functionCallingConfig: {
-        mode: FunctionCallingMode.ANY,
-        allowedFunctionNames: ['generate_sprite'],
-      },
-    },
-  });
+  const turnId = nextTurnId();
+  const userPrompt =
+    `Choose sprite parameters for this request. Call generate_sprite once with appropriate args.\n\nRequest: ${prompt}`;
 
-  const response = await model.generateContent(
-    `Choose sprite parameters for this request. Call generate_sprite once with appropriate args.\n\nRequest: ${prompt}`
-  );
-  const candidate = response.response.candidates?.[0];
-  const parts = candidate?.content?.parts ?? [];
+  emitGeminiTurn({ id: turnId, source: 'test_sprite', userPrompt });
 
   let args: Record<string, unknown> | null = null;
-  for (const part of parts) {
-    if ('functionCall' in part && part.functionCall?.name === 'generate_sprite') {
-      args = (part.functionCall.args ?? {}) as Record<string, unknown>;
-      break;
+  let responseText = '';
+  let rawToolCalls: GeminiToolCall[] = [];
+
+  try {
+    const ai = ensureGenAI();
+    const model = ai.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      tools: [{ functionDeclarations: [GENERATE_SPRITE_TOOL] }],
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingMode.ANY,
+          allowedFunctionNames: ['generate_sprite'],
+        },
+      },
+    });
+
+    const chat = model.startChat();
+    const response = await chat.sendMessage(userPrompt);
+    const parts = response.response.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      if ('text' in part && part.text) responseText += part.text;
+      if ('functionCall' in part && part.functionCall?.name === 'generate_sprite') {
+        args = (part.functionCall.args ?? {}) as Record<string, unknown>;
+        rawToolCalls.push({ name: 'generate_sprite', args });
+      }
     }
+
+    emitGeminiTurn({
+      id: turnId,
+      source: 'test_sprite',
+      responseText,
+      toolCalls: rawToolCalls,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    emitGeminiTurn({ id: turnId, source: 'test_sprite', responseText: `Error: ${msg}`, final: true });
+    return { success: false, error: msg, pushed: { texture: false, flipbook: false } };
   }
 
   if (!args) {
+    emitGeminiTurn({ id: turnId, source: 'test_sprite', final: true });
     return {
       success: false,
       error: 'Gemini did not call generate_sprite',
@@ -214,15 +290,20 @@ export async function generateSpriteWithGemini(prompt: string): Promise<SpriteTe
   try {
     spec = coerceGeminiArgs(args);
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    emitGeminiTurn({ id: turnId, source: 'test_sprite', responseText: `Coercion error: ${msg}`, final: true });
     return {
       success: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: msg,
       pushed: { texture: false, flipbook: false },
     };
   }
 
   console.log(`[TestSprite ${ts()}] Gemini chose: ${JSON.stringify(spec)}`);
 
-  const result = await generateSpriteDirect(spec);
+  // Delegate to Direct, sharing this turn id so push results land on
+  // the same sidebar card as the Gemini interpretation.
+  const result = await generateSpriteDirect(spec, turnId);
+  emitGeminiTurn({ id: turnId, source: 'test_sprite', final: true });
   return { ...result, geminiArgs: spec };
 }
