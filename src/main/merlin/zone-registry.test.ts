@@ -21,10 +21,12 @@ describe('zone-registry', () => {
       expect(ZONE_NAMES).toContain('velocity_modifier');
       expect(ZONE_NAMES).toContain('post_fx');
       expect(ZONE_NAMES).toContain('material_pixel');
+      expect(ZONE_NAMES).toContain('billboard_vertex');
+      expect(ZONE_NAMES).toContain('billboard_pixel');
     });
 
-    it('should have 7 zones', () => {
-      expect(ZONE_NAMES).toHaveLength(7);
+    it('should have 9 zones', () => {
+      expect(ZONE_NAMES).toHaveLength(9);
     });
   });
 

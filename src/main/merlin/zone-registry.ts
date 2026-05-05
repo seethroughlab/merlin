@@ -29,6 +29,8 @@ export const ZONE_NAMES = [
   'velocity_modifier',
   'post_fx',
   'material_pixel',
+  'billboard_vertex',
+  'billboard_pixel',
 ] as const;
 
 export type ZoneName = (typeof ZONE_NAMES)[number];
@@ -87,6 +89,20 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     availableVars: ['uv', 'normal', 'worldPos', 'baseColor', 'color', 'emission', 'roughness', 'metallic'],
     uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uRoughness', 'uMetallic', 'uEmission'],
     maxLines: 35,
+  },
+  billboard_vertex: {
+    description: 'Billboard particle vertex shader (camera-facing quads)',
+    modifies: ['worldOffset'],
+    availableVars: ['localPos', 'instancePos', 'instanceScale', 'camRight', 'camUp', 'worldOffset', 'vel', 'age', 'life', 'id'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
+    maxLines: 20,
+  },
+  billboard_pixel: {
+    description: 'Billboard particle pixel shader with flipbook animation',
+    modifies: ['brightness', 'saturation', 'hueShift'],
+    availableVars: ['albedo', 'alpha', 'vel', 'age', 'life', 'id', 'energy', 'mode', 'brightness', 'saturation', 'hueShift'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uFlipbook1', 'uFlipbook2', 'sSpriteMap'],
+    maxLines: 25,
   },
 };
 
