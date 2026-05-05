@@ -344,6 +344,35 @@ def merge_shader_template(template, zone_code):
     return merged, None
 
 
+def _check_glsl_compile(glsl_op):
+    """Determine compile success for a GLSL op (POP / TOP / MAT).
+
+    glsl_op.errors() can be empty even when only the pixel shader failed
+    to compile (the truth lives in a sibling _info DAT). Pattern borrowed
+    from vibe-agent/td/ws_client_callbacks.py — production-validated.
+
+    Returns (ok, error_text_or_none).
+    """
+    errors = glsl_op.errors()
+    if errors:
+        return False, errors
+    warnings = glsl_op.warnings() if hasattr(glsl_op, 'warnings') else ''
+    if warnings and 'compile error' in str(warnings).lower():
+        info_dat = op(glsl_op.path + '_info')
+        if info_dat and info_dat.text:
+            return False, info_dat.text
+        return False, str(warnings)
+    # Belt-and-suspenders: even if warnings is empty, the _info DAT may
+    # still contain ERROR lines (we observed this with post_fx vignette
+    # redefinition). Scan for any "ERROR" lines and treat as compile fail.
+    info_dat = op(glsl_op.path + '_info')
+    if info_dat and info_dat.text:
+        error_lines = [l for l in info_dat.text.splitlines() if 'ERROR' in l]
+        if error_lines:
+            return False, '\n'.join(error_lines)
+    return True, None
+
+
 def handle_zone_update(dat, msg):
     """Handle zone_update message with template-based shader compilation.
 
@@ -401,11 +430,9 @@ def handle_zone_update(dat, msg):
     compute_dat.text = full_shader
     glsl_pop.cook(force=True)
 
-    errors = glsl_pop.errors()
-    if errors:
-        send_compile_result(dat, zone, False, errors)
-    else:
-        send_compile_result(dat, zone, True)
+    ok, err = _check_glsl_compile(glsl_pop)
+    send_compile_result(dat, zone, ok, err)
+    if ok:
         print(f"[WS] Zone '{zone}' updated successfully")
 
 
@@ -426,11 +453,9 @@ def handle_top_zone_update(dat, zone, full_shader):
     code_dat.text = full_shader
     glsl_top.cook(force=True)
 
-    errors = glsl_top.errors()
-    if errors:
-        send_compile_result(dat, zone, False, errors)
-    else:
-        send_compile_result(dat, zone, True)
+    ok, err = _check_glsl_compile(glsl_top)
+    send_compile_result(dat, zone, ok, err)
+    if ok:
         print(f"[WS] TOP zone '{zone}' updated successfully")
 
 
@@ -455,11 +480,9 @@ def handle_mat_zone_update(dat, zone, full_shader):
     code_dat.text = full_shader
     glsl_mat.cook(force=True)
 
-    errors = glsl_mat.errors()
-    if errors:
-        send_compile_result(dat, zone, False, errors)
-    else:
-        send_compile_result(dat, zone, True)
+    ok, err = _check_glsl_compile(glsl_mat)
+    send_compile_result(dat, zone, ok, err)
+    if ok:
         print(f"[WS] MAT zone '{zone}' updated successfully")
 
 
