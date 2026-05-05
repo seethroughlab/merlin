@@ -2,7 +2,7 @@
  * TD Bridge Connection
  *
  * WebSocket server for TouchDesigner communication.
- * Parlor acts as the server; TD connects as a client.
+ * Merlin acts as the server; TD connects as a client.
  */
 
 import { WebSocketServer, WebSocket } from 'ws';

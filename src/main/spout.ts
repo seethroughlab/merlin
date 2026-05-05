@@ -187,7 +187,7 @@ export async function initSpout(config: { enabled: boolean; senderName: string; 
 }
 
 export function wireSpoutToWindow(win: BrowserWindow): void {
-  wireWindowToSender(win, 'Parlor', 30);
+  wireWindowToSender(win, 'Merlin', 30);
 }
 
 export function closeSpout(): void {

@@ -1,12 +1,12 @@
 # vibe-agent Feature Checklist
 
-Features from vibe-agent that could be ported to Parlor. Mark the ones you want to implement.
+Features from vibe-agent that could be ported to Merlin. Mark the ones you want to implement.
 
 ---
 
 ## Shader Zones
 
-Parlor has 5 zones. vibe-agent has 9.
+Merlin has 5 zones. vibe-agent has 9.
 
 - [3] **shape_deform** - Vertex displacement for mesh particles (wobble, pulse, twist effects)
 - [3] **material_lighting** - Surface properties: roughness, metallic, emission, normal perturbation

@@ -2,7 +2,7 @@
  * Asset Manager for Sprite Storage
  *
  * Manages storage and retrieval of sprite assets (single sprites and flipbook atlases).
- * Assets are stored in the user data directory: ~/.parlor/assets/sprites/
+ * Assets are stored in the user data directory: ~/.merlin/assets/sprites/
  */
 
 import { app } from 'electron';

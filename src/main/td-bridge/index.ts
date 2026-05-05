@@ -2,7 +2,7 @@
  * TD Bridge
  *
  * WebSocket bridge for communicating with TouchDesigner.
- * Parlor runs the server; TD connects as a client.
+ * Merlin runs the server; TD connects as a client.
  */
 
 // Re-export types

@@ -2,7 +2,7 @@
  * State Persistence
  *
  * Save and load Merlin session state including zone shaders and spell state.
- * Sessions are stored as JSON files in ~/.parlor/sessions/
+ * Sessions are stored as JSON files in ~/.merlin/sessions/
  */
 
 import { app } from 'electron';

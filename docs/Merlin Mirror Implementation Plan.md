@@ -6,7 +6,7 @@ Implementation Plan
 
 # **Purpose**
 
-This document defines the practical migration path from the existing Parlor / Mentalist prototype into the Merlin Mirror experience.
+This document defines the practical migration path from the existing Mentalist prototype into the Merlin Mirror experience.
 
 The goal is not to rebuild from scratch. The existing prototype already contains a strong foundation:
 

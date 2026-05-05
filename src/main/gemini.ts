@@ -218,7 +218,7 @@ export function isGeminiAvailable(): boolean {
   return model !== null;
 }
 
-const VOICE_COMMAND_PROMPT = `You are a voice command interpreter for Parlor, a motion capture application.
+const VOICE_COMMAND_PROMPT = `You are a voice command interpreter for Merlin, a motion capture application.
 The user has spoken a command. Interpret what they want and respond with a JSON action.
 
 Available commands and their actions:
@@ -256,7 +256,7 @@ Respond with ONLY valid JSON (no markdown, no code blocks):
 Examples:
 User: "turn on pose tracking" → {"understood":true,"action":{"type":"toggle_pose","enabled":true},"response":"Pose tracking enabled","confidence":0.95}
 User: "analyze my face" → {"understood":true,"action":{"type":"capture_face"},"response":"Capturing face expression","confidence":0.9}
-User: "what's the weather" → {"understood":false,"action":null,"response":"I can only control Parlor features","confidence":0.8}`;
+User: "what's the weather" → {"understood":false,"action":null,"response":"I can only control Merlin features","confidence":0.8}`;
 
 /**
  * Interpret a voice command transcript using Gemini

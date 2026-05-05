@@ -1,7 +1,7 @@
 /**
  * TD Bridge Types
  *
- * Type definitions for WebSocket communication between Parlor and TouchDesigner.
+ * Type definitions for WebSocket communication between Merlin and TouchDesigner.
  */
 
 import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
@@ -24,7 +24,7 @@ export interface TDCapabilities {
   availableZones: string[];
 }
 
-// ===== Outbound Messages (Parlor → TD) =====
+// ===== Outbound Messages (Merlin → TD) =====
 
 export type TDOutboundMessage =
   | { type: 'mood_update'; mood: string; color?: string; intensity?: number }
@@ -146,7 +146,7 @@ export interface FlipbookConfigMessage {
   driveSource: DriveSource;
 }
 
-// ===== Inbound Messages (TD → Parlor) =====
+// ===== Inbound Messages (TD → Merlin) =====
 
 export type TDInboundMessage =
   | { type: 'td_ready'; capabilities: TDCapabilities }

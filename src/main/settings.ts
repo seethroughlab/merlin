@@ -66,8 +66,8 @@ const defaults: AppSettings = {
   drawSegment: true,
   // Camera
   isPortraitMode: false,
-  spoutVideoName: 'Parlor',
-  spoutMaskName: 'Parlor Mask',
+  spoutVideoName: 'Merlin',
+  spoutMaskName: 'Merlin Mask',
   // Analysis - disabled by default
   autoAnalyzeFace: false,
   faceAnalysisInterval: 10000,

@@ -1,1 +1,1 @@
-- Parlor should have the option to choose different webcam resolution, as well as the resolution that 
+- Merlin should have the option to choose different webcam resolution, as well as the resolution that 

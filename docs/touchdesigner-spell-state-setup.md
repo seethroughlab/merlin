@@ -57,7 +57,7 @@ Each zone has a shader template with a `{zone_code}` placeholder where Gemini's 
 
 ## Zone Update Message
 
-When Gemini calls `set_zone_shader`, Parlor sends a WebSocket message:
+When Gemini calls `set_zone_shader`, Merlin sends a WebSocket message:
 
 ```json
 {
@@ -147,7 +147,7 @@ The `spell_state` tableDAT stores spell parameters (key-value pairs):
 
 ## Test the Integration
 
-1. Start Parlor: `npm run dev`
+1. Start Merlin: `npm run dev`
 2. Connect TD to WebSocket (auto-connects on port 8001)
 3. Start a Merlin session
 4. Watch TD textport for zone_update messages:

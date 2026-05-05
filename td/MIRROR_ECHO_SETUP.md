@@ -47,7 +47,7 @@ The `td/scripts/ws_callbacks.py` file has been updated with:
 - ✅ Helper functions: `get_valence()`, `get_arousal()`, `get_tension()`, etc.
 - ✅ `get_analysis_vec4_1()` and `get_analysis_vec4_2()` for shader uniforms
 
-**Important:** After making changes in TD, sync the `ws_parlor_callbacks` textDAT to the external file, or copy the file contents into the textDAT.
+**Important:** After making changes in TD, sync the `ws_merlin_callbacks` textDAT to the external file, or copy the file contents into the textDAT.
 
 ---
 
@@ -69,7 +69,7 @@ Create a new **tableDAT** named `analysis_state` at `/project1/analysis_state`:
 
 ## Step 2: Sync WebSocket Callbacks
 
-Make sure the `ws_parlor_callbacks` textDAT in TD has the updated code:
+Make sure the `ws_merlin_callbacks` textDAT in TD has the updated code:
 
 **Option A:** Set the textDAT to sync from `td/scripts/ws_callbacks.py`
 - DAT → File → File Path: `scripts/ws_callbacks.py`
@@ -510,7 +510,7 @@ The body should appear solid with particles wrapping around/behind.
 ### Create These Nodes
 
 1. **invert_mask** (levelTOP)
-   - Input: `spout_mask` (the Spout "Parlor Mask" input)
+   - Input: `spout_mask` (the Spout "Merlin Mask" input)
    - Invert: On
    - This creates a mask where body = black, background = white
 
@@ -547,7 +547,7 @@ Before the composite chain, you need to render particles to a texture:
 
 ## Step 10: Test
 
-1. Start Parlor: `npm run dev`
+1. Start Merlin: `npm run dev`
 2. Start a mentalist session (M key)
 3. Watch TD console for `[WS] Analysis:` messages
 4. Verify `analysis_state` table updates
@@ -563,20 +563,20 @@ You can use these in TD expressions:
 
 ```python
 # Individual values
-op.ws_parlor_callbacks.module.get_valence()
-op.ws_parlor_callbacks.module.get_arousal()
-op.ws_parlor_callbacks.module.get_tension()
-op.ws_parlor_callbacks.module.get_openness()
-op.ws_parlor_callbacks.module.get_engagement()
-op.ws_parlor_callbacks.module.get_emotion()
-op.ws_parlor_callbacks.module.get_emotion_index()
+op.ws_merlin_callbacks.module.get_valence()
+op.ws_merlin_callbacks.module.get_arousal()
+op.ws_merlin_callbacks.module.get_tension()
+op.ws_merlin_callbacks.module.get_openness()
+op.ws_merlin_callbacks.module.get_engagement()
+op.ws_merlin_callbacks.module.get_emotion()
+op.ws_merlin_callbacks.module.get_emotion_index()
 
 # Force mode based on mood (0=orbit, 1=attract, 2=repel, 3=emit)
-op.ws_parlor_callbacks.module.get_force_mode()
+op.ws_merlin_callbacks.module.get_force_mode()
 
 # For shader uniforms
-op.ws_parlor_callbacks.module.get_analysis_vec4_1()  # (valence, arousal, tension, openness)
-op.ws_parlor_callbacks.module.get_analysis_vec4_2()  # (engagement, emotion_index, 0, 0)
+op.ws_merlin_callbacks.module.get_analysis_vec4_1()  # (valence, arousal, tension, openness)
+op.ws_merlin_callbacks.module.get_analysis_vec4_2()  # (engagement, emotion_index, 0, 0)
 ```
 
 ### Force Mode Uniform
@@ -587,7 +587,7 @@ int(op('/project1/scene_state')['force_mode', 1])
 ```
 Or:
 ```python
-op.ws_parlor_callbacks.module.get_force_mode()
+op.ws_merlin_callbacks.module.get_force_mode()
 ```
 
 ---
@@ -652,7 +652,7 @@ For real-time control, you can:
 ### No analysis messages
 - Check WebSocket connection status
 - Verify mentalist session is active
-- Check Parlor console for errors
+- Check Merlin console for errors
 
 ### Particles not responding
 - Check uniform expressions are correct
