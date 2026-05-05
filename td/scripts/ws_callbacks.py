@@ -19,6 +19,8 @@ ZONE_TEMPLATES = {
     'velocity_modifier': 'pop_velmod.glsl',
     'post_fx': 'top_postfx.glsl',
     'material_pixel': 'mat_pixel.glsl',
+    'billboard_vertex': 'mat_billboard_vertex.glsl',
+    'billboard_pixel': 'mat_billboard_pixel.glsl',
 }
 
 # Zone to glslPOP node mapping (particle compute shaders)
@@ -52,11 +54,19 @@ ZONE_TOP_CODE_PATHS = {
 # MAT zones (material shaders)
 ZONE_MAT_PATHS = {
     'material_pixel': '/project1/particle_mat',
+    'billboard_vertex': '/project1/glsl_billboard',
+    'billboard_pixel': '/project1/glsl_billboard',
 }
 
 # MAT zone to pixel shader DAT mapping
 ZONE_MAT_CODE_PATHS = {
     'material_pixel': '/project1/particle_mat_pixel',
+    'billboard_pixel': '/project1/glsl_billboard_pixel',
+}
+
+# Billboard MAT vertex shader DAT mapping
+ZONE_MAT_VERTEX_PATHS = {
+    'billboard_vertex': '/project1/glsl_billboard_vertex',
 }
 
 # Emotion to index mapping for shaders
@@ -67,6 +77,31 @@ EMOTION_INDEX = {
     'anger': 3,
     'sadness': 4,
     'surprise': 5,
+}
+
+# ===== Sprite System Mappings =====
+
+# Playback mode: 0=loop, 1=once, 2=pingpong, 3=random
+PLAYBACK_MODE_MAP = {
+    'loop': 0,
+    'once': 1,
+    'pingpong': 2,
+    'random': 3,
+}
+
+# Drive source: 0=age, 1=life, 2=velocity, 3=id, 4=time
+DRIVE_SOURCE_MAP = {
+    'age': 0,
+    'life': 1,
+    'velocity': 2,
+    'id': 3,
+    'time': 4,
+}
+
+# Render mode: 0=mesh, 1=billboard
+RENDER_MODE_MAP = {
+    'mesh': 0,
+    'billboard': 1,
 }
 
 # Mood to particle force mode mapping
@@ -106,6 +141,24 @@ analysis_state = {
     'engagement': 0.0,   # 0 (disengaged) to 1 (engaged)
     'primary_emotion': 'neutral',
     'emotion_index': 0,  # For shader lookup
+}
+
+# Sprite system state
+sprite_state = {
+    'asset_id': None,
+    'texture_path': None,
+    'sprite_source': 'default',  # 'default' or 'custom'
+    'render_mode': 'mesh',  # 'mesh' or 'billboard'
+    'render_mode_float': 0.0,  # 0=mesh, 1=billboard
+    # Flipbook config
+    'atlas_cols': 1,
+    'atlas_rows': 1,
+    'frame_count': 1,
+    'playback_mode': 'loop',
+    'playback_mode_float': 0.0,  # For shader
+    'frame_duration': 0.1,
+    'drive_source': 'age',
+    'drive_source_float': 0.0,  # For shader
 }
 
 # ===== Merlin Spell State =====
@@ -250,6 +303,15 @@ def onReceiveText(dat, rowIndex, message):
             handle_request_metrics(dat)
         elif msg_type == 'request_screenshot':
             handle_request_screenshot(dat)
+        # Sprite system messages
+        elif msg_type == 'sprite_texture':
+            handle_sprite_texture(dat, msg)
+        elif msg_type == 'flipbook_config':
+            handle_flipbook_config(dat, msg)
+        elif msg_type == 'render_mode':
+            handle_render_mode(dat, msg)
+        elif msg_type == 'reset_sprite':
+            handle_reset_sprite(dat, msg)
 
     except Exception as e:
         print(f"[WS] Error: {e}")
@@ -842,6 +904,283 @@ def handle_request_screenshot(dat):
 
     except Exception as e:
         print(f"[WS] Screenshot error: {e}")
+
+
+# ===== Sprite System Handlers =====
+
+def handle_sprite_texture(dat, msg):
+    """Handle sprite_texture message - load sprite texture into TD.
+
+    Message format:
+    {
+        "type": "sprite_texture",
+        "assetId": "uuid-string",
+        "texturePath": "/path/to/sprite.png"
+    }
+    """
+    global sprite_state
+
+    asset_id = msg.get('assetId', '')
+    texture_path = msg.get('texturePath', '')
+
+    sprite_state['asset_id'] = asset_id
+    sprite_state['texture_path'] = texture_path
+
+    # Try to load texture into sprite_texture TOP
+    sprite_top = op('/project1/sprite_texture')
+    sprite_switch = op('/project1/sprite_switch')
+    success = False
+    error = None
+
+    if sprite_top:
+        try:
+            sprite_top.par.file = texture_path
+            sprite_top.cook(force=True)
+            success = True
+
+            # Switch to custom sprite (index 1 = sprite_texture)
+            if sprite_switch:
+                sprite_switch.par.index = 1
+                sprite_state['sprite_source'] = 'custom'
+
+            print(f"[WS] Loaded sprite texture: {asset_id}")
+        except Exception as e:
+            error = str(e)
+            print(f"[WS] Failed to load sprite: {e}")
+    else:
+        error = "sprite_texture TOP not found"
+        print(f"[WS] {error}")
+
+    # Update sprite_state tableDAT
+    table = op('/project1/sprite_state')
+    if table:
+        update_scene_state(table, 'asset_id', asset_id)
+        update_scene_state(table, 'texture_path', texture_path)
+        update_scene_state(table, 'sprite_source', sprite_state['sprite_source'])
+
+    # Send confirmation
+    response = {
+        'type': 'sprite_loaded',
+        'assetId': asset_id,
+        'success': success,
+    }
+    if error:
+        response['error'] = error
+    dat.sendText(json.dumps(response))
+
+
+def handle_flipbook_config(dat, msg):
+    """Handle flipbook_config message - configure flipbook animation.
+
+    Message format:
+    {
+        "type": "flipbook_config",
+        "config": {
+            "atlasCols": 4,
+            "atlasRows": 4,
+            "frameCount": 16,
+            "playbackMode": "loop",
+            "frameDuration": 0.1,
+            "driveSource": "age"
+        }
+    }
+    """
+    global sprite_state
+
+    config = msg.get('config', {})
+
+    # Update sprite state
+    sprite_state['atlas_cols'] = config.get('atlasCols', 1)
+    sprite_state['atlas_rows'] = config.get('atlasRows', 1)
+    sprite_state['frame_count'] = config.get('frameCount', 1)
+    sprite_state['playback_mode'] = config.get('playbackMode', 'loop')
+    sprite_state['playback_mode_float'] = float(PLAYBACK_MODE_MAP.get(
+        sprite_state['playback_mode'], 0
+    ))
+    sprite_state['frame_duration'] = config.get('frameDuration', 0.1)
+    sprite_state['drive_source'] = config.get('driveSource', 'age')
+    sprite_state['drive_source_float'] = float(DRIVE_SOURCE_MAP.get(
+        sprite_state['drive_source'], 0
+    ))
+
+    # Update billboard material uniforms if it exists
+    billboard_mat = op('/project1/glsl_billboard')
+    if billboard_mat:
+        try:
+            # uFlipbook1: (cols, rows, frameCount, playbackMode)
+            billboard_mat.par.vec1valuex = float(sprite_state['atlas_cols'])
+            billboard_mat.par.vec1valuey = float(sprite_state['atlas_rows'])
+            billboard_mat.par.vec1valuez = float(sprite_state['frame_count'])
+            billboard_mat.par.vec1valuew = sprite_state['playback_mode_float']
+
+            # uFlipbook2: (frameDuration, driveSource, renderMode, 0)
+            billboard_mat.par.vec2valuex = float(sprite_state['frame_duration'])
+            billboard_mat.par.vec2valuey = sprite_state['drive_source_float']
+            billboard_mat.par.vec2valuez = sprite_state['render_mode_float']
+        except Exception as e:
+            print(f"[WS] Error setting billboard mat params: {e}")
+
+    # Update sprite_state tableDAT
+    table = op('/project1/sprite_state')
+    if table:
+        update_scene_state(table, 'atlas_cols', str(sprite_state['atlas_cols']))
+        update_scene_state(table, 'atlas_rows', str(sprite_state['atlas_rows']))
+        update_scene_state(table, 'frame_count', str(sprite_state['frame_count']))
+        update_scene_state(table, 'playback_mode', sprite_state['playback_mode'])
+        update_scene_state(table, 'playback_mode_float', str(sprite_state['playback_mode_float']))
+        update_scene_state(table, 'frame_duration', str(sprite_state['frame_duration']))
+        update_scene_state(table, 'drive_source', sprite_state['drive_source'])
+        update_scene_state(table, 'drive_source_float', str(sprite_state['drive_source_float']))
+
+    cols = sprite_state['atlas_cols']
+    rows = sprite_state['atlas_rows']
+    frames = sprite_state['frame_count']
+    mode = sprite_state['playback_mode']
+    print(f"[WS] Flipbook config: {cols}x{rows} ({frames} frames, {mode})")
+
+
+def handle_render_mode(dat, msg):
+    """Handle render_mode message - switch between mesh and billboard rendering.
+
+    Message format:
+    {
+        "type": "render_mode",
+        "mode": "billboard"  // or "mesh"
+    }
+    """
+    global sprite_state
+
+    mode = msg.get('mode', 'mesh')
+    sprite_state['render_mode'] = mode
+    sprite_state['render_mode_float'] = float(RENDER_MODE_MAP.get(mode, 0))
+
+    # Update sprite_state tableDAT
+    table = op('/project1/sprite_state')
+    if table:
+        update_scene_state(table, 'render_mode', mode)
+        update_scene_state(table, 'render_mode_float', str(sprite_state['render_mode_float']))
+
+    # TODO: Toggle render paths in TD based on mode
+    # This would switch between mesh-based and billboard-based rendering
+    # Implementation depends on TD project structure
+
+    print(f"[WS] Render mode: {mode}")
+
+
+def handle_reset_sprite(dat, msg):
+    """Handle reset_sprite message - revert to default feathered circle sprite.
+
+    Message format:
+    {
+        "type": "reset_sprite"
+    }
+    """
+    success = reset_to_default_sprite()
+
+    # Update billboard material uniforms to single frame
+    billboard_mat = op('/project1/glsl_billboard')
+    if billboard_mat:
+        try:
+            # uFlipbook1: (cols, rows, frameCount, playbackMode)
+            billboard_mat.par.vec1valuex = 1.0
+            billboard_mat.par.vec1valuey = 1.0
+            billboard_mat.par.vec1valuez = 1.0
+            billboard_mat.par.vec1valuew = 0.0
+        except Exception as e:
+            print(f"[WS] Error resetting billboard uniforms: {e}")
+
+    response = {
+        'type': 'sprite_reset',
+        'success': success,
+    }
+    dat.sendText(json.dumps(response))
+
+
+# ===== Sprite Helper Functions =====
+
+def get_sprite_asset_id():
+    """Get current sprite asset ID."""
+    return sprite_state['asset_id']
+
+def get_sprite_texture_path():
+    """Get current sprite texture path."""
+    return sprite_state['texture_path']
+
+def get_sprite_source():
+    """Get sprite source: 'default' or 'custom'."""
+    return sprite_state['sprite_source']
+
+def reset_to_default_sprite():
+    """Reset to the default feathered circle sprite.
+
+    Switches sprite_switch to input 0 (default_sprite).
+    """
+    global sprite_state
+
+    sprite_switch = op('/project1/sprite_switch')
+    if sprite_switch:
+        sprite_switch.par.index = 0
+        sprite_state['sprite_source'] = 'default'
+        sprite_state['asset_id'] = None
+        sprite_state['texture_path'] = None
+
+        # Reset flipbook to single frame
+        sprite_state['atlas_cols'] = 1
+        sprite_state['atlas_rows'] = 1
+        sprite_state['frame_count'] = 1
+
+        # Update sprite_state tableDAT
+        table = op('/project1/sprite_state')
+        if table:
+            update_scene_state(table, 'sprite_source', 'default')
+            update_scene_state(table, 'asset_id', '')
+            update_scene_state(table, 'texture_path', '')
+            update_scene_state(table, 'atlas_cols', '1')
+            update_scene_state(table, 'atlas_rows', '1')
+            update_scene_state(table, 'frame_count', '1')
+
+        print("[WS] Reset to default sprite")
+        return True
+    return False
+
+def get_render_mode():
+    """Get render mode: 'mesh' or 'billboard'."""
+    return sprite_state['render_mode']
+
+def get_render_mode_float():
+    """Get render mode as float for shaders: 0=mesh, 1=billboard."""
+    return sprite_state['render_mode_float']
+
+def get_flipbook_config():
+    """Get flipbook configuration as a dict."""
+    return {
+        'atlas_cols': sprite_state['atlas_cols'],
+        'atlas_rows': sprite_state['atlas_rows'],
+        'frame_count': sprite_state['frame_count'],
+        'playback_mode': sprite_state['playback_mode'],
+        'playback_mode_float': sprite_state['playback_mode_float'],
+        'frame_duration': sprite_state['frame_duration'],
+        'drive_source': sprite_state['drive_source'],
+        'drive_source_float': sprite_state['drive_source_float'],
+    }
+
+def get_flipbook_vec4():
+    """Get flipbook uniform as vec4: (cols, rows, frameCount, playbackMode)."""
+    return (
+        float(sprite_state['atlas_cols']),
+        float(sprite_state['atlas_rows']),
+        float(sprite_state['frame_count']),
+        sprite_state['playback_mode_float'],
+    )
+
+def get_flipbook_vec4_2():
+    """Get second flipbook uniform as vec4: (frameDuration, driveSource, renderMode, 0)."""
+    return (
+        sprite_state['frame_duration'],
+        sprite_state['drive_source_float'],
+        sprite_state['render_mode_float'],
+        0.0,
+    )
 
 
 def is_pose_detected():
