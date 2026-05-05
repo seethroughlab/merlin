@@ -9,7 +9,21 @@
 export * from './types';
 
 // Re-export connection functions
-export { startServer, stopServer, isConnected, isTDReady, state, send } from './connection';
+export { startServer, stopServer, isConnected, isTDReady, state, send, getConnectionStats, resetReconnectCount } from './connection';
+
+// Re-export metrics functions
+export {
+  getLatestMetrics,
+  getAverageFps,
+  getAverageParticleCount,
+  getMetricsHistory,
+  getLatestScreenshot,
+  getLatestVisibility,
+  getMetricsSummary,
+  requestScreenshot,
+  clearMetrics,
+} from './metrics';
+export type { TDMetrics, TDScreenshot, VisibilityMetrics } from './metrics';
 
 // Re-export push methods
 export {
@@ -19,14 +33,19 @@ export {
   pushAuraUpdate,
   pushSkeletonAugment,
   pushZoneUpdate,
+  pushZoneUpdateWithValidation,
   pushOrientationUpdate,
   pushTrackingFrame,
   pushMerlinState,
   pushAnalysisUpdate,
+  // Particle spell program push methods
+  pushParticleSpellProgram,
+  pushSpellCharge,
+  pushSpellCast,
 } from './push';
 
 // Re-export push types
-export type { MerlinStateUpdate } from './push';
+export type { MerlinStateUpdate, ZoneUpdateResult } from './push';
 
 // Re-export insight visual functions
 export {

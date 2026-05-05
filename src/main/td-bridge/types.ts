@@ -4,6 +4,9 @@
  * Type definitions for WebSocket communication between Parlor and TouchDesigner.
  */
 
+import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
+import type { CastingOrigin } from '../../shared/types';
+
 // ===== Connection State =====
 
 export interface TDBridgeState {
@@ -33,7 +36,12 @@ export type TDOutboundMessage =
   | { type: 'tracking_frame'; timestamp: number; fps: number; frame: FrameInfo; pose: PoseData; face: FaceData }
   | { type: 'merlin_state'; active: boolean; phase?: string; spell?: MerlinSpellState }
   | { type: 'analysis_update'; valence: number; arousal: number; tension: number; openness: number; engagement: number; primary_emotion: string }
-  | { type: 'ping' };
+  | { type: 'particle_spell_program'; mode: SpellVisualMode; program: ParticleSpellProgram }
+  | { type: 'spell_charge'; origin: CastingOrigin; intensity: number; castingLandmarks: number[] }
+  | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope; program: ParticleSpellProgram }
+  | { type: 'ping' }
+  | { type: 'request_screenshot' }
+  | { type: 'request_metrics' };
 
 /**
  * Spell state for Merlin mode (subset for TD communication)
@@ -120,6 +128,8 @@ export type TDInboundMessage =
   | { type: 'td_ready'; capabilities: TDCapabilities }
   | { type: 'compile_result'; zone: string; success: boolean; error?: string }
   | { type: 'metrics'; fps: number; particle_count: number; coverage: number }
+  | { type: 'visibility'; visible_particles: number; culled_particles: number; avg_brightness: number }
+  | { type: 'screenshot_result'; base64: string; width: number; height: number }
   | { type: 'pong' };
 
 // ===== Callbacks =====
@@ -129,5 +139,6 @@ export interface TDBridgeCallbacks {
   onDisconnect?: () => void;
   onReady?: (capabilities: TDCapabilities) => void;
   onMetrics?: (metrics: { fps: number; particle_count: number; coverage: number }) => void;
+  onCompileResult?: (result: { zone: string; success: boolean; error?: string }) => void;
   onError?: (error: string) => void;
 }

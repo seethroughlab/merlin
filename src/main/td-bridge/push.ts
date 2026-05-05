@@ -6,7 +6,11 @@
 
 import { send, isConnected } from './connection';
 import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate } from './types';
-import type { TrackingFrame } from '../../shared/types';
+import type { TrackingFrame, CastingOrigin } from '../../shared/types';
+import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
+import { validateGlslSnippet } from '../merlin/glsl-validator';
+import { validateZoneCode, ZoneValidationError, isValidZoneName } from '../merlin/zone-registry';
+import { zoneStateManager } from '../merlin/zone-state';
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
@@ -73,10 +77,96 @@ export function pushSkeletonAugment(overlays: SkeletonOverlay[]): boolean {
 // ===== GLSL Zones =====
 
 /**
- * Update a GLSL zone with new shader code
+ * Update a GLSL zone with a shader code snippet
+ * The snippet gets merged into the zone's shader template at {zone_code}
  */
-export function pushZoneUpdate(zone: ZoneName, glsl_code: string): boolean {
-  return guardedSend({ type: 'zone_update', zone, glsl_code }, `push zone ${zone}`);
+export function pushZoneUpdate(zone: ZoneName, zone_code: string): boolean {
+  return guardedSend({ type: 'zone_update', zone, zone_code }, `push zone ${zone}`);
+}
+
+/**
+ * Result of zone update with validation
+ */
+export interface ZoneUpdateResult {
+  success: boolean;
+  error?: string;
+  warnings?: string[];
+}
+
+/**
+ * Update a GLSL zone with full validation pipeline
+ *
+ * Steps:
+ * 1. Syntax validation (balanced braces, parens, etc.)
+ * 2. Zone contract validation (variables, line limits, banned keywords)
+ * 3. Mark zone as pending, save previous code
+ * 4. Send to TouchDesigner
+ * 5. Wait for compile result from TD
+ * 6. On failure: rollback to previous code
+ */
+export async function pushZoneUpdateWithValidation(
+  zone: string,
+  zoneCode: string,
+  options: { timeoutMs?: number } = {}
+): Promise<ZoneUpdateResult> {
+  const timeoutMs = options.timeoutMs ?? 3000;
+
+  // 1. Validate zone name
+  if (!isValidZoneName(zone)) {
+    return { success: false, error: `Unknown zone: ${zone}` };
+  }
+
+  // 2. Syntax validation
+  const syntaxResult = validateGlslSnippet(zoneCode);
+  if (!syntaxResult.isValid) {
+    return { success: false, error: syntaxResult.error ?? 'Syntax error', warnings: syntaxResult.warnings };
+  }
+
+  // 3. Zone contract validation
+  try {
+    validateZoneCode(zone, zoneCode);
+  } catch (e) {
+    if (e instanceof ZoneValidationError) {
+      return { success: false, error: e.message, warnings: syntaxResult.warnings };
+    }
+    throw e;
+  }
+
+  // 4. Check connection
+  if (!isConnected()) {
+    return { success: false, error: 'Not connected to TouchDesigner', warnings: syntaxResult.warnings };
+  }
+
+  // 5. Mark zone as pending and save previous code
+  zoneStateManager.updateZone(zone, zoneCode);
+
+  // 6. Send to TD
+  const sent = send({ type: 'zone_update', zone, zone_code: zoneCode });
+  if (!sent) {
+    return { success: false, error: 'Failed to send to TouchDesigner', warnings: syntaxResult.warnings };
+  }
+
+  console.log(`[TDBridge ${ts()}] Zone '${zone}' sent for compilation`);
+
+  // 7. Wait for compile result
+  const compiled = await zoneStateManager.waitForCompileResult(zone, timeoutMs);
+
+  if (!compiled) {
+    // Get the error from zone state
+    const error = zoneStateManager.getZoneError(zone) || 'Compilation failed';
+
+    // Rollback to previous code
+    const previousCode = zoneStateManager.rollbackZone(zone);
+    if (previousCode !== null) {
+      // Re-send the previous working code
+      send({ type: 'zone_update', zone, zone_code: previousCode });
+      console.log(`[TDBridge ${ts()}] Zone '${zone}' rolled back to previous code`);
+    }
+
+    return { success: false, error, warnings: syntaxResult.warnings };
+  }
+
+  return { success: true, warnings: syntaxResult.warnings };
 }
 
 // ===== Orientation =====
@@ -184,5 +274,57 @@ export function pushAnalysisUpdate(analysis: AnalysisUpdate): boolean {
       primary_emotion: analysis.primary_emotion,
     },
     'push analysis update'
+  );
+}
+
+// ===== Particle Spell Program =====
+
+/**
+ * Push a complete particle spell program to TD.
+ * Used for both buildup and release mode changes.
+ */
+export function pushParticleSpellProgram(
+  mode: SpellVisualMode,
+  program: ParticleSpellProgram
+): boolean {
+  console.log(
+    `[TDBridge ${ts()}] Pushing spell program: mode=${mode} archetype=${program.archetype} energy=${program.energy.toFixed(2)}`
+  );
+  return guardedSend({ type: 'particle_spell_program', mode, program }, `push particle program (${mode})`);
+}
+
+/**
+ * Push spell charge state (particles tightening around origin).
+ * Called as user approaches casting readiness.
+ */
+export function pushSpellCharge(
+  origin: CastingOrigin,
+  intensity: number,
+  castingLandmarks: number[]
+): boolean {
+  console.log(`[TDBridge ${ts()}] Pushing spell charge: origin=${origin} intensity=${intensity.toFixed(2)}`);
+  return guardedSend(
+    { type: 'spell_charge', origin, intensity, castingLandmarks },
+    'push spell charge'
+  );
+}
+
+/**
+ * Push spell cast trigger with envelope timing.
+ * Called when magic word + gesture detected.
+ */
+export function pushSpellCast(
+  origin: CastingOrigin,
+  intensity: number,
+  durationMs: number,
+  envelope: CastEnvelope,
+  program: ParticleSpellProgram
+): boolean {
+  console.log(
+    `[TDBridge ${ts()}] SPELL CAST! origin=${origin} duration=${durationMs}ms archetype=${program.archetype}`
+  );
+  return guardedSend(
+    { type: 'spell_cast', origin, intensity, durationMs, envelope, program },
+    'push spell cast'
   );
 }
