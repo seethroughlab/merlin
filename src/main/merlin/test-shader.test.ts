@@ -237,4 +237,30 @@ describe('testShaderGeneration', () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/1 of 2/);
   });
+
+  it('catches sendMessage throw mid-retry and marks zone error without crashing', async () => {
+    // Initial response returns force_field code; first push fails so a
+    // retry fires; the retry's chat.sendMessage throws.
+    mockSendMessage
+      .mockResolvedValueOnce(geminiCallsForZones(['force_field']))
+      .mockRejectedValueOnce(new Error('Gemini network error'));
+    mockPushZoneUpdateWithValidation.mockResolvedValueOnce({
+      success: false,
+      error: 'compile error',
+    });
+
+    const { testShaderGeneration } = await import('./test-shader');
+    const result = await testShaderGeneration({
+      intent: 'calm', element: 'air', energy: 0.3,
+      zones: ['force_field'],
+    });
+
+    // Zone is recorded as errored with the thrown message, function does
+    // not propagate the throw.
+    expect(result.zones).toHaveLength(1);
+    expect(result.zones[0].status).toBe('error');
+    expect(result.zones[0].error).toMatch(/Gemini network error/);
+    // Outer success criterion still reports overall failure.
+    expect(result.success).toBe(false);
+  });
 });

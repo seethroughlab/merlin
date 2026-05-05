@@ -18,10 +18,6 @@
  *  6. Push via pushParticleSpellProgram and return the result.
  */
 
-import {
-  GoogleGenerativeAI,
-  FunctionCallingMode,
-} from '@google/generative-ai';
 import { GENERATE_SPELL_PROGRAM_TOOL } from './prompts';
 import {
   createBuildupProgram,
@@ -31,7 +27,7 @@ import {
 } from './particle-program';
 import { pushParticleSpellProgram } from '../td-bridge';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
-import type { GeminiToolCall } from '../../shared/types';
+import { startSingleToolChat } from './gemini-chat-helper';
 import type {
   CastEnvelope,
   ParticleSpellArchetype,
@@ -66,17 +62,6 @@ const ZONE_LONG_TO_SHORT: Record<string, ShaderZoneName> = {
 };
 
 const VALID_FORCE_DIRECTIONS = new Set(['inward', 'outward', 'tangential', 'upward']);
-
-let genAI: GoogleGenerativeAI | null = null;
-
-function ensureGenAI(): GoogleGenerativeAI {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY not set');
-    genAI = new GoogleGenerativeAI(apiKey);
-  }
-  return genAI;
-}
 
 function clamp(value: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, value));
@@ -163,7 +148,7 @@ interface CoercedArgs {
   castEnvelope?: Partial<CastEnvelope>;
 }
 
-export function coerceGeminiArgs(raw: Record<string, unknown>): CoercedArgs {
+export function coerceSpellProgramArgs(raw: Record<string, unknown>): CoercedArgs {
   const out: CoercedArgs = {};
 
   if (typeof raw.archetype === 'string' && (VALID_ARCHETYPES as readonly string[]).includes(raw.archetype)) {
@@ -254,39 +239,18 @@ export async function generateSpellProgramWithGemini(
 
   let coerced: CoercedArgs = {};
   let rawArgs: Record<string, unknown> | null = null;
-  let responseText = '';
-  const rawToolCalls: GeminiToolCall[] = [];
 
   try {
-    const ai = ensureGenAI();
-    const model = ai.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      tools: [{ functionDeclarations: [GENERATE_SPELL_PROGRAM_TOOL] }],
-      toolConfig: {
-        functionCallingConfig: {
-          mode: FunctionCallingMode.ANY,
-          allowedFunctionNames: ['set_spell_program'],
-        },
-      },
-    });
-
-    const chat = model.startChat();
-    const response = await chat.sendMessage(userPrompt);
-    const parts = response.response.candidates?.[0]?.content?.parts ?? [];
-
-    for (const part of parts) {
-      if ('text' in part && part.text) responseText += part.text;
-      if ('functionCall' in part && part.functionCall?.name === 'set_spell_program') {
-        rawArgs = (part.functionCall.args ?? {}) as Record<string, unknown>;
-        rawToolCalls.push({ name: 'set_spell_program', args: rawArgs });
-      }
-    }
+    const handle = startSingleToolChat(GENERATE_SPELL_PROGRAM_TOOL);
+    const response = await handle.send(userPrompt);
+    const programCall = response.toolCalls.find(tc => tc.name === 'set_spell_program');
+    if (programCall) rawArgs = programCall.args;
 
     emitGeminiTurn({
       id: turnId,
       source: 'test_spell_program',
-      responseText,
-      toolCalls: rawToolCalls,
+      responseText: response.text,
+      toolCalls: response.toolCalls,
     });
 
     if (!rawArgs) {
@@ -298,7 +262,7 @@ export async function generateSpellProgramWithGemini(
       };
     }
 
-    coerced = coerceGeminiArgs(rawArgs);
+    coerced = coerceSpellProgramArgs(rawArgs);
     console.log(`[TestSpellProgram ${ts()}] Gemini chose: ${JSON.stringify(coerced)}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

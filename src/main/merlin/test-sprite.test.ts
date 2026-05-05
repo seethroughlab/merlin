@@ -213,11 +213,11 @@ describe('generateSpriteDirect', () => {
   });
 });
 
-describe('coerceGeminiArgs', () => {
+describe('coerceSpriteArgs', () => {
   it('keeps valid fields and drops invalid ones', async () => {
-    const { coerceGeminiArgs } = await import('./test-sprite');
+    const { coerceSpriteArgs } = await import('./test-sprite');
 
-    const spec = coerceGeminiArgs({
+    const spec = coerceSpriteArgs({
       description: 'shield',
       style: 'crystalline',
       animation: 'pulse',
@@ -237,9 +237,9 @@ describe('coerceGeminiArgs', () => {
   });
 
   it('drops out-of-range frameCount and unknown enum values', async () => {
-    const { coerceGeminiArgs } = await import('./test-sprite');
+    const { coerceSpriteArgs } = await import('./test-sprite');
 
-    const spec = coerceGeminiArgs({
+    const spec = coerceSpriteArgs({
       description: 'shield',
       frameCount: 7, // not in {4,8,9,12,16,25}
       playbackMode: 'forever', // unknown
@@ -253,8 +253,8 @@ describe('coerceGeminiArgs', () => {
   });
 
   it('throws when description is missing', async () => {
-    const { coerceGeminiArgs } = await import('./test-sprite');
-    expect(() => coerceGeminiArgs({})).toThrow();
+    const { coerceSpriteArgs } = await import('./test-sprite');
+    expect(() => coerceSpriteArgs({})).toThrow();
   });
 });
 

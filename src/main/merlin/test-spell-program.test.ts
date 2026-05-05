@@ -100,10 +100,10 @@ beforeEach(() => {
   mockPushParticleSpellProgram.mockReturnValue(true);
 });
 
-describe('coerceGeminiArgs', () => {
+describe('coerceSpellProgramArgs', () => {
   it('keeps valid archetype, energy, palette, zoneOverrides', async () => {
-    const { coerceGeminiArgs } = await import('./test-spell-program');
-    const out = coerceGeminiArgs({
+    const { coerceSpellProgramArgs } = await import('./test-spell-program');
+    const out = coerceSpellProgramArgs({
       archetype: 'rising_embers',
       energy: 0.7,
       palette: { primary: '#ff0000', secondary: '#00ff00', accent: '#0000ff' },
@@ -124,8 +124,8 @@ describe('coerceGeminiArgs', () => {
   });
 
   it('drops invalid archetype, malformed hex, unknown zone, out-of-range numbers clamped', async () => {
-    const { coerceGeminiArgs } = await import('./test-spell-program');
-    const out = coerceGeminiArgs({
+    const { coerceSpellProgramArgs } = await import('./test-spell-program');
+    const out = coerceSpellProgramArgs({
       archetype: 'fire_explosion', // invalid
       energy: 5, // clamped to 1
       palette: { primary: 'red', secondary: '#abc', accent: '#0000ff' }, // bad
@@ -142,8 +142,8 @@ describe('coerceGeminiArgs', () => {
   });
 
   it('honors castEnvelope and clamps peakIntensity', async () => {
-    const { coerceGeminiArgs } = await import('./test-spell-program');
-    const out = coerceGeminiArgs({
+    const { coerceSpellProgramArgs } = await import('./test-spell-program');
+    const out = coerceSpellProgramArgs({
       castEnvelope: {
         ignitionMs: 500,
         projectionMs: 1500,

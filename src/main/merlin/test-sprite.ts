@@ -16,17 +16,13 @@
  */
 
 import { readFileSync } from 'fs';
-import {
-  GoogleGenerativeAI,
-  FunctionCallingMode,
-} from '@google/generative-ai';
 import { GENERATE_SPRITE_TOOL } from './prompts';
 import { getSpriteGenerator } from './sprite-generator';
 import { getFlipbookConfig } from './asset-manager';
 import { pushSpriteTexture, pushFlipbookConfig } from '../td-bridge';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
-import type { GeminiToolCall } from '../../shared/types';
+import { startSingleToolChat } from './gemini-chat-helper';
 import type {
   SpriteTestSpec,
   SpriteTestResult,
@@ -41,17 +37,6 @@ const ts = () => new Date().toISOString().slice(11, 23);
 const VALID_FRAME_COUNTS: readonly SpriteFrameCount[] = [4, 8, 9, 12, 16, 25];
 const VALID_PLAYBACK_MODES: readonly SpritePlaybackMode[] = ['loop', 'once', 'pingpong', 'random'];
 const VALID_DRIVE_SOURCES: readonly SpriteDriveSource[] = ['age', 'life', 'velocity', 'id', 'time'];
-
-let genAI: GoogleGenerativeAI | null = null;
-
-function ensureGenAI(): GoogleGenerativeAI {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY not set');
-    genAI = new GoogleGenerativeAI(apiKey);
-  }
-  return genAI;
-}
 
 function readPngAsBase64(path: string): string | undefined {
   try {
@@ -200,7 +185,7 @@ export async function generateSpriteDirect(
  * a SpriteTestSpec, dropping anything that doesn't match the allowed
  * unions. Throws if `description` is missing.
  */
-export function coerceGeminiArgs(args: Record<string, unknown>): SpriteTestSpec {
+export function coerceSpriteArgs(args: Record<string, unknown>): SpriteTestSpec {
   const description = typeof args.description === 'string' ? args.description : '';
   if (!description) throw new Error('Gemini did not provide a description');
 
@@ -238,38 +223,18 @@ export async function generateSpriteWithGemini(prompt: string): Promise<SpriteTe
   emitGeminiTurn({ id: turnId, source: 'test_sprite', userPrompt });
 
   let args: Record<string, unknown> | null = null;
-  let responseText = '';
-  let rawToolCalls: GeminiToolCall[] = [];
 
   try {
-    const ai = ensureGenAI();
-    const model = ai.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      tools: [{ functionDeclarations: [GENERATE_SPRITE_TOOL] }],
-      toolConfig: {
-        functionCallingConfig: {
-          mode: FunctionCallingMode.ANY,
-          allowedFunctionNames: ['generate_sprite'],
-        },
-      },
-    });
-
-    const chat = model.startChat();
-    const response = await chat.sendMessage(userPrompt);
-    const parts = response.response.candidates?.[0]?.content?.parts ?? [];
-    for (const part of parts) {
-      if ('text' in part && part.text) responseText += part.text;
-      if ('functionCall' in part && part.functionCall?.name === 'generate_sprite') {
-        args = (part.functionCall.args ?? {}) as Record<string, unknown>;
-        rawToolCalls.push({ name: 'generate_sprite', args });
-      }
-    }
+    const handle = startSingleToolChat(GENERATE_SPRITE_TOOL);
+    const response = await handle.send(userPrompt);
+    const spriteCall = response.toolCalls.find(tc => tc.name === 'generate_sprite');
+    if (spriteCall) args = spriteCall.args;
 
     emitGeminiTurn({
       id: turnId,
       source: 'test_sprite',
-      responseText,
-      toolCalls: rawToolCalls,
+      responseText: response.text,
+      toolCalls: response.toolCalls,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -288,7 +253,7 @@ export async function generateSpriteWithGemini(prompt: string): Promise<SpriteTe
 
   let spec: SpriteTestSpec;
   try {
-    spec = coerceGeminiArgs(args);
+    spec = coerceSpriteArgs(args);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     emitGeminiTurn({ id: turnId, source: 'test_sprite', responseText: `Coercion error: ${msg}`, final: true });

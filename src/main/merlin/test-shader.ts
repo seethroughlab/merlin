@@ -9,8 +9,6 @@
  */
 
 import {
-  GoogleGenerativeAI,
-  FunctionCallingMode,
   FunctionDeclaration,
   SchemaType,
   Part,
@@ -19,6 +17,7 @@ import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { loadTemplate, ZONE_TEMPLATE_FILES } from './shader-templates';
 import { ZONE_CONTRACTS } from './zone-registry';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
+import { startSingleToolChat } from './gemini-chat-helper';
 import type {
   TestShaderConfig,
   TestShaderResult,
@@ -27,19 +26,6 @@ import type {
 } from '../../shared/types';
 
 const MAX_RETRIES = 2;
-
-let genAI: GoogleGenerativeAI | null = null;
-
-function ensureGenAI(): GoogleGenerativeAI {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY not set');
-    }
-    genAI = new GoogleGenerativeAI(apiKey);
-  }
-  return genAI;
-}
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
@@ -283,28 +269,13 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
   emitGeminiTurn({ id: turnId, source: 'test_shader', systemPrompt, userPrompt });
 
   try {
-    const ai = ensureGenAI();
     const tool = buildToolDefinition(selectedZones);
-
-    const model = ai.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      systemInstruction: systemPrompt,
-      tools: [{ functionDeclarations: [tool] }],
-      toolConfig: {
-        functionCallingConfig: {
-          mode: FunctionCallingMode.ANY,
-          allowedFunctionNames: ['set_zone_shader'],
-        },
-      },
-    });
-
-    const chat = model.startChat();
+    const handle = startSingleToolChat(tool, { systemInstruction: systemPrompt });
 
     console.log(`[TestShader ${ts()}] Sending prompt to Gemini (${selectedZones.length} zones)...`);
-    const initial = await chat.sendMessage(userPrompt);
-    const initialParts = initial.response.candidates?.[0]?.content?.parts ?? [];
+    const initial = await handle.send(userPrompt);
     const requested = new Set(selectedZones);
-    const initialParsed = parseShaderResponse(initialParts, requested);
+    const initialParsed = parseShaderResponse(initial.rawParts, requested);
 
     emitGeminiTurn({
       id: turnId,
@@ -313,7 +284,7 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
       toolCalls: initialParsed.rawToolCalls,
     });
 
-    if (initialParts.length === 0) {
+    if (initial.rawParts.length === 0) {
       emitGeminiTurn({ id: turnId, source: 'test_shader', final: true });
       return {
         zones: [],
@@ -348,68 +319,82 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
         status: 'pending',
       };
 
-      let push = await pushZoneUpdateWithValidation(zoneResult.zone, zoneResult.glsl_code);
-      let attempt = 1;
-      emitGeminiTurn({
-        id: turnId,
-        source: 'test_shader',
-        pushResults: [{ zone, success: push.success, error: push.error, warnings: push.warnings }],
-      });
-      console.log(
-        `[TestShader ${ts()}] Zone ${zone} attempt 1: ${push.success ? 'OK' : 'FAILED'}` +
-        (push.error ? ` - ${push.error}` : '')
-      );
-
-      while (!push.success && attempt <= MAX_RETRIES) {
-        // Phrasing borrowed from vibe-agent/server/gemini_session.py:338-357
-        const retryMsg =
-          `COMPILE ERROR (iteration ${attempt}/${MAX_RETRIES}):\n\n` +
-          `Tool result for "${zone}": ${push.error ?? 'unknown error'}\n\n` +
-          `CRITICAL: The GLSL zone "${zone}" failed to compile. The zone code was reverted to defaults.\n` +
-          `You MUST call set_zone_shader again with corrected GLSL for zone "${zone}".\n` +
-          `Common fixes: check for syntax errors, undefined variables, missing semicolons, ` +
-          `redeclaration of template-provided variables, or invalid GLSL.\n` +
-          `Explain what you think went wrong and provide fixed code.`;
-        emitGeminiTurn({
-          id: turnId,
-          source: 'test_shader',
-          retry: { attempt, total: MAX_RETRIES, zone, reason: push.error },
-        });
-
-        const retryResp = await chat.sendMessage(retryMsg);
-        const retryParts = retryResp.response.candidates?.[0]?.content?.parts ?? [];
-        const retryParsed = parseShaderResponse(retryParts, requested);
-        rawResponse += '\n' + retryParsed.text;
-        emitGeminiTurn({
-          id: turnId,
-          source: 'test_shader',
-          responseText: retryParsed.text,
-          toolCalls: retryParsed.rawToolCalls,
-        });
-
-        const next = retryParsed.toolCallsByZone.get(zone);
-        if (!next) {
-          console.warn(`[TestShader ${ts()}] Retry response did not include zone "${zone}", giving up`);
-          break;
-        }
-        zoneResult.glsl_code = next.glsl_code;
-        zoneResult.description = next.description || zoneResult.description;
-        push = await pushZoneUpdateWithValidation(zoneResult.zone, zoneResult.glsl_code);
-        attempt += 1;
+      // Per-zone block wrapped in try/catch so a transient Gemini failure
+      // or a thrown push doesn't skip the final emit and leave the zone
+      // in a half-recorded state.
+      try {
+        let push = await pushZoneUpdateWithValidation(zoneResult.zone, zoneResult.glsl_code);
+        let attempt = 1;
         emitGeminiTurn({
           id: turnId,
           source: 'test_shader',
           pushResults: [{ zone, success: push.success, error: push.error, warnings: push.warnings }],
         });
         console.log(
-          `[TestShader ${ts()}] Zone ${zone} attempt ${attempt}: ${push.success ? 'OK' : 'FAILED'}` +
+          `[TestShader ${ts()}] Zone ${zone} attempt 1: ${push.success ? 'OK' : 'FAILED'}` +
           (push.error ? ` - ${push.error}` : '')
         );
-      }
 
-      zoneResult.status = push.success ? 'active' : 'error';
-      zoneResult.error = push.success ? undefined : push.error;
-      zoneResult.warnings = push.warnings;
+        while (!push.success && attempt <= MAX_RETRIES) {
+          // Phrasing borrowed from vibe-agent/server/gemini_session.py:338-357
+          const retryMsg =
+            `COMPILE ERROR (iteration ${attempt}/${MAX_RETRIES}):\n\n` +
+            `Tool result for "${zone}": ${push.error ?? 'unknown error'}\n\n` +
+            `CRITICAL: The GLSL zone "${zone}" failed to compile. The zone code was reverted to defaults.\n` +
+            `You MUST call set_zone_shader again with corrected GLSL for zone "${zone}".\n` +
+            `Common fixes: check for syntax errors, undefined variables, missing semicolons, ` +
+            `redeclaration of template-provided variables, or invalid GLSL.\n` +
+            `Explain what you think went wrong and provide fixed code.`;
+          emitGeminiTurn({
+            id: turnId,
+            source: 'test_shader',
+            retry: { attempt, total: MAX_RETRIES, zone, reason: push.error },
+          });
+
+          const retryResp = await handle.send(retryMsg);
+          const retryParsed = parseShaderResponse(retryResp.rawParts, requested);
+          rawResponse += '\n' + retryParsed.text;
+          emitGeminiTurn({
+            id: turnId,
+            source: 'test_shader',
+            responseText: retryParsed.text,
+            toolCalls: retryParsed.rawToolCalls,
+          });
+
+          const next = retryParsed.toolCallsByZone.get(zone);
+          if (!next) {
+            console.warn(`[TestShader ${ts()}] Retry response did not include zone "${zone}", giving up`);
+            break;
+          }
+          zoneResult.glsl_code = next.glsl_code;
+          zoneResult.description = next.description || zoneResult.description;
+          push = await pushZoneUpdateWithValidation(zoneResult.zone, zoneResult.glsl_code);
+          attempt += 1;
+          emitGeminiTurn({
+            id: turnId,
+            source: 'test_shader',
+            pushResults: [{ zone, success: push.success, error: push.error, warnings: push.warnings }],
+          });
+          console.log(
+            `[TestShader ${ts()}] Zone ${zone} attempt ${attempt}: ${push.success ? 'OK' : 'FAILED'}` +
+            (push.error ? ` - ${push.error}` : '')
+          );
+        }
+
+        zoneResult.status = push.success ? 'active' : 'error';
+        zoneResult.error = push.success ? undefined : push.error;
+        zoneResult.warnings = push.warnings;
+      } catch (zoneErr) {
+        const msg = zoneErr instanceof Error ? zoneErr.message : String(zoneErr);
+        console.warn(`[TestShader ${ts()}] Zone ${zone} threw mid-loop: ${msg}`);
+        zoneResult.status = 'error';
+        zoneResult.error = msg;
+        emitGeminiTurn({
+          id: turnId,
+          source: 'test_shader',
+          pushResults: [{ zone, success: false, error: msg }],
+        });
+      }
       zones.push(zoneResult);
     }
 
