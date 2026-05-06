@@ -233,8 +233,79 @@ cast_state = {
 }
 
 
+def _wire_spell_state_uniforms():
+    """Bind uSpellEnergy / uSpellMode on every shader op to live
+    expressions reading from /project1/spell_state. Without this the
+    uniforms sit at hardcoded constants (e.g. uSpellEnergy=0.7) and the
+    shaders never reflect actual spell state. Idempotent — safe to call
+    on every connect.
+    """
+    energy_expr = "float(op('/project1/spell_state')['energy', 1]) if op('/project1/spell_state').numRows > 1 else 0.5"
+    mode_expr = "float(op('/project1/spell_state')['mode_float', 1]) if op('/project1/spell_state').numRows > 1 else 0"
+
+    # Probe a known-good parameter to discover the EXPRESSION mode enum
+    # without an explicit import (TD versions vary).
+    probe = op('/project1/glsl_postfx')
+    if probe is None:
+        return
+    expression_mode = type(probe.par.vec1valuex.mode).EXPRESSION
+
+    def bind(par, expr):
+        par.expr = expr
+        par.mode = expression_mode
+
+    # POP shaders + post_fx use vec slots. Billboard uses const slots.
+    pop_targets = [
+        '/project1/glsl_force',
+        '/project1/glsl_color',
+        '/project1/glsl_size',
+        '/project1/glsl_spawn',
+        '/project1/glsl_velmod',
+        '/project1/glsl_postfx',
+    ]
+    for path in pop_targets:
+        n = op(path)
+        if n is None:
+            continue
+        for i in range(8):
+            namepar = getattr(n.par, f'vec{i}name', None)
+            if namepar is None:
+                continue
+            nm = namepar.eval()
+            valpar = getattr(n.par, f'vec{i}valuex', None)
+            if valpar is None:
+                continue
+            if nm == 'uSpellEnergy':
+                bind(valpar, energy_expr)
+            elif nm == 'uSpellMode':
+                bind(valpar, mode_expr)
+
+    mat = op('/project1/glsl_billboard')
+    if mat is not None:
+        for i in range(4):
+            namepar = getattr(mat.par, f'const{i}name', None)
+            if namepar is None:
+                continue
+            nm = namepar.eval()
+            valpar = getattr(mat.par, f'const{i}value', None)
+            if valpar is None:
+                continue
+            if nm == 'uSpellEnergy':
+                bind(valpar, energy_expr)
+            elif nm == 'uSpellMode':
+                bind(valpar, mode_expr)
+
+    print("[WS] Wired uSpellEnergy / uSpellMode uniforms to spell_state")
+
+
 def onConnect(dat):
-    print(f"[WS] Connected to Parlor")
+    print(f"[WS] Connected to Merlin")
+
+    # Self-heal: ensure uSpellEnergy / uSpellMode read live from spell_state.
+    try:
+        _wire_spell_state_uniforms()
+    except Exception as e:
+        print(f"[WS] Failed to wire spell_state uniforms: {e}")
 
     # Check which templates are available
     available_zones = []
