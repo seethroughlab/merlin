@@ -144,6 +144,7 @@ export type TDInboundMessage =
   | { type: 'visibility'; visible_particles: number; culled_particles: number; avg_brightness: number }
   | { type: 'screenshot_result'; base64: string; width: number; height: number }
   | { type: 'sprite_loaded'; assetId: string; success: boolean; error?: string }
+  | { type: 'sprite_reset'; success: boolean }
   | { type: 'pong' };
 
 // ===== Callbacks =====

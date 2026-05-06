@@ -93,7 +93,7 @@ describe('resetTDBaseline', () => {
     expect(mockPushParticleSpellProgram).toHaveBeenCalledWith('idle', expect.any(Object));
   });
 
-  it('post_fx gets the explicit pass-through, others get empty code', async () => {
+  it('post_fx gets the explicit pass-through, others get a no-op comment', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     await resetTDBaseline();
 
@@ -103,7 +103,11 @@ describe('resetTDBaseline', () => {
     expect(postFxCall).toBeDefined();
     expect(postFxCall![1]).toContain('texture(sTD2DInputs[0]');
     expect(forceFieldCall).toBeDefined();
-    expect(forceFieldCall![1]).toBe('');
+    // The validator rejects literally empty strings, so the reset uses
+    // a comment as the no-op. Templates inject it at {zone_code} where
+    // it has no effect, leaving the template's defaults in place.
+    expect(forceFieldCall![1]).toMatch(/^\/\/\s/);
+    expect(forceFieldCall![1].trim().length).toBeGreaterThan(0);
   });
 
   it('records render mode and flipbook into the mirror on push success', async () => {

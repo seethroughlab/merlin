@@ -55,9 +55,15 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
     console.log(`[ResetTD ${ts()}]   ${label}: ${ok ? 'OK' : `FAIL${error ? ` - ${error}` : ''}`}`);
   };
 
-  // 1. Reset all marker-bearing zones (empty code, except post_fx pass-through).
+  // 1. Reset all marker-bearing zones. The validator rejects literally
+  // empty strings, so use a comment as the no-op snippet — the template
+  // injects it at {zone_code} where it has no effect, leaving the
+  // template's default behavior in place. post_fx is the exception:
+  // its template applies a vignette before {zone_code}, so we pass an
+  // explicit pass-through that overwrites color.
+  const NOOP = '// reset to defaults';
   for (const zone of getMarkerBearingZones()) {
-    const code = zone === 'post_fx' ? POSTFX_PASSTHROUGH : '';
+    const code = zone === 'post_fx' ? POSTFX_PASSTHROUGH : NOOP;
     const r = await pushZoneUpdateWithValidation(zone, code);
     record(`zone:${zone}`, r.success, r.error);
   }

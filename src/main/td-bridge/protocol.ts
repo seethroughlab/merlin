@@ -79,6 +79,11 @@ export function handleInbound(
       // Heartbeat acknowledged - no action needed
       break;
 
+    case 'sprite_reset':
+      // TD acknowledges a reset_sprite — no action needed; the
+      // sidebar already shows the reset outcome.
+      break;
+
     default:
       console.log(`[TDBridge ${ts()}] Unknown message type:`, (message as { type: string }).type);
   }
