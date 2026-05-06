@@ -22,7 +22,6 @@ const { mockLoadTemplate, mockZoneTemplateFiles } = vi.hoisted(() => ({
     spawn_behavior: 'pop_spawn.glsl',
     velocity_modifier: 'pop_velmod.glsl',
     post_fx: 'top_postfx.glsl',
-    material_pixel: 'mat_pixel.glsl',
     billboard_vertex: 'mat_billboard_vertex.glsl',
     billboard_pixel: 'mat_billboard_pixel.glsl',
   },
@@ -41,7 +40,6 @@ vi.mock('./zone-registry', () => ({
     spawn_behavior: { description: 'spawn', modifies: ['pos', 'vel'], availableVars: ['seed'], uniforms: ['uDeltaTime'], maxLines: 20 },
     velocity_modifier: { description: 'vel mod', modifies: 'vel', availableVars: ['vel'], uniforms: ['uTime'], maxLines: 20 },
     post_fx: { description: 'post', modifies: 'color', availableVars: ['uv'], uniforms: ['uTime'], maxLines: 30, bannedKeywords: ['discard'] },
-    material_pixel: { description: 'mat', modifies: ['color', 'emission'], availableVars: ['uv'], uniforms: ['uTime'], maxLines: 35 },
     billboard_pixel: { description: 'billboard', modifies: ['brightness'], availableVars: ['albedo'], uniforms: ['uTime'], maxLines: 25 },
   },
 }));
@@ -95,11 +93,11 @@ beforeEach(() => {
 });
 
 describe('testShaderGeneration', () => {
-  it('defaults to all 9 marker-bearing zones when zones is omitted', async () => {
+  it('defaults to all 8 marker-bearing zones when zones is omitted', async () => {
     const expected = [
       'force_field', 'color_over_life', 'size_over_life',
       'spawn_behavior', 'velocity_modifier', 'post_fx',
-      'material_pixel', 'billboard_pixel', 'billboard_vertex',
+      'billboard_pixel', 'billboard_vertex',
     ];
     mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(expected));
 
@@ -107,16 +105,16 @@ describe('testShaderGeneration', () => {
     const result = await testShaderGeneration({ intent: 'calm', element: 'air', energy: 0.5 });
 
     expect(result.success).toBe(true);
-    expect(result.zones).toHaveLength(9);
+    expect(result.zones).toHaveLength(8);
     expect(result.zones.map(z => z.zone).sort()).toEqual([...expected].sort());
 
-    // Tool config built with all 9 — confirm via the model call
+    // Tool config built with all 8 — confirm via the model call
     const modelArgs = mockGetGenerativeModel.mock.calls[0][0];
     const toolEnum = modelArgs.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
     expect(toolEnum.sort()).toEqual([...expected].sort());
 
     // Each returned zone went through pushZoneUpdateWithValidation
-    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(8);
   });
 
   it('honors explicit zone subset', async () => {

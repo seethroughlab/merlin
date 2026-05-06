@@ -69,7 +69,6 @@ import {
   pushSpellCast,
   pushSpriteTexture,
   pushFlipbookConfig,
-  pushRenderMode,
 } from './push';
 import type { FlipbookConfigMessage } from './types';
 
@@ -593,37 +592,4 @@ describe('push', () => {
     });
   });
 
-  describe('pushRenderMode', () => {
-    it('should send mesh render mode', () => {
-      pushRenderMode('mesh');
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'render_mode',
-        mode: 'mesh',
-      });
-    });
-
-    it('should send billboard render mode', () => {
-      pushRenderMode('billboard');
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'render_mode',
-        mode: 'billboard',
-      });
-    });
-
-    it('should return false when disconnected', () => {
-      mockIsConnected.mockReturnValue(false);
-
-      const result = pushRenderMode('billboard');
-
-      expect(result).toBe(false);
-    });
-
-    it('should return true on successful send', () => {
-      const result = pushRenderMode('mesh');
-
-      expect(result).toBe(true);
-    });
-  });
 });

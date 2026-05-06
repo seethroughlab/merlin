@@ -4,8 +4,11 @@
  * Pushes a known-good clean state to TouchDesigner: empty zone code so
  * each shader template runs its default behavior, an explicit pass-
  * through for post_fx (the template's vignette would otherwise still
- * apply), the default sprite, mesh render mode, a 1x1 single-frame
- * flipbook config, and the idle particle program.
+ * apply), the default sprite, a 1x1 single-frame flipbook config, and
+ * the idle particle program.
+ *
+ * Mesh-mode rendering and its render_mode reset step have been pruned;
+ * see docs/mesh-mode-pipeline.md if we ever bring it back.
  *
  * Used by the sidebar "Reset to Baseline" button.
  */
@@ -13,16 +16,12 @@
 import {
   pushZoneUpdateWithValidation,
   pushFlipbookConfig,
-  pushRenderMode,
   pushResetSprite,
   pushParticleSpellProgram,
 } from '../td-bridge';
 import { createIdleProgram } from './particle-program';
 import { getMarkerBearingZones } from './test-shader';
-import {
-  recordRenderModePush,
-  recordFlipbookConfigPush,
-} from './td-state-mirror';
+import { recordFlipbookConfigPush } from './td-state-mirror';
 import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
 
 const ts = () => new Date().toISOString().slice(11, 23);
@@ -94,17 +93,12 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   const spriteOK = pushResetSprite();
   record('sprite', spriteOK ? 'ok' : 'error', { error: spriteOK ? undefined : 'TD not connected' });
 
-  // 3. Render mode = mesh.
-  const renderOK = pushRenderMode('mesh');
-  if (renderOK) recordRenderModePush('mesh');
-  record('render_mode', renderOK ? 'ok' : 'error', { error: renderOK ? undefined : 'TD not connected' });
-
-  // 4. Flipbook 1x1 single frame.
+  // 3. Flipbook 1x1 single frame.
   const fbOK = pushFlipbookConfig(BASELINE_FLIPBOOK);
   if (fbOK) recordFlipbookConfigPush(BASELINE_FLIPBOOK);
   record('flipbook', fbOK ? 'ok' : 'error', { error: fbOK ? undefined : 'TD not connected' });
 
-  // 5. Idle particle program (low energy, generic motion).
+  // 4. Idle particle program (low energy, generic motion).
   const idleOK = pushParticleSpellProgram('idle', createIdleProgram());
   record('idle_program', idleOK ? 'ok' : 'error', { error: idleOK ? undefined : 'TD not connected' });
 

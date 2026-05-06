@@ -5,7 +5,7 @@
  */
 
 import { send, isConnected } from './connection';
-import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate, FlipbookConfigMessage, RenderMode } from './types';
+import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate, FlipbookConfigMessage } from './types';
 import type { TrackingFrame, CastingOrigin } from '../../shared/types';
 import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
@@ -355,18 +355,6 @@ export function pushFlipbookConfig(config: FlipbookConfigMessage): boolean {
   return guardedSend(
     { type: 'flipbook_config', config },
     'push flipbook config'
-  );
-}
-
-/**
- * Push render mode change to TouchDesigner.
- * Switches between mesh-based and billboard-based particle rendering.
- */
-export function pushRenderMode(mode: RenderMode): boolean {
-  console.log(`[TDBridge ${ts()}] Pushing render mode: ${mode}`);
-  return guardedSend(
-    { type: 'render_mode', mode },
-    'push render mode'
   );
 }
 

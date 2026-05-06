@@ -502,7 +502,7 @@ export class SpriteGenerator {
       console.log(`[SpriteGen ${ts()}] Calling Gemini image generation...`);
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-3.1-flash-image-preview',
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           responseModalities: ['IMAGE', 'TEXT'],
@@ -582,7 +582,7 @@ export class SpriteGenerator {
       console.log(`[SpriteGen ${ts()}] Calling Gemini for flipbook atlas...`);
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-3.1-flash-image-preview',
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           responseModalities: ['IMAGE', 'TEXT'],

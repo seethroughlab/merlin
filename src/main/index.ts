@@ -10,7 +10,7 @@ import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './t
 import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
 import { testShaderGeneration } from './merlin/test-shader';
 import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
-import { setRenderMode, applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-render-mode';
+import { applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-flipbook';
 import { generateSpellProgramWithGemini } from './merlin/test-spell-program';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
 import { resetTDBaseline } from './merlin/reset-td';
@@ -28,7 +28,7 @@ import {
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, RenderMode, SpriteFlipbookConfig, SpellProgramTestInput } from '../shared/types';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, SpriteFlipbookConfig, SpellProgramTestInput } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -695,13 +695,7 @@ ipcMain.handle('merlin-test-sprite-gemini', async (_event, prompt: string) => {
   }
 });
 
-// Test render mode toggle (Shift+T Render Mode tab)
-ipcMain.handle('merlin-test-render-mode', async (_event, mode: RenderMode) => {
-  console.log(`[Merlin ${ts()}] Test render mode: ${mode}`);
-  return setRenderMode(mode);
-});
-
-// Test flipbook re-config without regenerating texture (Shift+T Render Mode tab)
+// Test flipbook re-config without regenerating texture (Shift+T Flipbook tab)
 ipcMain.handle('merlin-test-flipbook-config', async (_event, config: SpriteFlipbookConfig) => {
   console.log(`[Merlin ${ts()}] Test flipbook config: ${JSON.stringify(config)}`);
   return applyFlipbookConfig(config);

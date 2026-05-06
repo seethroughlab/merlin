@@ -1,4 +1,4 @@
-"""
+﻿﻿"""
 WebSocket callbacks for Parlor <-> TouchDesigner communication.
 
 Expanded POP system for mirror/echo AR visuals.
@@ -18,7 +18,6 @@ ZONE_TEMPLATES = {
     'size_over_life': 'pop_size.glsl',
     'velocity_modifier': 'pop_velmod.glsl',
     'post_fx': 'top_postfx.glsl',
-    'material_pixel': 'mat_pixel.glsl',
     'billboard_vertex': 'mat_billboard_vertex.glsl',
     'billboard_pixel': 'mat_billboard_pixel.glsl',
 }
@@ -51,16 +50,16 @@ ZONE_TOP_CODE_PATHS = {
     'post_fx': '/project1/glsl_postfx_pixel',
 }
 
-# MAT zones (material shaders)
+# MAT zones (material shaders) — billboards only. Mesh-mode work
+# (a particle_mat glslMAT) is documented in docs/mesh-mode-pipeline.md
+# and currently not part of this project.
 ZONE_MAT_PATHS = {
-    'material_pixel': '/project1/particle_mat',
     'billboard_vertex': '/project1/glsl_billboard',
     'billboard_pixel': '/project1/glsl_billboard',
 }
 
 # MAT zone to pixel shader DAT mapping
 ZONE_MAT_CODE_PATHS = {
-    'material_pixel': '/project1/particle_mat_pixel',
     'billboard_pixel': '/project1/glsl_billboard_pixel',
 }
 
@@ -96,12 +95,6 @@ DRIVE_SOURCE_MAP = {
     'velocity': 2,
     'id': 3,
     'time': 4,
-}
-
-# Render mode: 0=mesh, 1=billboard
-RENDER_MODE_MAP = {
-    'mesh': 0,
-    'billboard': 1,
 }
 
 # Mood to particle force mode mapping
@@ -143,13 +136,12 @@ analysis_state = {
     'emotion_index': 0,  # For shader lookup
 }
 
-# Sprite system state
+# Sprite system state (billboard-only; see docs/mesh-mode-pipeline.md
+# for the future-work notes on a separate mesh render path).
 sprite_state = {
     'asset_id': None,
     'texture_path': None,
     'sprite_source': 'default',  # 'default' or 'custom'
-    'render_mode': 'mesh',  # 'mesh' or 'billboard'
-    'render_mode_float': 0.0,  # 0=mesh, 1=billboard
     # Flipbook config
     'atlas_cols': 1,
     'atlas_rows': 1,
@@ -239,63 +231,122 @@ def _wire_spell_state_uniforms():
     uniforms sit at hardcoded constants (e.g. uSpellEnergy=0.7) and the
     shaders never reflect actual spell state. Idempotent — safe to call
     on every connect.
+
+    Bindings live on the Vectors page (`vec*name` / `vec*valuex`).
+    glslMAT in particular ignores Constants-page assignments and emits
+    "Uniform not assigned. Please assign it on the Colors or Vectors
+    page." if the uniform isn't on Vectors. To stay consistent across
+    glslTOP/glslPOP/glslMAT we always use Vectors. Any stray
+    Constants-page name from older runs gets cleared so we don't end up
+    with the same uniform claimed in two slots.
     """
     energy_expr = "float(op('/project1/spell_state')['energy', 1]) if op('/project1/spell_state').numRows > 1 else 0.5"
     mode_expr = "float(op('/project1/spell_state')['mode_float', 1]) if op('/project1/spell_state').numRows > 1 else 0"
 
-    # Probe a known-good parameter to discover the EXPRESSION mode enum
-    # without an explicit import (TD versions vary).
+    # Probe a known-good parameter to discover the EXPRESSION / CONSTANT
+    # mode enums without an explicit import (TD versions vary).
     probe = op('/project1/glsl_postfx')
     if probe is None:
         return
-    expression_mode = type(probe.par.vec1valuex.mode).EXPRESSION
+    par_mode = type(probe.par.vec1valuex.mode)
+    expression_mode = par_mode.EXPRESSION
+    constant_mode = par_mode.CONSTANT
 
-    def bind(par, expr):
-        par.expr = expr
-        par.mode = expression_mode
+    UNIFORMS = {'uSpellEnergy': energy_expr, 'uSpellMode': mode_expr}
 
-    # POP shaders + post_fx use vec slots. Billboard uses const slots.
-    pop_targets = [
+    def wire_op(node, slots=8):
+        # Pass 1: clear any Constants-page entries we may have stamped
+        # in past runs (TD silently ignores them on glslMAT, leaving
+        # ghost names sitting around).
+        for i in range(slots):
+            namepar = getattr(node.par, f'const{i}name', None)
+            valpar = getattr(node.par, f'const{i}value', None)
+            if namepar is None or valpar is None:
+                continue
+            if namepar.eval() in UNIFORMS:
+                namepar.val = ''
+                valpar.mode = constant_mode
+                valpar.expr = ''
+                valpar.val = 0.0
+
+        # Pass 2: ensure each uniform is bound on the Vectors page —
+        # update an existing slot if already named, otherwise claim the
+        # first free vec slot.
+        existing = {}  # name -> slot index
+        free_slots = []
+        for i in range(slots):
+            namepar = getattr(node.par, f'vec{i}name', None)
+            if namepar is None:
+                continue
+            nm = namepar.eval()
+            if nm:
+                existing[nm] = i
+            else:
+                free_slots.append(i)
+
+        for uniform_name, expr in UNIFORMS.items():
+            if uniform_name in existing:
+                slot = existing[uniform_name]
+            elif free_slots:
+                slot = free_slots.pop(0)
+                getattr(node.par, f'vec{slot}name').val = uniform_name
+            else:
+                # No room — node has all 8 vec slots claimed by other
+                # uniforms. Skip; warning will surface in TD.
+                continue
+            valpar = getattr(node.par, f'vec{slot}valuex', None)
+            if valpar is not None:
+                valpar.expr = expr
+                valpar.mode = expression_mode
+
+    targets = [
         '/project1/glsl_force',
         '/project1/glsl_color',
         '/project1/glsl_size',
         '/project1/glsl_spawn',
         '/project1/glsl_velmod',
         '/project1/glsl_postfx',
+        '/project1/glsl_billboard',
     ]
-    for path in pop_targets:
+    for path in targets:
         n = op(path)
-        if n is None:
+        if n is not None:
+            wire_op(n)
+
+    print("[WS] Wired uSpellEnergy / uSpellMode uniforms to spell_state (Vectors page)")
+
+
+def _wire_info_dats():
+    """Ensure each glsl_*_info DAT's `op` parameter points at its matching
+    GLSL op. This is what `_check_glsl_compile` reads to surface real
+    GLSL compiler errors (line numbers, identifiers, type mismatches)
+    back to Gemini for retry. If the info DAT is wired to the wrong op,
+    we silently fall back to .errors() which only returns the useless
+    generic "Compile failed (/path)" string — and Gemini retries blind.
+    Idempotent — safe to run on every connect.
+    """
+    expected = {
+        '/project1/glsl_force_info':     '/project1/glsl_force',
+        '/project1/glsl_color_info':     '/project1/glsl_color',
+        '/project1/glsl_size_info':      '/project1/glsl_size',
+        '/project1/glsl_spawn_info':     '/project1/glsl_spawn',
+        '/project1/glsl_velmod_info':    '/project1/glsl_velmod',
+        '/project1/glsl_postfx_info':    '/project1/glsl_postfx',
+        '/project1/glsl_billboard_info': '/project1/glsl_billboard',
+    }
+    fixed = []
+    for info_path, target in expected.items():
+        info = op(info_path)
+        if info is None:
             continue
-        for i in range(8):
-            namepar = getattr(n.par, f'vec{i}name', None)
-            if namepar is None:
-                continue
-            nm = namepar.eval()
-            valpar = getattr(n.par, f'vec{i}valuex', None)
-            if valpar is None:
-                continue
-            if nm == 'uSpellEnergy':
-                bind(valpar, energy_expr)
-            elif nm == 'uSpellMode':
-                bind(valpar, mode_expr)
-
-    mat = op('/project1/glsl_billboard')
-    if mat is not None:
-        for i in range(4):
-            namepar = getattr(mat.par, f'const{i}name', None)
-            if namepar is None:
-                continue
-            nm = namepar.eval()
-            valpar = getattr(mat.par, f'const{i}value', None)
-            if valpar is None:
-                continue
-            if nm == 'uSpellEnergy':
-                bind(valpar, energy_expr)
-            elif nm == 'uSpellMode':
-                bind(valpar, mode_expr)
-
-    print("[WS] Wired uSpellEnergy / uSpellMode uniforms to spell_state")
+        op_par = getattr(info.par, 'op', None)
+        if op_par is None:
+            continue
+        if op_par.eval() != target:
+            op_par.val = target
+            fixed.append(info_path)
+    if fixed:
+        print(f"[WS] Re-wired info DATs: {fixed}")
 
 
 def onConnect(dat):
@@ -306,6 +357,13 @@ def onConnect(dat):
         _wire_spell_state_uniforms()
     except Exception as e:
         print(f"[WS] Failed to wire spell_state uniforms: {e}")
+
+    # Self-heal: ensure each glsl_*_info DAT points at the right GLSL op
+    # so compile errors actually flow back to Gemini.
+    try:
+        _wire_info_dats()
+    except Exception as e:
+        print(f"[WS] Failed to wire info DATs: {e}")
 
     # Check which templates are available
     available_zones = []
@@ -379,8 +437,6 @@ def onReceiveText(dat, rowIndex, message):
             handle_sprite_texture(dat, msg)
         elif msg_type == 'flipbook_config':
             handle_flipbook_config(dat, msg)
-        elif msg_type == 'render_mode':
-            handle_render_mode(dat, msg)
         elif msg_type == 'reset_sprite':
             handle_reset_sprite(dat, msg)
 
@@ -1115,10 +1171,12 @@ def handle_flipbook_config(dat, msg):
             billboard_mat.par.vec1valuez = float(sprite_state['frame_count'])
             billboard_mat.par.vec1valuew = sprite_state['playback_mode_float']
 
-            # uFlipbook2: (frameDuration, driveSource, renderMode, 0)
+            # uFlipbook2: (frameDuration, driveSource, 0, 0)
+            # The third slot used to carry renderMode; mesh-mode rendering
+            # has been pruned (see docs/mesh-mode-pipeline.md). Left at 0.
             billboard_mat.par.vec2valuex = float(sprite_state['frame_duration'])
             billboard_mat.par.vec2valuey = sprite_state['drive_source_float']
-            billboard_mat.par.vec2valuez = sprite_state['render_mode_float']
+            billboard_mat.par.vec2valuez = 0.0
         except Exception as e:
             print(f"[WS] Error setting billboard mat params: {e}")
 
@@ -1139,43 +1197,6 @@ def handle_flipbook_config(dat, msg):
     frames = sprite_state['frame_count']
     mode = sprite_state['playback_mode']
     print(f"[WS] Flipbook config: {cols}x{rows} ({frames} frames, {mode})")
-
-
-def handle_render_mode(dat, msg):
-    """Handle render_mode message - switch between mesh and billboard rendering.
-
-    Message format:
-    {
-        "type": "render_mode",
-        "mode": "billboard"  // or "mesh"
-    }
-    """
-    global sprite_state
-
-    mode = msg.get('mode', 'mesh')
-    sprite_state['render_mode'] = mode
-    sprite_state['render_mode_float'] = float(RENDER_MODE_MAP.get(mode, 0))
-
-    # Update sprite_state tableDAT
-    table = op('/project1/sprite_state')
-    if table:
-        update_scene_state(table, 'render_mode', mode)
-        update_scene_state(table, 'render_mode_float', str(sprite_state['render_mode_float']))
-
-    # Update billboard material uniform so the shader sees the new mode
-    # immediately. uFlipbook2 = (frameDuration, driveSource, renderMode, 0)
-    billboard_mat = op('/project1/glsl_billboard')
-    if billboard_mat:
-        try:
-            billboard_mat.par.vec2valuez = sprite_state['render_mode_float']
-        except Exception as e:
-            print(f"[WS] Error setting render mode uniform: {e}")
-
-    # TODO: Toggle render paths in TD based on mode
-    # This would switch between mesh-based and billboard-based rendering
-    # Implementation depends on TD project structure
-
-    print(f"[WS] Render mode: {mode}")
 
 
 def handle_reset_sprite(dat, msg):
@@ -1254,14 +1275,6 @@ def reset_to_default_sprite():
         return True
     return False
 
-def get_render_mode():
-    """Get render mode: 'mesh' or 'billboard'."""
-    return sprite_state['render_mode']
-
-def get_render_mode_float():
-    """Get render mode as float for shaders: 0=mesh, 1=billboard."""
-    return sprite_state['render_mode_float']
-
 def get_flipbook_config():
     """Get flipbook configuration as a dict."""
     return {
@@ -1285,11 +1298,14 @@ def get_flipbook_vec4():
     )
 
 def get_flipbook_vec4_2():
-    """Get second flipbook uniform as vec4: (frameDuration, driveSource, renderMode, 0)."""
+    """Get second flipbook uniform as vec4: (frameDuration, driveSource, 0, 0).
+    The third slot used to carry renderMode; mesh-mode rendering has been
+    pruned (see docs/mesh-mode-pipeline.md). Slot is reserved at 0.
+    """
     return (
         sprite_state['frame_duration'],
         sprite_state['drive_source_float'],
-        sprite_state['render_mode_float'],
+        0.0,
         0.0,
     )
 

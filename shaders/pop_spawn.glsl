@@ -1,31 +1,40 @@
+// IQ-style multiplicative hash. fract(sin(...)) collapses near zero and
+// aliases for small integer inputs, producing emergent attractor clusters
+// instead of uniform randomness — that bug was the source of the "8
+// fountains" baseline visual.
+vec3 hash31(float p) {
+    vec3 p3 = fract(vec3(p) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xxy + p3.yzz) * p3.zyx);
+}
+
 void main() {
-    const uint id = TDIndex();
-    if (id >= TDNumElements()) return;
+    const uint idx = TDIndex();
+    if (idx >= TDNumElements()) return;
+
+    // Persistent particle id — preferred over TDIndex for stable
+    // per-particle randomness across slot recycling.
+    float id = float(TDIn_PartId());
 
     vec3 pos = TDIn_P();
     vec3 vel = TDIn_PartVel();
     float age = TDIn_PartAge();
 
     if (age < uDeltaTime * 1.5) {
-        // Particle just born - initialize position and velocity
-        float seed = fract(sin(fract(float(id) * 0.00123456) * 6.283) * 43758.5453);
-        float seed2 = fract(sin(float(id) * 78.233) * 43758.5453);
-        float seed3 = fract(sin(float(id) * 43.758) * 12345.6789);
-
-        // Default: spawn in sphere with outward velocity
-        float theta = seed * 6.283;
-        float phi = seed2 * 3.14159 - 1.57;
-        float radius = 0.1 + seed3 * 0.15;
-
-        pos.x = cos(theta) * cos(phi) * radius;
-        pos.y = sin(phi) * radius;
-        pos.z = sin(theta) * cos(phi) * radius;
-
-        vel = vec3((seed - 0.5) * 0.1, 0.2 + seed2 * 0.1, (seed3 - 0.5) * 0.1);
+        // Particle just born. Leave `pos` alone — particle1 already
+        // chose a random input point from the pointgenerator's spawn
+        // pool (verified per-particle distinct via rndinputpts=True).
+        // Only initialise velocity, with an outward radial component
+        // plus a small id-keyed perturbation so neighbouring particles
+        // diverge instead of stacking.
+        vec3 r = hash31(id);
+        vec3 outward = normalize(pos + vec3(1e-5)) * (0.05 + r.x * 0.05);
+        vec3 jitter = (r - 0.5) * 0.05;
+        vel = outward + jitter;
 
         // {zone_code}
     }
 
-    P[id] = pos;
-    PartVel[id] = vel;
+    P[idx] = pos;
+    PartVel[idx] = vel;
 }

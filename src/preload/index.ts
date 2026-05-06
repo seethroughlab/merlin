@@ -12,9 +12,8 @@ import type {
   TestShaderResult,
   SpriteTestSpec,
   SpriteTestResult,
-  RenderMode,
   SpriteFlipbookConfig,
-  RenderModeTestResult,
+  FlipbookTestResult,
   MirroredTDState,
   SpellProgramTestInput,
   SpellProgramTestResult,
@@ -147,17 +146,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-test-sprite-gemini', prompt);
   },
 
-  // Test render mode toggle (Shift+T Render Mode tab)
-  merlinTestRenderMode: (mode: RenderMode): Promise<RenderModeTestResult> => {
-    return ipcRenderer.invoke('merlin-test-render-mode', mode);
-  },
-
-  // Test flipbook re-config without regenerating texture
-  merlinTestFlipbookConfig: (config: SpriteFlipbookConfig): Promise<RenderModeTestResult> => {
+  // Test flipbook re-config without regenerating texture (Shift+T Flipbook tab)
+  merlinTestFlipbookConfig: (config: SpriteFlipbookConfig): Promise<FlipbookTestResult> => {
     return ipcRenderer.invoke('merlin-test-flipbook-config', config);
   },
 
-  // Get the current mirrored TD state for the Render Mode tab readout
+  // Get the current mirrored TD state for the Flipbook tab readout
   merlinTestGetMirroredState: (): Promise<MirroredTDState> => {
     return ipcRenderer.invoke('merlin-test-get-mirrored-state');
   },
@@ -285,8 +279,7 @@ declare global {
       merlinTestShader: (config: TestShaderConfig) => Promise<TestShaderResult>;
       merlinTestSpriteDirect: (spec: SpriteTestSpec) => Promise<SpriteTestResult>;
       merlinTestSpriteGemini: (prompt: string) => Promise<SpriteTestResult>;
-      merlinTestRenderMode: (mode: RenderMode) => Promise<RenderModeTestResult>;
-      merlinTestFlipbookConfig: (config: SpriteFlipbookConfig) => Promise<RenderModeTestResult>;
+      merlinTestFlipbookConfig: (config: SpriteFlipbookConfig) => Promise<FlipbookTestResult>;
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
       merlinTestSpellProgram: (input: SpellProgramTestInput) => Promise<SpellProgramTestResult>;
       merlinResetTDBaseline: () => Promise<ResetTDResult>;

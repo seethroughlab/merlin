@@ -2,6 +2,9 @@ void main() {
     const uint idx = TDIndex();
     if (idx >= TDNumElements()) return;
 
+    // Persistent particle id for stable per-particle effects in zone code.
+    float id = float(TDIn_PartId());
+
     vec3 pos = TDIn_P();
     vec3 vel = TDIn_PartVel();
     float age = TDIn_PartAge();
@@ -9,25 +12,17 @@ void main() {
     float life = 1.0 - (age / max(lifeSpan, 0.001));
     vec3 force = TDIn_PartForce();
 
-    // Default behavior: gentle orbit with center attraction
-    vec2 toCenter = vec2(0.5, 0.5) - pos.xy;
-    float dist = length(toCenter);
-
-    // Gentle orbit
-    force.x += -toCenter.y * 0.03;
-    force.y += toCenter.x * 0.03;
-
-    // Center attraction
-    float pullStrength = smoothstep(0.15, 0.4, dist) * 0.05;
-    force.xy += normalize(toCenter) * pullStrength;
-
-    // Gentle upward drift
-    force.y += 0.005;
-
-    // Scale by spell energy
-    force *= (0.5 + uSpellEnergy);
+    // No opinionated default motion. Idle baseline = zero force; particles
+    // inherit emission velocity from glsl_spawn, get gradually slowed by
+    // drag in glsl_velmod, and fan out via the per-id drift there. Spell
+    // motion comes entirely from the zone snippet below. Aligns with
+    // vibe-agent's minimal-template philosophy.
 
     // {zone_code}
+
+    // Energy scaling preserved so zone code that sets force.xyz directly
+    // still scales with spell energy at the very end.
+    force *= (0.5 + uSpellEnergy);
 
     PartForce[idx] = force;
 }

@@ -45,7 +45,6 @@ export const ZONE_TEMPLATE_FILES: Record<string, string> = {
   color_over_life: 'pop_color.glsl',
   size_over_life: 'pop_size.glsl',
   post_fx: 'top_postfx.glsl',
-  material_pixel: 'mat_pixel.glsl',
   billboard_vertex: 'mat_billboard_vertex.glsl',
   billboard_pixel: 'mat_billboard_pixel.glsl',
 };

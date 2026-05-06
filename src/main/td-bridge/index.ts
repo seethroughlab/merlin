@@ -45,7 +45,6 @@ export {
   // Sprite system push methods
   pushSpriteTexture,
   pushFlipbookConfig,
-  pushRenderMode,
   pushResetSprite,
 } from './push';
 

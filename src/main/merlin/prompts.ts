@@ -105,17 +105,37 @@ Example patterns by element:
 
 ### CRITICAL SHADER RULES - AVOID THESE MISTAKES:
 
-1. **spawn_behavior: Random seeds MUST include uTime**
-   Particle IDs are REUSED when particles die. Using only idx for randomization creates static patterns.
+1. **NEVER use fract(sin(...)) for per-particle randomness**
+   It collapses near zero and aliases for sequential integer ids,
+   producing emergent attractor clusters (the "all particles spawn from
+   8 points" bug). Use the hash31() function provided in the spawn and
+   velmod templates: it takes a float and returns a vec3 of well-
+   distributed values.
    BAD:  float seed = fract(sin(float(idx) * 12.9898) * 43758.5453);
-   GOOD: float seed = fract(sin((uTime + float(idx) * 0.001) * 12.9898) * 43758.5453);
+   GOOD: vec3 r = hash31(id);  // spawn_behavior, velocity_modifier
+         // r.x, r.y, r.z each ∈ [0,1), independent
 
-2. **Always use uTime for animation**
+2. **Use id (persistent), NOT idx (recyclable slot)**
+   id = float(TDIn_PartId()) is the persistent, unique-per-particle
+   identifier — it stays the same for a given particle across its
+   entire life. idx = TDIndex() is the GPU thread / array slot index;
+   when a particle dies its slot is reused and idx is reassigned to a
+   new particle. For stable per-particle effects (consistent color
+   variation, drift direction, frequency, etc.) always key off id.
+
+3. **force_field has NO default forces**
+   The template applies zero force unless your snippet sets it.
+   Particles coast on emission velocity + drag + tiny per-id drift if
+   force_field is empty. Your snippet is the sole source of spell
+   motion. Spell intensity is auto-scaled — the template multiplies
+   final force by (0.5 + uSpellEnergy) for you.
+
+4. **Always use uTime for animation**
    Static patterns look lifeless. Add uTime to create movement.
    BAD:  float wave = sin(pos.x * 10.0);
    GOOD: float wave = sin(pos.x * 10.0 + uTime * 2.0);
 
-3. **Force magnitudes for visible motion**
+5. **Force magnitudes for visible motion**
    - Too small (< 0.01): particles appear static
    - Good range: 0.03 - 0.15 for gentle, 0.15 - 0.3 for energetic
    - Too large (> 0.5): motion too fast to perceive
@@ -475,9 +495,10 @@ Zone outputs (modify these variables):
 - velocity_modifier: PartVel (vec3) - velocity scaling
 
 CRITICAL RULES:
-1. spawn_behavior: Random seeds MUST include uTime (e.g., fract(sin((uTime + float(idx)*0.001) * 12.9898) * 43758.5453)) - particle IDs are reused!
-2. Always use uTime for animation - static patterns look lifeless
-3. Force magnitudes: 0.03-0.15 for gentle motion, 0.15-0.3 for energetic
+1. Per-particle randomness: use the provided hash31(id) function (returns a vec3) — id = float(TDIn_PartId()) is the persistent particle id. Do NOT use fract(sin(...)) — it aliases for sequential ids and produces clustered emergent attractors. Use id (persistent across life) NOT idx (slot index, gets recycled).
+2. force_field has no default forces — your snippet is the sole source of spell motion. Final force is auto-scaled by (0.5 + uSpellEnergy).
+3. Always use uTime for animation - static patterns look lifeless.
+4. Force magnitudes: 0.03-0.15 for gentle motion, 0.15-0.3 for energetic.
 
 Write expressive GLSL that matches the spell's intent and element. Call on each turn to evolve the visuals.`,
   parameters: {

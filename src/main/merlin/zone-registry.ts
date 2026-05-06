@@ -28,7 +28,6 @@ export const ZONE_NAMES = [
   'spawn_behavior',
   'velocity_modifier',
   'post_fx',
-  'material_pixel',
   'billboard_vertex',
   'billboard_pixel',
 ] as const;
@@ -40,7 +39,8 @@ export type ZoneName = (typeof ZONE_NAMES)[number];
  */
 export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
   force_field: {
-    description: 'Apply forces to particles',
+    description:
+      'Apply forces to particles. The template applies NO default forces — your snippet is the sole source of motion (other than emission velocity, drag, and a tiny per-id drift). Without a force_field snippet, particles coast on inertia. The template multiplies the final force by (0.5 + uSpellEnergy) so spell intensity scales automatically.',
     modifies: 'force',
     availableVars: ['pos', 'vel', 'age', 'lifeSpan', 'life', 'force', 'id', 'idx'],
     uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
@@ -62,10 +62,11 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     maxLines: 15,
   },
   spawn_behavior: {
-    description: 'Initialize particle position/velocity',
+    description:
+      "Initialize a newborn particle's position and velocity. By default `pos` is whatever input point particle1 selected from its 100-point spawn pool — leave it alone unless you want to override the entire spawn region. Velocity is initialized to a small outward radial vector + per-id jitter; replace `vel` to change the spawn impulse. `r` is a vec3 of well-distributed pseudo-random values from hash31(id) — use it instead of fract(sin(...)) which aliases for sequential ids.",
     modifies: ['pos', 'vel'],
-    availableVars: ['pos', 'vel', 'age', 'seed', 'seed2', 'seed3', 'id'],
-    uniforms: ['uDeltaTime'],
+    availableVars: ['pos', 'vel', 'age', 'r', 'id', 'idx'],
+    uniforms: ['uDeltaTime', 'uTime'],
     maxLines: 20,
   },
   velocity_modifier: {
@@ -82,13 +83,6 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uBloomIntensity', 'uVignetteStrength', 'uChromaticAberration'],
     maxLines: 30,
     bannedKeywords: ['discard'],
-  },
-  material_pixel: {
-    description: 'Custom pixel/fragment shading on particle geometry',
-    modifies: ['color', 'emission', 'roughness', 'metallic'],
-    availableVars: ['uv', 'normal', 'worldPos', 'baseColor', 'color', 'emission', 'roughness', 'metallic'],
-    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uRoughness', 'uMetallic', 'uEmission'],
-    maxLines: 35,
   },
   billboard_vertex: {
     description: 'Billboard particle vertex shader. Snippet runs in view space after the camera-facing quad has been positioned, before final projection — typically used to perturb viewPos for wobble, jitter, or other position effects.',

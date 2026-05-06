@@ -20,13 +20,12 @@ describe('zone-registry', () => {
       expect(ZONE_NAMES).toContain('spawn_behavior');
       expect(ZONE_NAMES).toContain('velocity_modifier');
       expect(ZONE_NAMES).toContain('post_fx');
-      expect(ZONE_NAMES).toContain('material_pixel');
       expect(ZONE_NAMES).toContain('billboard_vertex');
       expect(ZONE_NAMES).toContain('billboard_pixel');
     });
 
-    it('should have 9 zones', () => {
-      expect(ZONE_NAMES).toHaveLength(9);
+    it('should have 8 zones', () => {
+      expect(ZONE_NAMES).toHaveLength(8);
     });
   });
 
@@ -48,7 +47,7 @@ describe('zone-registry', () => {
     it('should return contract for valid zone', () => {
       const contract = getZoneContract('force_field');
       expect(contract).not.toBeNull();
-      expect(contract?.description).toBe('Apply forces to particles');
+      expect(contract?.description).toMatch(/forces/i);
       expect(contract?.modifies).toBe('force');
       expect(contract?.maxLines).toBe(25);
     });

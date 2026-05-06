@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   mockPushZoneUpdateWithValidation,
   mockPushFlipbookConfig,
-  mockPushRenderMode,
   mockPushResetSprite,
   mockPushParticleSpellProgram,
 } = vi.hoisted(() => ({
@@ -13,7 +12,6 @@ const {
     Promise.resolve({ success: true })
   ),
   mockPushFlipbookConfig: vi.fn(() => true),
-  mockPushRenderMode: vi.fn(() => true),
   mockPushResetSprite: vi.fn(() => true),
   mockPushParticleSpellProgram: vi.fn(() => true),
 }));
@@ -21,7 +19,6 @@ const {
 vi.mock('../td-bridge', () => ({
   pushZoneUpdateWithValidation: mockPushZoneUpdateWithValidation,
   pushFlipbookConfig: mockPushFlipbookConfig,
-  pushRenderMode: mockPushRenderMode,
   pushResetSprite: mockPushResetSprite,
   pushParticleSpellProgram: mockPushParticleSpellProgram,
 }));
@@ -41,7 +38,6 @@ const ALL_ZONES = [
   'spawn_behavior',
   'velocity_modifier',
   'post_fx',
-  'material_pixel',
   'billboard_pixel',
   'billboard_vertex',
 ];
@@ -50,13 +46,11 @@ vi.mock('./test-shader', () => ({
   getMarkerBearingZones: () => ALL_ZONES,
 }));
 
-const { mockRecordRenderModePush, mockRecordFlipbookConfigPush } = vi.hoisted(() => ({
-  mockRecordRenderModePush: vi.fn(),
+const { mockRecordFlipbookConfigPush } = vi.hoisted(() => ({
   mockRecordFlipbookConfigPush: vi.fn(),
 }));
 
 vi.mock('./td-state-mirror', () => ({
-  recordRenderModePush: mockRecordRenderModePush,
   recordFlipbookConfigPush: mockRecordFlipbookConfigPush,
 }));
 
@@ -64,28 +58,26 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockPushZoneUpdateWithValidation.mockResolvedValue({ success: true });
   mockPushFlipbookConfig.mockReturnValue(true);
-  mockPushRenderMode.mockReturnValue(true);
   mockPushResetSprite.mockReturnValue(true);
   mockPushParticleSpellProgram.mockReturnValue(true);
 });
 
 describe('resetTDBaseline', () => {
-  it('happy path: pushes 9 zones, sprite, render mode, flipbook, idle program', async () => {
+  it('happy path: pushes 8 zones, sprite, flipbook, idle program', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    expect(result.steps).toHaveLength(13); // 9 zones + sprite + render + flipbook + idle
+    expect(result.steps).toHaveLength(11); // 8 zones + sprite + flipbook + idle
     expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
     // Each marker-bearing zone got a push
-    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(8);
     for (const zone of ALL_ZONES) {
       expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledWith(zone, expect.any(String));
     }
 
     expect(mockPushResetSprite).toHaveBeenCalledTimes(1);
-    expect(mockPushRenderMode).toHaveBeenCalledWith('mesh');
     expect(mockPushFlipbookConfig).toHaveBeenCalledWith({
       atlasCols: 1, atlasRows: 1, frameCount: 1,
       playbackMode: 'loop', frameDuration: 0.1, driveSource: 'age',
@@ -93,12 +85,12 @@ describe('resetTDBaseline', () => {
     expect(mockPushParticleSpellProgram).toHaveBeenCalledWith('idle', expect.any(Object));
   });
 
-  it('classifies "MAT zone not found" as skipped, not failure', async () => {
-    // material_pixel zone returns the not-found error; success should
-    // still be true because skips don't count as failures.
+  it('classifies "zone not found" as skipped, not failure', async () => {
+    // A zone returns the not-found error; success should still be true
+    // because skips don't count as failures.
     mockPushZoneUpdateWithValidation.mockImplementation(async (zone) => {
-      if (zone === 'material_pixel') {
-        return { success: false, error: 'MAT zone not found: material_pixel' };
+      if (zone === 'post_fx') {
+        return { success: false, error: 'zone not found: post_fx' };
       }
       return { success: true };
     });
@@ -107,9 +99,9 @@ describe('resetTDBaseline', () => {
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    const matStep = result.steps.find(s => s.label === 'zone:material_pixel');
-    expect(matStep?.status).toBe('skipped');
-    expect(matStep?.note).toMatch(/not found/i);
+    const step = result.steps.find(s => s.label === 'zone:post_fx');
+    expect(step?.status).toBe('skipped');
+    expect(step?.note).toMatch(/not found/i);
     // No errors recorded
     expect(result.steps.filter(s => s.status === 'error')).toHaveLength(0);
   });
@@ -131,29 +123,26 @@ describe('resetTDBaseline', () => {
     expect(forceFieldCall![1].trim().length).toBeGreaterThan(0);
   });
 
-  it('records render mode and flipbook into the mirror on push success', async () => {
+  it('records flipbook into the mirror on push success', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     await resetTDBaseline();
 
-    expect(mockRecordRenderModePush).toHaveBeenCalledWith('mesh');
     expect(mockRecordFlipbookConfigPush).toHaveBeenCalledWith(expect.objectContaining({
       atlasCols: 1, frameCount: 1,
     }));
   });
 
   it('does NOT record into the mirror when push fails (TD disconnected)', async () => {
-    mockPushRenderMode.mockReturnValue(false);
     mockPushFlipbookConfig.mockReturnValue(false);
 
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
-    expect(mockRecordRenderModePush).not.toHaveBeenCalled();
     expect(mockRecordFlipbookConfigPush).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
-    const renderStep = result.steps.find(s => s.label === 'render_mode');
-    expect(renderStep?.status).toBe('error');
-    expect(renderStep?.error).toMatch(/not connected/i);
+    const fbStep = result.steps.find(s => s.label === 'flipbook');
+    expect(fbStep?.status).toBe('error');
+    expect(fbStep?.error).toMatch(/not connected/i);
   });
 
   it('partial failure: continues attempting remaining steps', async () => {
@@ -165,8 +154,7 @@ describe('resetTDBaseline', () => {
 
     expect(result.success).toBe(false);
     expect(result.steps.find(s => s.label === 'sprite')?.status).toBe('error');
-    // render / flipbook / idle still attempted
-    expect(mockPushRenderMode).toHaveBeenCalled();
+    // flipbook / idle still attempted
     expect(mockPushFlipbookConfig).toHaveBeenCalled();
     expect(mockPushParticleSpellProgram).toHaveBeenCalled();
   });
@@ -180,7 +168,7 @@ describe('resetTDBaseline', () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
-    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(8);
     const failedStep = result.steps.find(s => s.label === 'zone:force_field');
     expect(failedStep?.status).toBe('error');
     expect(failedStep?.error).toBe('compile error');

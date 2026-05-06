@@ -24,12 +24,12 @@ Interactive AR experience combining Electron, MediaPipe tracking, and TouchDesig
 - `shader-templates.ts` - Loads `shaders/*.glsl` from disk for prompt context
 
 #### Test Mode (Shift+T)
-- `test-shader.ts` - Shaders tab: Gemini fills 1–9 zones with retry on compile failure
+- `test-shader.ts` - Shaders tab: Gemini fills 1–8 zones with retry on compile failure
 - `test-sprite.ts` - Sprites tab: Direct spec or Gemini interpretation → Imagen → push
-- `test-render-mode.ts` - Render Mode tab: mesh/billboard toggle + flipbook re-config
+- `test-flipbook.ts` - Flipbook tab: re-configure flipbook playback on the loaded texture
 - `test-spell-program.ts` - Spell Program tab: free-text → `set_spell_program` → push
 - `test-shader-presets.ts` - Named scenarios for the Shaders preset dropdown (in `src/shared/`)
-- `td-state-mirror.ts` - Last-pushed snapshot of render mode + flipbook (read by Render Mode tab)
+- `td-state-mirror.ts` - Last-pushed snapshot of flipbook config (read by Flipbook tab)
 - `gemini-events.ts` - Publisher: emits `GeminiTurn` events on `gemini-conversation` IPC channel; truncates long string fields to keep IPC payloads small
 - `gemini-chat-helper.ts` - Shared `startSingleToolChat(toolDef, opts)` used by all three Gemini-test modules
 
@@ -42,8 +42,10 @@ Interactive AR experience combining Electron, MediaPipe tracking, and TouchDesig
 ### shaders/
 - `pop_force.glsl`, `pop_color.glsl`, `pop_size.glsl`, `pop_spawn.glsl`, `pop_velmod.glsl` - POP zone templates
 - `top_postfx.glsl` - Post-FX TOP template
-- `mat_pixel.glsl`, `mat_billboard_pixel.glsl`, `mat_billboard_vertex.glsl` - Material templates
+- `mat_billboard_pixel.glsl`, `mat_billboard_vertex.glsl` - Billboard material templates
 - All templates have a `// {zone_code}` injection point where Gemini's snippet is merged
+
+> Particle rendering is **billboard/flipbook only** for now. Mesh-mode rendering (a `particle_mat` glslMAT + `material_pixel` zone) was scoped out and pruned; see `docs/mesh-mode-pipeline.md` for the future-work notes if we ever bring it back.
 
 ## Test Mode
 
@@ -53,7 +55,7 @@ Interactive AR experience combining Electron, MediaPipe tracking, and TouchDesig
 |---|---|
 | Shaders | Gemini generates GLSL for a chosen subset of zones; auto-retries up to 2× on compile failure |
 | Sprites | Direct spec or Gemini-interpretation → Gemini Imagen → `pushSpriteTexture` / `pushFlipbookConfig` |
-| Render Mode | Mesh/billboard toggle, flipbook re-config without regenerating the texture |
+| Flipbook | Re-configure flipbook playback (frameDuration / playbackMode / driveSource) without regenerating the texture |
 | Spell Program | Gemini fills a `ParticleSpellProgram` and pushes via `pushParticleSpellProgram` |
 
 Opening the panel auto-activates the Merlin sidebar so every Gemini turn (live session AND test mode) shows up as a card with: source badge, collapsible system prompt, user prompt, response text, tool calls, push results, retry markers. All flows route through `gemini-events.ts` so the sidebar is a single conversation transcript.
@@ -83,7 +85,6 @@ TD connects via WebSocket. Outbound message types (Merlin → TD):
 - `zone_update` - GLSL zone code injection (POP / TOP / MAT)
 - `sprite_texture` - Load sprite PNG
 - `flipbook_config` - Atlas grid + playback settings
-- `render_mode` - Mesh / billboard toggle
 - `particle_spell_program` - Full spell-program payload
 - `tracking_frame` - MediaPipe pose/face data
 - `mood_update`, `scene_params`, `reveal_effect`, etc.

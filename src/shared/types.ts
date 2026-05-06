@@ -398,31 +398,32 @@ export interface SpriteTestResult {
   pushed: { texture: boolean; flipbook: boolean };
 }
 
-// ============ TEST RENDER MODE TYPES ============
-
-export type RenderMode = 'mesh' | 'billboard';
+// ============ TEST FLIPBOOK TYPES ============
 
 /**
- * Local mirror of the most recent state we pushed to TD. Used by the
- * Render Mode tab readout. NOT authoritative — TD's actual state may
- * have drifted (e.g. user changed something in TD directly), but for
- * a developer test panel this reflects what the test mode last sent.
+ * Local mirror of the most recent flipbook config pushed to TD. Used
+ * by the Flipbook tab readout. NOT authoritative — TD's actual state
+ * may have drifted, but for a developer test panel this reflects what
+ * test mode last sent.
+ *
+ * Mesh-mode rendering (and the render-mode toggle that selected it)
+ * has been pruned. See docs/mesh-mode-pipeline.md for the future-work
+ * notes if we ever bring it back.
  */
 export interface MirroredTDState {
-  renderMode: RenderMode;
   flipbook: SpriteFlipbookConfig;
   /** ms epoch of last update, or null if never pushed in this process. */
   lastUpdatedAt: number | null;
   /** Which test-mode action produced the most recent update. */
-  lastSource: 'render_mode' | 'flipbook_config' | null;
+  lastSource: 'flipbook_config' | null;
 }
 
 /**
- * Result of a render-mode or flipbook-config test push. `success: true`
- * even when `pushed: false` — the operation completed locally; the
- * message just didn't reach TD because we're not connected.
+ * Result of a flipbook-config test push. `success: true` even when
+ * `pushed: false` — the operation completed locally; the message just
+ * didn't reach TD because we're not connected.
  */
-export interface RenderModeTestResult {
+export interface FlipbookTestResult {
   success: boolean;
   pushed: boolean;
   state: MirroredTDState;
@@ -542,15 +543,15 @@ export interface GeminiTurn {
  * Status of one Reset to Baseline step.
  *  - 'ok'      : step pushed cleanly
  *  - 'skipped' : TD reported the target zone/node doesn't exist in this
- *                project (e.g. material_pixel without its glslMAT). Not
- *                a real failure — the project just doesn't use it.
+ *                project. Not a real failure — the project just doesn't
+ *                use it.
  *  - 'error'   : actual push or compile failure
  */
 export type ResetTDStatus = 'ok' | 'skipped' | 'error';
 
 /**
  * One step of a TD baseline reset (e.g. "zone:force_field", "sprite",
- * "render_mode", "flipbook", "idle_program").
+ * "flipbook", "idle_program").
  */
 export interface ResetTDStep {
   label: string;

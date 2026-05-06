@@ -1,20 +1,22 @@
 /**
  * TD State Mirror
  *
- * Tracks the most recent render_mode and flipbook_config that test mode
- * has pushed to TouchDesigner. NOT authoritative — TD's actual state may
- * have drifted (e.g. someone edited TD directly) but this reflects what
- * Merlin last sent, which is good enough for the test panel readout.
+ * Tracks the most recent flipbook_config that test mode has pushed to
+ * TouchDesigner. NOT authoritative — TD's actual state may have drifted
+ * (e.g. someone edited TD directly) but this reflects what Merlin last
+ * sent, which is good enough for the test panel readout.
  *
- * Pure module — no electron / fs / WS dependencies. Both test-sprite
- * and test-render-mode write into this; the Render Mode tab reads from
- * it via getMirroredState().
+ * Pure module — no electron / fs / WS dependencies. Written by
+ * test-sprite (after a flipbook generation) and test-flipbook (after
+ * a re-config); read by the Flipbook tab via getMirroredState().
+ *
+ * Mesh-mode rendering and its render_mode toggle have been pruned;
+ * see docs/mesh-mode-pipeline.md if we ever bring them back.
  */
 
-import type { MirroredTDState, RenderMode, SpriteFlipbookConfig } from '../../shared/types';
+import type { MirroredTDState, SpriteFlipbookConfig } from '../../shared/types';
 
 export const DEFAULT_MIRROR: MirroredTDState = {
-  renderMode: 'mesh',
   flipbook: {
     atlasCols: 1,
     atlasRows: 1,
@@ -31,7 +33,6 @@ let state: MirroredTDState = cloneDefault();
 
 function cloneDefault(): MirroredTDState {
   return {
-    renderMode: DEFAULT_MIRROR.renderMode,
     flipbook: { ...DEFAULT_MIRROR.flipbook },
     lastUpdatedAt: null,
     lastSource: null,
@@ -41,17 +42,10 @@ function cloneDefault(): MirroredTDState {
 /** Returns a deep copy so callers cannot mutate internal state. */
 export function getMirroredState(): MirroredTDState {
   return {
-    renderMode: state.renderMode,
     flipbook: { ...state.flipbook },
     lastUpdatedAt: state.lastUpdatedAt,
     lastSource: state.lastSource,
   };
-}
-
-export function recordRenderModePush(mode: RenderMode): void {
-  state.renderMode = mode;
-  state.lastUpdatedAt = Date.now();
-  state.lastSource = 'render_mode';
 }
 
 export function recordFlipbookConfigPush(config: SpriteFlipbookConfig): void {
