@@ -54,17 +54,10 @@ vi.mock('../merlin/zone-state', () => ({
 }));
 
 import {
-  pushMoodUpdate,
-  pushSceneParams,
-  pushRevealEffect,
-  pushAuraUpdate,
-  pushSkeletonAugment,
   pushZoneUpdate,
   pushZoneUpdateWithValidation,
   pushOrientationUpdate,
   pushMerlinState,
-  pushAnalysisUpdate,
-  pushParticleSpellProgram,
   pushSpellCharge,
   pushSpellCast,
   pushSpriteTexture,
@@ -83,7 +76,7 @@ describe('push', () => {
     it('should return false when not connected', () => {
       mockIsConnected.mockReturnValue(false);
 
-      const result = pushMoodUpdate('calm');
+      const result = pushZoneUpdate('force_field', '// snippet');
 
       expect(result).toBe(false);
       expect(mockSend).not.toHaveBeenCalled();
@@ -92,111 +85,10 @@ describe('push', () => {
     it('should call send when connected', () => {
       mockIsConnected.mockReturnValue(true);
 
-      const result = pushMoodUpdate('calm');
+      const result = pushZoneUpdate('force_field', '// snippet');
 
       expect(result).toBe(true);
       expect(mockSend).toHaveBeenCalled();
-    });
-  });
-
-  describe('pushMoodUpdate', () => {
-    it('should send mood update message', () => {
-      pushMoodUpdate('mysterious', '#ff0000', 0.8);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'mood_update',
-        mood: 'mysterious',
-        color: '#ff0000',
-        intensity: 0.8,
-      });
-    });
-
-    it('should send mood without optional params', () => {
-      pushMoodUpdate('calm');
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'mood_update',
-        mood: 'calm',
-        color: undefined,
-        intensity: undefined,
-      });
-    });
-  });
-
-  describe('pushSceneParams', () => {
-    it('should send scene params message', () => {
-      const params = {
-        particle_intensity: 'moderate' as const,
-        particle_behavior: 'orbiting' as const,
-        particle_color: '#00ff00',
-      };
-
-      pushSceneParams(params);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'scene_params',
-        params,
-      });
-    });
-  });
-
-  describe('pushRevealEffect', () => {
-    it('should send reveal effect message', () => {
-      pushRevealEffect('burst', 0.9, 2000, 5);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'reveal_effect',
-        effect_type: 'burst',
-        intensity: 0.9,
-        duration: 2000,
-        landmark: 5,
-      });
-    });
-
-    it('should send reveal effect without landmark', () => {
-      pushRevealEffect('glow', 0.5, 1000);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'reveal_effect',
-        effect_type: 'glow',
-        intensity: 0.5,
-        duration: 1000,
-        landmark: undefined,
-      });
-    });
-  });
-
-  describe('pushAuraUpdate', () => {
-    it('should send aura update message', () => {
-      pushAuraUpdate('#ff00ff', 1.5, 'pulsing');
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'aura_update',
-        color: '#ff00ff',
-        size: 1.5,
-        behavior: 'pulsing',
-      });
-    });
-  });
-
-  describe('pushSkeletonAugment', () => {
-    it('should send skeleton augment message', () => {
-      const overlays = [
-        {
-          landmark_start: 11,
-          landmark_end: 12,
-          effect: 'glow' as const,
-          color: '#00ffff',
-          intensity: 0.7,
-        },
-      ];
-
-      pushSkeletonAugment(overlays);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'skeleton_augment',
-        overlays,
-      });
     });
   });
 
@@ -403,49 +295,6 @@ describe('push', () => {
     });
   });
 
-  describe('pushAnalysisUpdate', () => {
-    it('should send analysis update message', () => {
-      pushAnalysisUpdate({
-        valence: 0.7,
-        arousal: 0.5,
-        tension: 0.2,
-        openness: 0.8,
-        engagement: 0.9,
-        primary_emotion: 'joy',
-      });
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'analysis_update',
-        valence: 0.7,
-        arousal: 0.5,
-        tension: 0.2,
-        openness: 0.8,
-        engagement: 0.9,
-        primary_emotion: 'joy',
-      });
-    });
-  });
-
-  describe('pushParticleSpellProgram', () => {
-    it('should send particle spell program', () => {
-      const program = {
-        archetype: 'orb',
-        energy: 0.8,
-        palette: { primary: '#ff0000', secondary: '#ff8800', accent: '#ffff00' },
-        forceCode: 'force = vec3(0);',
-        colorCode: 'color = vec3(1);',
-      };
-
-      pushParticleSpellProgram('buildup', program as any);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'particle_spell_program',
-        mode: 'buildup',
-        program,
-      });
-    });
-  });
-
   describe('pushSpellCharge', () => {
     it('should send spell charge message', () => {
       pushSpellCharge('hands', 0.75, [15, 16, 17]);
@@ -461,24 +310,16 @@ describe('push', () => {
 
   describe('pushSpellCast', () => {
     it('should send spell cast message', () => {
-      const envelope = { attack: 0.1, decay: 0.2, sustain: 0.5, release: 0.2 };
-      const program = {
-        archetype: 'burst',
-        energy: 1.0,
-        palette: { primary: '#00ff00', secondary: '#00aa00', accent: '#88ff88' },
-        forceCode: '',
-        colorCode: '',
-      };
+      const envelope = { ignitionMs: 400, projectionMs: 1200, afterglowMs: 2900, peakIntensity: 1.0 };
 
-      pushSpellCast('whole_body', 1.0, 3000, envelope as any, program as any);
+      pushSpellCast('whole_body', 1.0, 4500, envelope);
 
       expect(mockSend).toHaveBeenCalledWith({
         type: 'spell_cast',
         origin: 'whole_body',
         intensity: 1.0,
-        durationMs: 3000,
+        durationMs: 4500,
         envelope,
-        program,
       });
     });
   });

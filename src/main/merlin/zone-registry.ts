@@ -40,10 +40,10 @@ export type ZoneName = (typeof ZONE_NAMES)[number];
 export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
   force_field: {
     description:
-      'Apply forces to particles. The template applies NO default forces — your snippet is the sole source of motion (other than emission velocity, drag, and a tiny per-id drift). Without a force_field snippet, particles coast on inertia. The template multiplies the final force by (0.5 + uSpellEnergy) so spell intensity scales automatically.',
+      'Apply forces to particles. The template applies NO default forces — your snippet is the sole source of motion (other than emission velocity, drag, and a tiny per-id drift). Without a force_field snippet, particles coast on inertia. The template multiplies the final force by (0.5 + uSpellEnergy) so spell intensity scales automatically. Use `uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos` (vec3 world positions) to pull/push particles toward body parts — e.g. `force += normalize(uHandRPos - pos) * 5.0` makes particles converge on the right hand.',
     modifies: 'force',
     availableVars: ['pos', 'vel', 'age', 'lifeSpan', 'life', 'force', 'id', 'idx'],
-    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos'],
     maxLines: 25,
   },
   color_over_life: {
@@ -63,17 +63,19 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
   },
   spawn_behavior: {
     description:
-      "Initialize a newborn particle's position and velocity. By default `pos` is whatever input point particle1 selected from its 100-point spawn pool — leave it alone unless you want to override the entire spawn region. Velocity is initialized to a small outward radial vector + per-id jitter; replace `vel` to change the spawn impulse. `r` is a vec3 of well-distributed pseudo-random values from hash31(id) — use it instead of fract(sin(...)) which aliases for sequential ids.",
+      "Initialize a newborn particle's position and velocity. The template provides these locals already populated — DO NOT redeclare them: `pos` (vec3, **default = a random point in a 0.2-radius sphere centered on the participant's chest — already body-tracked, follows them as they move**), `vel` (vec3, default outward radial + jitter from `pos`), `age` (float), `id` (float, persistent particle id), `idx` (uint, slot index), and **`r` (vec3 of pseudo-random values from hash31(id) — already a variable, do not write `vec3 r = ...` again**, just reference it). " +
+      "**Body-target uniforms (vec3 world positions, all body-tracked)**: `uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos`. " +
+      "**Spawning rules**: If the spell emits from the chest, leave `pos` alone — it's already there. If the spell emits from another body part, set `pos = uEyeLPos + r * 0.05;` (or eye_r/hand_l/hand_r) — the small jitter keeps the spawn from being a single point. **NEVER set `pos` to a static vector near world origin** (e.g. `vec3(r.x*0.2, r.y*0.2, 0)`); that throws away body tracking and the spell will appear to come from empty space instead of the participant. To change spawn behavior assign to `pos` and/or `vel`. The template handles `P[idx] = pos; PartVel[idx] = vel;` after your snippet runs — don't write to P[] or PartVel[] yourself, they're write-only output buffers. There's no built-in `PI` constant; use `6.2832` for tau or `3.14159`. Snippet runs only when age < ~1 frame.",
     modifies: ['pos', 'vel'],
     availableVars: ['pos', 'vel', 'age', 'r', 'id', 'idx'],
-    uniforms: ['uDeltaTime', 'uTime'],
+    uniforms: ['uDeltaTime', 'uTime', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos'],
     maxLines: 20,
   },
   velocity_modifier: {
-    description: 'Modify particle velocity',
+    description: 'Modify particle velocity. Body-target uniforms `uChestPos`/`uEyeLPos`/`uEyeRPos`/`uHandLPos`/`uHandRPos` (vec3) are available if the spell needs to steer particles toward or away from a body part mid-flight.',
     modifies: 'vel',
     availableVars: ['pos', 'vel', 'age', 'lifeSpan', 'life', 'id', 'idx'],
-    uniforms: ['uTime'],
+    uniforms: ['uTime', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos'],
     maxLines: 20,
   },
   post_fx: {

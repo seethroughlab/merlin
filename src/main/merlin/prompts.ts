@@ -8,7 +8,7 @@
  * 4. Output Contract - structured response format
  */
 
-import type { FunctionDeclaration, SchemaType } from '@google/generative-ai';
+import { Type, type FunctionDeclaration } from '@google/genai';
 import type { MerlinPhase, SpellState } from '../../shared/types';
 import type { MerlinSessionState } from './types';
 import { formatTemplatesForSystemPrompt } from './shader-templates';
@@ -89,12 +89,28 @@ Available uniforms in all zones:
 - uSpellEnergy (float): Spell intensity 0-1
 - uSpellMode (float): -1=idle, 0=buildup, 1=release
 
-Zone output variables to modify:
-- force_field: PartForce (vec3) - particle acceleration direction
-- spawn_behavior: P (vec3), PartVel (vec3) - spawn position and initial velocity
-- color_over_life: Cd (vec4) - RGBA color
-- size_over_life: pscale (float) - particle size
-- velocity_modifier: PartVel (vec3) - velocity multiplier
+Body-target uniforms (vec3 world positions, available in spawn_behavior, force_field, velocity_modifier — already body-tracked, follow the participant frame-by-frame):
+- uChestPos: midpoint of the participant's shoulders. **The default \`pos\` in spawn_behavior is already in a small sphere around uChestPos**, so chest-emission is the no-op default.
+- uEyeLPos / uEyeRPos: left and right eye centers. Use for "from my eyes" spells.
+- uHandLPos / uHandRPos: left and right wrist positions (closest available to the hand). Use for "from my hands", "to my right hand", "lightning between my palms" etc.
+Coordinate notes: roughly bounded by [-0.4, 0.4] in x/y, [-0.3, 0.3] in z (TD world units, camera at z≈1 looking back). When the participant moves, every uniform updates. When a body part is off-screen its position holds at the last visible value, so guard with reasonable distances.
+
+Each zone's snippet is injected into a template that already declares
+common locals (pos, vel, age, life, lifeSpan, id) and writes the final
+output to TD's POP buffers (P[idx], PartVel[idx], xcolor[idx],
+xscale[idx], PartForce[idx]) AFTER your snippet runs. **Modify the
+locals — don't write to the buffers directly. The output buffers are
+write-only; reading from them or assigning a vec3 to them in your
+snippet will fail to compile.**
+
+Zone locals to ASSIGN to in your snippet:
+- force_field: \`force\` (vec3) — additional force on the particle this frame
+- spawn_behavior: \`pos\` (vec3) and \`vel\` (vec3) — newborn particle position + initial velocity. **\`pos\` defaults to a small sphere around the participant's chest (uChestPos) and is body-tracked**. For chest-emission spells, leave \`pos\` alone. For body-part-emission spells (eyes/hands), set \`pos = uEyeLPos + r * 0.05;\` etc. **Do NOT replace \`pos\` with origin-anchored vectors like \`vec3((r.x-0.5)*0.2, ...)\`** — that throws away body tracking. The template also pre-populates \`r\` (vec3 from hash31(id)); reference it directly, do NOT redeclare.
+- color_over_life: \`color\` (vec4) — final particle color (RGB + alpha)
+- size_over_life: \`size\` (float) — final particle size in world units
+- velocity_modifier: \`vel\` (vec3) — modified velocity each frame
+
+Available read-only locals: \`pos\`, \`age\`, \`life\` (1.0 at birth → 0.0 at death), \`lifeSpan\`, \`id\` (persistent particle id), \`idx\` (slot index). There is NO built-in PI; use \`6.2832\` for tau or \`3.14159\`.
 
 Example patterns by element:
 - fire: upward spiral forces, warm orange-to-red gradients, flickering size
@@ -102,6 +118,18 @@ Example patterns by element:
 - air: swirling circular motion, light pastels, wispy particles
 - light: radiant expansion, golden-white colors, pulsing brightness
 - cosmic: orbiting patterns, deep purples, scattered stardust
+
+Body-part emission patterns (for spells that name a specific body part):
+- "from my eyes" (split half/half between eyes):
+    pos = (r.x < 0.5 ? uEyeLPos : uEyeRPos) + (r - 0.5) * 0.04;
+- "from my chest" (default — no spawn snippet needed; \`pos\` is already there)
+- "from my hands":
+    pos = (r.x < 0.5 ? uHandLPos : uHandRPos) + (r - 0.5) * 0.05;
+- "to my right hand" (force_field — pulls particles toward the hand):
+    force += normalize(uHandRPos - pos) * (3.0 + uSpellEnergy * 5.0);
+- "lightning between my palms" (force_field):
+    vec3 mid = (uHandLPos + uHandRPos) * 0.5;
+    force += normalize(mid - pos) * 4.0;
 
 ### CRITICAL SHADER RULES - AVOID THESE MISTAKES:
 
@@ -154,7 +182,29 @@ When an error occurs:
 3. Generate CORRECTED GLSL code
 4. Call set_zone_shader again with the fixed code
 
-Do NOT give up after one failure. The visual magic depends on successful shaders!`;
+Do NOT give up after one failure. The visual magic depends on successful shaders!
+
+### VERIFY THE LOOK — use request_visual_feedback
+
+A shader compiling does not mean it looks right. After you've written a
+substantive set of shaders for a spell (typically 2+ zones), call
+request_visual_feedback once. You'll get a screenshot of the live
+particle system. Look at it. Ask yourself: does this match the spell
+the participant described? If the particles are invisible, the wrong
+color, the wrong shape, or just feel wrong — call set_zone_shader again
+to fix what you see. Treat each screenshot as ground truth; your GLSL
+might compile and still produce nothing visible.
+
+Common visual problems to watch for in screenshots:
+- Particles too small / not visible → bump baseSize in size_over_life
+- Wrong color tone → adjust color_over_life rgb values
+- Particles all in one spot / no motion → force_field force is too small
+- Particles flying off-screen → force or velocity too high
+- Looks identical to default purple cloud → none of your shaders ran successfully
+
+Don't request feedback after every single set_zone_shader — that wastes
+a turn. Do it after a coherent batch (typically all your shader writes
+for the current spell direction), then iterate based on what you see.`;
 
 /**
  * Build the complete system prompt
@@ -178,6 +228,60 @@ export function buildSystemPrompt(): string {
 }
 
 export const MERLIN_SYSTEM_PROMPT = buildSystemPrompt();
+
+/**
+ * Build the visual-author system prompt for the Live Spell test.
+ *
+ * Strips the Merlin character, ritual structure, perception ethics,
+ * conversational tone rules — anything that would make Gemini address
+ * a participant who isn't there. Keeps the SHADER_AUTHORSHIP block
+ * (with body-target uniforms, GLSL rules, examples) and the shader
+ * templates so Gemini still has all the technical context for visual
+ * authoring.
+ */
+function buildVisualAuthorSystemPrompt(): string {
+  const VISUAL_AUTHOR_INTRO = `You are a visual effects authoring assistant for the Merlin Mirror — a real-time particle system rendered in TouchDesigner with body tracking from MediaPipe. The user describes a spell in plain language; your job is to make the on-screen visuals match that description.
+
+## Tools
+
+You have exactly three tools:
+- set_zone_shader(zone, glsl_code, description?): write GLSL for one of the particle zones (force_field, color_over_life, size_over_life, spawn_behavior, velocity_modifier, post_fx, billboard_vertex, billboard_pixel)
+- generate_sprite(description, animation?, frameCount?, ...): produce the particle texture (single image or flipbook atlas)
+- request_visual_feedback(intent): capture a live screenshot to see what your shaders produced
+
+You do NOT have access to perception, conversational profile metadata, or casting controls. This is one-shot visual authoring — no participant is in the room.
+
+## Workflow
+
+1. Read the spell description. Pick body-target uniforms and effects that match the language ("from my chest" → spawn at uChestPos by default, just leave \`pos\` alone in spawn_behavior; "fire from eyes" → spawn at uEyeLPos / uEyeRPos; "to my right hand" → force toward uHandRPos).
+2. Generate a sprite if the spell needs a distinctive texture (smoke, droplet, flame, vine, lightning bolt). Single sprite for static shapes, flipbook for animated ones (flicker, pulse, bloom).
+3. Write zone shaders. Submit them all in one batch when you can — set_zone_shader is parallelizable across zones in a single response.
+4. **WAIT for ALL shaders to compile successfully before requesting a screenshot.** A failed compile resets that zone to default; a screenshot taken before all zones compile cleanly is misleading. The system will reject request_visual_feedback if any zone is in an error state — fix shader errors first.
+5. Once all shaders compile, call request_visual_feedback ONCE and analyze the result EXPLICITLY. State what you see in plain terms:
+   - "The dominant color is [X], which [does/doesn't] match the [element]."
+   - "Particles are [visible at chest / scattered / invisible]."
+   - "Motion is [upward spiral / chaotic / static]."
+   - "Density is [appropriate / too sparse / too thick]."
+   Your evaluation drives the next iteration — generic praise or generic dismissal is useless.
+6. If the screenshot doesn't match the spell, refine via set_zone_shader. **Replace** problematic lines — do NOT comment-out and re-add lines as a record of past attempts. State briefly what's changing and why.
+7. Stop after at most one refinement round. Two screenshots maximum per spell. If two rounds don't fix it, accept the current state and end your turn.
+
+## Rules
+
+- **DO NOT address a participant.** There is no participant. Don't write "I see you sitting…", "Tell me what's weighing on you", "Your shoulders are tense", or any other live-ritual language. Speak as a tool authoring visuals.
+- **DO NOT make poetic claims about what the spell will look like.** Describe what you actually see in screenshots after they arrive. "Forest green spirals turning into pink blooms" is not allowed unless the screenshot actually shows those.
+- **DO NOT iterate forever.** Cap at two screenshots. Two rounds.
+- **DO NOT comment out lines** as a record of past attempts. Replace them.
+- **DO NOT call get_posture / get_expression / prepare_casting / set_spell_profile.** They are not in your tool registry.
+`;
+
+  const templatesSection = formatTemplatesForSystemPrompt();
+  return [VISUAL_AUTHOR_INTRO, SHADER_AUTHORSHIP, templatesSection]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export const MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT = buildVisualAuthorSystemPrompt();
 
 // ============ LAYER 2: SESSION CONTEXT ============
 
@@ -371,10 +475,10 @@ const GET_POSTURE_TOOL: FunctionDeclaration = {
   name: 'get_posture',
   description: 'Request fresh body posture and gesture state. Use to observe their physical presence.',
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       focus: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         enum: ['stance', 'hands', 'overall'],
         description: 'What aspect to focus on',
       },
@@ -390,10 +494,10 @@ const GET_EXPRESSION_TOOL: FunctionDeclaration = {
   name: 'get_expression',
   description: 'Request fresh facial expression state. Use to read their emotional state.',
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       focus: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         enum: ['eyes', 'mouth', 'overall'],
         description: 'What aspect to focus on',
       },
@@ -407,7 +511,7 @@ const GET_EXPRESSION_TOOL: FunctionDeclaration = {
  */
 const SET_SPELL_PROFILE_TOOL: FunctionDeclaration = {
   name: 'set_spell_profile',
-  description: `Update the spell being formed. Call this when you learn something about their spell.
+  description: `Tag the spell with its emerging metadata as you learn about it. This is a passive context tracker — calling it does NOT change visuals on its own. Visuals come from set_zone_shader and generate_sprite. This tool exists so future turns of the conversation know what kind of spell is forming (intent, element, energy, tone, origin) and can write GLSL that reflects it.
 
 Intents: confidence, calm, protection, clarity, creativity, transformation, release, focus, joy, wonder
 Elements: fire, water, air, earth, light, shadow, crystal, storm, flora, cosmic
@@ -416,35 +520,27 @@ Origins: hands, heart, eyes, whole_body, wand
 
 Only set values you're confident about. Partial updates are fine.`,
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       intent: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'What they seek (confidence, calm, protection, etc.)',
       },
       element: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Elemental nature (fire, water, light, etc.)',
       },
       tone: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Emotional character (gentle, heroic, mysterious, etc.)',
       },
       energy: {
-        type: 'number' as SchemaType,
+        type: Type.NUMBER,
         description: 'Energy level 0-1 (0.3 default, increase as spell forms)',
       },
       castingOrigin: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Where spell originates (hands, heart, eyes, whole_body)',
-      },
-      visualArchetype: {
-        type: 'string' as SchemaType,
-        description: 'Visual pattern name (e.g., "rising_embers", "gentle_rain")',
-      },
-      palette: {
-        type: 'string' as SchemaType,
-        description: 'Hex color for spell visuals',
       },
     },
     required: [],
@@ -458,14 +554,14 @@ const PREPARE_CASTING_TOOL: FunctionDeclaration = {
   name: 'prepare_casting',
   description: `Signal that the spell is ready to be cast. Call this in the Formation phase when you give them their magic word.`,
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       magicWord: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'The word they will speak to cast (single word, evocative)',
       },
       gestureHint: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'How to cast based on origin (e.g., "raise your hands", "place a hand on your heart")',
       },
     },
@@ -482,17 +578,15 @@ const SET_ZONE_SHADER_TOOL: FunctionDeclaration = {
 
 Each zone has these uniforms available:
 - uTime (float): Current time in seconds - USE THIS FOR ALL ANIMATION
-- uAnalysis1 (vec4): valence, arousal, tension, openness
-- uAnalysis2 (vec4): engagement, emotion_index, 0, 0
 - uSpellEnergy (float): Spell intensity 0-1
 - uSpellMode (float): -1=idle, 0=buildup, 1=release
 
-Zone outputs (modify these variables):
-- force_field: PartForce (vec3) - particle acceleration
-- spawn_behavior: P (vec3) and PartVel (vec3) - spawn position/velocity
-- color_over_life: Cd (vec4) - particle color with alpha
-- size_over_life: pscale (float) - particle scale
-- velocity_modifier: PartVel (vec3) - velocity scaling
+Zone locals to modify (the template writes them to the right output buffer after your snippet — do NOT write to P[], PartVel[], PartForce[], xcolor[], or xscale[] yourself):
+- force_field: modify \`force\` (vec3). Auto-scaled by (0.5 + uSpellEnergy) before being written to PartForce.
+- spawn_behavior: assign to \`pos\` and/or \`vel\` (vec3). Use the provided \`r\` (vec3 from hash31(id)) for randomness — do NOT redeclare it.
+- color_over_life: modify \`color\` (vec4) — RGBA, alpha drives visibility.
+- size_over_life: modify \`size\` (float) — scalar scale.
+- velocity_modifier: modify \`vel\` (vec3) — typically multiplicative (drag, swirl).
 
 CRITICAL RULES:
 1. Per-particle randomness: use the provided hash31(id) function (returns a vec3) — id = float(TDIn_PartId()) is the persistent particle id. Do NOT use fract(sin(...)) — it aliases for sequential ids and produces clustered emergent attractors. Use id (persistent across life) NOT idx (slot index, gets recycled).
@@ -502,19 +596,19 @@ CRITICAL RULES:
 
 Write expressive GLSL that matches the spell's intent and element. Call on each turn to evolve the visuals.`,
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       zone: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         enum: ['force_field', 'spawn_behavior', 'color_over_life', 'size_over_life', 'velocity_modifier'],
         description: 'Which shader zone to customize',
       },
       glsl_code: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'GLSL code snippet to insert into the zone template. Use available uniforms and modify the output variables.',
       },
       description: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Brief description of the visual effect',
       },
     },
@@ -527,15 +621,17 @@ Write expressive GLSL that matches the spell's intent and element. Call on each 
  */
 const REQUEST_VISUAL_FEEDBACK_TOOL: FunctionDeclaration = {
   name: 'request_visual_feedback',
-  description: `Capture the current visual effect and receive an image to assess if it matches your intent.
-Use this after set_zone_shader to verify the effect looks right. Returns a screenshot of the current particle system.
-Only call this when you want to visually verify your shader changes - it adds latency.`,
+  description: `Capture a live screenshot of the particle system and receive it as an image you can analyze. CALL THIS after you've written a coherent batch of zone shaders (typically 2+ writes for the current spell direction) to verify the visual matches your intent. Shaders compiling cleanly is NOT proof they look right — particles can be invisible, the wrong color, the wrong shape, or stuck at the spawn point even when the GLSL compiles.
+
+Treat the screenshot as ground truth. Compare what you see to what the participant asked for and iterate via set_zone_shader if needed. Don't call this after every single shader write (wastes a turn) — call it once per coherent batch.
+
+Adds ~1s of latency.`,
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       intent: {
-        type: 'string' as SchemaType,
-        description: 'What visual effect you expect to see (e.g., "fire rising in spirals", "gentle blue waves")',
+        type: Type.STRING,
+        description: 'What visual effect you expect to see in the screenshot (e.g., "fire rising in spirals", "gentle blue waves")',
       },
     },
     required: ['intent'],
@@ -576,109 +672,34 @@ Examples:
 - For water spell: "soft blue droplet with ripple" with animation="expand"
 - For protection: "crystalline shield fragment" with style="sharp geometric"`,
   parameters: {
-    type: 'object' as SchemaType,
+    type: Type.OBJECT,
     properties: {
       description: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Description of the sprite appearance (e.g., "glowing ember", "soft blue orb")',
       },
       style: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Visual style: "soft glow", "sharp edges", "crystalline", "ethereal", "textured"',
       },
       animation: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'For flipbooks: "pulse", "rotate", "flicker", "expand", "morph"',
       },
       frameCount: {
-        type: 'number' as SchemaType,
+        type: Type.NUMBER,
         description: 'Number of animation frames: 4, 9, 16, or 25 (default 16 for animations)',
       },
       playbackMode: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'Animation playback: "loop", "once", "pingpong", "random"',
       },
       driveSource: {
-        type: 'string' as SchemaType,
+        type: Type.STRING,
         description: 'What drives frame selection: "age", "life", "velocity", "id", "time"',
       },
     },
     required: ['description'],
-  },
-};
-
-/**
- * Tool: Generate a particle spell program (test mode + future live use)
- *
- * Used by the Shift+T Spell Program tab. All fields optional — Gemini
- * fills what it sees fit; the test-mode caller backfills the rest from
- * createBuildupProgram / createReleaseProgram defaults.
- */
-export const GENERATE_SPELL_PROGRAM_TOOL: FunctionDeclaration = {
-  name: 'set_spell_program',
-  description: `Given a free-text spell description, fill out the visual parameters of a particle spell program — archetype, energy, palette, per-zone overrides, and (for release mode) cast envelope timing.
-
-Available archetypes:
-- rising_embers: warm upward flames, sharp accents, dynamic
-- breathing_aura_mist: soft pulsing aura, calm, ambient
-- orbiting_stardust: cosmic swirl, mystical, rotational
-
-Energy ranges:
-- buildup mode: 0.0–0.55 (clamped). Slow accumulation.
-- release mode: 0.0–1.0. Peaks at the cast moment.
-
-Palette: three hex colors (#RRGGBB). Primary is the dominant tone, secondary supports, accent is the highlight.
-
-Zone overrides (all optional, all numeric ranges as documented):
-- spawnRadius (0.1–0.5), spawnRate (0.5–3.0), forceStrength (0–1)
-- forceDirection: 'inward' | 'outward' | 'tangential' | 'upward'
-- orbitSpeed (0–2), turbulence (0–1), velocityScale (0.5–3.0), damping (0–1)
-- baseSize (0.01–0.15), sizeVariation (0–1)
-- saturation (0–1), brightness (0–1), alphaFade (0–1)
-
-Cast envelope (release only):
-- ignitionMs: rise at casting origin, default 400
-- projectionMs: peak burst projected outward, default 1200
-- afterglowMs: decay back to calm, default 2900
-- peakIntensity: 0–1`,
-  parameters: {
-    type: 'object' as SchemaType,
-    properties: {
-      archetype: {
-        type: 'string' as SchemaType,
-        enum: ['rising_embers', 'breathing_aura_mist', 'orbiting_stardust'],
-        description: 'Which visual archetype best matches the spell description.',
-      },
-      energy: {
-        type: 'number' as SchemaType,
-        description: '0–1 overall energy. Clamped to 0.55 in buildup, peaks at 1.0 in release.',
-      },
-      palette: {
-        type: 'object' as SchemaType,
-        description: 'Three hex #RRGGBB colors.',
-        properties: {
-          primary: { type: 'string' as SchemaType, description: 'Hex #RRGGBB' },
-          secondary: { type: 'string' as SchemaType, description: 'Hex #RRGGBB' },
-          accent: { type: 'string' as SchemaType, description: 'Hex #RRGGBB' },
-        },
-      },
-      zoneOverrides: {
-        type: 'object' as SchemaType,
-        description:
-          'Optional per-zone overrides. Top-level keys: force_field, color_over_life, size_over_life, spawn_behavior, velocity_modifier. Each value is a partial of the documented zone params.',
-      },
-      castEnvelope: {
-        type: 'object' as SchemaType,
-        description: 'Only honored in release mode.',
-        properties: {
-          ignitionMs: { type: 'number' as SchemaType },
-          projectionMs: { type: 'number' as SchemaType },
-          afterglowMs: { type: 'number' as SchemaType },
-          peakIntensity: { type: 'number' as SchemaType },
-        },
-      },
-    },
-    required: [],
   },
 };
 
@@ -716,6 +737,22 @@ export const MERLIN_TOOLS: FunctionDeclaration[] = [
   GET_EXPRESSION_TOOL,
   SET_SPELL_PROFILE_TOOL,
   PREPARE_CASTING_TOOL,
+  SET_ZONE_SHADER_TOOL,
+  REQUEST_VISUAL_FEEDBACK_TOOL,
+  GENERATE_SPRITE_TOOL,
+];
+
+/**
+ * Visual-author tool subset for the Live Spell test (and future
+ * automated visual authoring contexts).
+ *
+ * Drops: get_posture, get_expression (no body data in test mode),
+ * set_spell_profile (metadata-only, no visual effect),
+ * prepare_casting (live-experience cast trigger).
+ *
+ * Keeps: the three tools that actually shape what's on screen.
+ */
+export const MERLIN_VISUAL_AUTHOR_TOOLS: FunctionDeclaration[] = [
   SET_ZONE_SHADER_TOOL,
   REQUEST_VISUAL_FEEDBACK_TOOL,
   GENERATE_SPRITE_TOOL,

@@ -38,18 +38,18 @@ vi.mock('fs', () => ({
   readFileSync: mockReadFileSync,
 }));
 
-// Gemini SDK mock
-const { mockSendMessage, mockStartChat, mockGetGenerativeModel } = vi.hoisted(() => ({
+// Gemini SDK mock — @google/genai chat-based.
+const { mockSendMessage, mockChatsCreate } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(),
-  mockStartChat: vi.fn(),
-  mockGetGenerativeModel: vi.fn(),
+  mockChatsCreate: vi.fn(),
 }));
 
-vi.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: class MockGoogleGenerativeAI {
-    getGenerativeModel = mockGetGenerativeModel;
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: class MockGoogleGenAI {
+    chats = { create: mockChatsCreate };
   },
-  FunctionCallingMode: { ANY: 'ANY' },
+  FunctionCallingConfigMode: { ANY: 'ANY', AUTO: 'AUTO' },
+  Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
 }));
 
 vi.mock('./gemini-events', () => ({
@@ -110,8 +110,7 @@ beforeEach(() => {
     generateSpriteSync: mockGenerateSpriteSync,
     generateFlipbookSync: mockGenerateFlipbookSync,
   });
-  mockStartChat.mockReturnValue({ sendMessage: mockSendMessage });
-  mockGetGenerativeModel.mockReturnValue({ startChat: mockStartChat });
+  mockChatsCreate.mockReturnValue({ sendMessage: mockSendMessage });
 });
 
 describe('generateSpriteDirect', () => {
@@ -124,10 +123,19 @@ describe('generateSpriteDirect', () => {
     expect(mockGenerateSpriteSync).toHaveBeenCalledWith('glowing orb', { style: undefined });
     expect(mockGenerateFlipbookSync).not.toHaveBeenCalled();
     expect(mockPushSpriteTexture).toHaveBeenCalledWith('fake-id', '/fake/path/sprite.png');
-    expect(mockPushFlipbookConfig).not.toHaveBeenCalled();
+    // Single-sprite path resets the flipbook config to 1×1 single-frame
+    // so a previous spell's atlas grid doesn't keep slicing this texture.
+    expect(mockPushFlipbookConfig).toHaveBeenCalledWith({
+      atlasCols: 1,
+      atlasRows: 1,
+      frameCount: 1,
+      playbackMode: 'loop',
+      frameDuration: 0.1,
+      driveSource: 'age',
+    });
     expect(result.success).toBe(true);
     expect(result.assetType).toBe('single');
-    expect(result.pushed).toEqual({ texture: true, flipbook: false });
+    expect(result.pushed).toEqual({ texture: true, flipbook: true });
     expect(result.previewPng).toBe(Buffer.from('fake-png-bytes').toString('base64'));
   });
 
@@ -263,27 +271,25 @@ describe('generateSpriteWithGemini', () => {
     const { generateSpriteWithGemini } = await import('./test-sprite');
 
     mockSendMessage.mockResolvedValue({
-      response: {
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    name: 'generate_sprite',
-                    args: {
-                      description: 'protective shield',
-                      animation: 'pulse',
-                      frameCount: 9,
-                      playbackMode: 'once',
-                    },
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'generate_sprite',
+                  args: {
+                    description: 'protective shield',
+                    animation: 'pulse',
+                    frameCount: 9,
+                    playbackMode: 'once',
                   },
                 },
-              ],
-            },
+              },
+            ],
           },
-        ],
-      },
+        },
+      ],
     });
 
     mockGenerateFlipbookSync.mockResolvedValue({
@@ -310,11 +316,9 @@ describe('generateSpriteWithGemini', () => {
     const { generateSpriteWithGemini } = await import('./test-sprite');
 
     mockSendMessage.mockResolvedValue({
-      response: {
-        candidates: [
-          { content: { parts: [{ text: 'I cannot help with that.' }] } },
-        ],
-      },
+      candidates: [
+        { content: { parts: [{ text: 'I cannot help with that.' }] } },
+      ],
     });
 
     const result = await generateSpriteWithGemini('something');

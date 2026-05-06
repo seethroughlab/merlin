@@ -11,7 +11,7 @@ import { MerlinSession, createMerlinSession as createMerlinSessionInstance } fro
 import { testShaderGeneration } from './merlin/test-shader';
 import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
 import { applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-flipbook';
-import { generateSpellProgramWithGemini } from './merlin/test-spell-program';
+import { testLiveSpell } from './merlin/test-live-spell';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
 import { resetTDBaseline } from './merlin/reset-td';
 import {
@@ -19,16 +19,13 @@ import {
   closeTDBridge,
   isConnected as isTDConnected,
   isTDReady,
-  pushMoodUpdate,
-  pushSceneParams,
-  pushRevealEffect,
   pushOrientationUpdate,
   pushTrackingFrame,
   pushMerlinState,
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, SpriteFlipbookConfig, SpellProgramTestInput } from '../shared/types';
+import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, SpriteFlipbookConfig, LiveSpellTestInput } from '../shared/types';
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -722,21 +719,21 @@ ipcMain.handle('merlin-reset-td-baseline', async () => {
   }
 });
 
-// Test spell program generation - Gemini interpretation (Shift+T Spell Program tab)
-ipcMain.handle('merlin-test-spell-program', async (_event, input: SpellProgramTestInput) => {
+// Test live spell - end-to-end Gemini creative process (Shift+T Live Spell tab)
+ipcMain.handle('merlin-test-live-spell', async (_event, input: LiveSpellTestInput) => {
   if (!isGeminiAvailable()) {
     throw new Error('Gemini not available - check GEMINI_API_KEY');
   }
 
-  console.log(`[Merlin ${ts()}] Test spell program: mode=${input.mode} prompt="${input.prompt}"`);
+  console.log(`[Merlin ${ts()}] Test live spell: prompt="${input.prompt}"`);
   const startTime = Date.now();
 
   try {
-    const result = await generateSpellProgramWithGemini(input);
-    console.log(`[Merlin ${ts()}] Test spell program complete in ${Date.now() - startTime}ms, success=${result.success} pushed=${result.pushed}`);
+    const result = await testLiveSpell(input);
+    console.log(`[Merlin ${ts()}] Test live spell complete in ${Date.now() - startTime}ms, success=${result.success} toolCalls=${result.toolCallCount}`);
     return result;
   } catch (error) {
-    console.error(`[Merlin ${ts()}] Test spell program failed:`, error);
+    console.error(`[Merlin ${ts()}] Test live spell failed:`, error);
     throw error;
   }
 });
@@ -787,26 +784,6 @@ ipcMain.handle('td-get-status', () => ({
   ready: isTDReady(),
   capabilities: tdState.capabilities,
 }));
-
-// Push mood update to TD
-ipcMain.on('td-push-mood', (_event, { mood, color, intensity }: { mood: string; color?: string; intensity?: number }) => {
-  pushMoodUpdate(mood, color, intensity);
-});
-
-// Push scene parameters to TD
-ipcMain.on('td-push-scene', (_event, params: Parameters<typeof pushSceneParams>[0]) => {
-  pushSceneParams(params);
-});
-
-// Push reveal effect to TD
-ipcMain.on('td-push-reveal', (_event, { effect_type, intensity, duration, landmark }: {
-  effect_type: string;
-  intensity: number;
-  duration: number;
-  landmark?: number;
-}) => {
-  pushRevealEffect(effect_type, intensity, duration, landmark);
-});
 
 app.whenReady().then(async () => {
   console.log('=== Merlin Starting ===');

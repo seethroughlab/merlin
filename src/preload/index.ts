@@ -15,8 +15,8 @@ import type {
   SpriteFlipbookConfig,
   FlipbookTestResult,
   MirroredTDState,
-  SpellProgramTestInput,
-  SpellProgramTestResult,
+  LiveSpellTestInput,
+  LiveSpellTestResult,
   GeminiTurn,
   ResetTDResult,
 } from '@shared/types';
@@ -156,9 +156,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-test-get-mirrored-state');
   },
 
-  // Test spell program generation (Shift+T Spell Program tab)
-  merlinTestSpellProgram: (input: SpellProgramTestInput): Promise<SpellProgramTestResult> => {
-    return ipcRenderer.invoke('merlin-test-spell-program', input);
+  // Test live spell — end-to-end Gemini creative process (Shift+T Live Spell tab)
+  merlinTestLiveSpell: (input: LiveSpellTestInput): Promise<LiveSpellTestResult> => {
+    return ipcRenderer.invoke('merlin-test-live-spell', input);
   },
 
   // Reset TD shaders / sprite / render mode / flipbook / program to baseline
@@ -204,28 +204,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Get TD connection status
   tdGetStatus: (): Promise<{ connected: boolean; ready: boolean; capabilities: unknown }> => {
     return ipcRenderer.invoke('td-get-status');
-  },
-
-  // Push mood update to TD
-  tdPushMood: (mood: string, color?: string, intensity?: number) => {
-    ipcRenderer.send('td-push-mood', { mood, color, intensity });
-  },
-
-  // Push scene parameters to TD
-  tdPushScene: (params: {
-    particle_intensity?: string;
-    particle_behavior?: string;
-    particle_color?: string;
-    aura_color?: string;
-    aura_size?: number;
-    background_mood?: string;
-  }) => {
-    ipcRenderer.send('td-push-scene', params);
-  },
-
-  // Push reveal effect to TD
-  tdPushReveal: (effect_type: string, intensity: number, duration: number, landmark?: number) => {
-    ipcRenderer.send('td-push-reveal', { effect_type, intensity, duration, landmark });
   },
 
   // Listen for TD status changes
@@ -281,7 +259,7 @@ declare global {
       merlinTestSpriteGemini: (prompt: string) => Promise<SpriteTestResult>;
       merlinTestFlipbookConfig: (config: SpriteFlipbookConfig) => Promise<FlipbookTestResult>;
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
-      merlinTestSpellProgram: (input: SpellProgramTestInput) => Promise<SpellProgramTestResult>;
+      merlinTestLiveSpell: (input: LiveSpellTestInput) => Promise<LiveSpellTestResult>;
       merlinResetTDBaseline: () => Promise<ResetTDResult>;
       onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => () => void;
       // TTS
@@ -291,16 +269,6 @@ declare global {
       onTTSComplete: (callback: () => void) => void;
       // TD Bridge
       tdGetStatus: () => Promise<{ connected: boolean; ready: boolean; capabilities: unknown }>;
-      tdPushMood: (mood: string, color?: string, intensity?: number) => void;
-      tdPushScene: (params: {
-        particle_intensity?: string;
-        particle_behavior?: string;
-        particle_color?: string;
-        aura_color?: string;
-        aura_size?: number;
-        background_mood?: string;
-      }) => void;
-      tdPushReveal: (effect_type: string, intensity: number, duration: number, landmark?: number) => void;
       onTDStatus: (callback: (status: { connected: boolean; ready: boolean; capabilities?: unknown }) => void) => () => void;
       onZoneCompileResult: (callback: (result: { zone: string; success: boolean; error?: string }) => void) => () => void;
       platform: NodeJS.Platform;

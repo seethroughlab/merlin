@@ -261,71 +261,81 @@ function getEdgeAlpha(
 }
 
 /**
- * Validate sprite image data
- * For now, this is a simplified validation that assumes the image is already
- * in the correct format. Full validation would require image decoding.
+ * Detect image format from magic bytes. Gemini-3.x image generation
+ * returns JPEG by default, not PNG; older Gemini-2.x flash-image-exp
+ * returned PNG. We accept all three formats TD's moviefilein supports.
+ */
+export type DetectedImageFormat = 'png' | 'jpeg' | 'webp' | 'unknown';
+
+export function detectImageFormat(imageData: Buffer): DetectedImageFormat {
+  if (imageData.length < 12) return 'unknown';
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    imageData[0] === 0x89 && imageData[1] === 0x50 &&
+    imageData[2] === 0x4e && imageData[3] === 0x47
+  ) return 'png';
+  // JPEG: FF D8 FF
+  if (
+    imageData[0] === 0xff && imageData[1] === 0xd8 && imageData[2] === 0xff
+  ) return 'jpeg';
+  // WebP: "RIFF" .... "WEBP"
+  if (
+    imageData[0] === 0x52 && imageData[1] === 0x49 &&
+    imageData[2] === 0x46 && imageData[3] === 0x46 &&
+    imageData[8] === 0x57 && imageData[9] === 0x45 &&
+    imageData[10] === 0x42 && imageData[11] === 0x50
+  ) return 'webp';
+  return 'unknown';
+}
+
+/**
+ * Validate sprite image data — accepts any format TD's moviefilein
+ * supports (PNG / JPEG / WebP). Full pixel-level validation would
+ * require an image decoding library; for now we trust Gemini.
  */
 export function validateSpriteImage(
   imageData: Buffer,
   _expectedSize: number = SPRITE_SIZE
 ): ValidationResult {
-  // For MVP, we accept the image data as-is since we don't have
-  // image decoding libraries. The Gemini API returns valid PNGs.
-  // In production, we would use sharp or jimp for validation.
-
   if (imageData.length < 100) {
+    return { isValid: false, message: 'Image data too small' };
+  }
+  const format = detectImageFormat(imageData);
+  if (format === 'unknown') {
     return {
       isValid: false,
-      message: 'Image data too small',
+      message: `Unrecognized image format (first 12 bytes: ${imageData.subarray(0, 12).toString('hex')})`,
     };
   }
-
-  // Check PNG signature
-  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  if (!imageData.subarray(0, 8).equals(pngSignature)) {
-    return {
-      isValid: false,
-      message: 'Not a valid PNG file',
-    };
-  }
-
-  // For MVP, accept the PNG as-is
-  // TODO: Add sharp for proper validation and luminance-alpha conversion
   return {
     isValid: true,
-    message: 'Valid PNG (basic validation)',
+    message: `Valid ${format.toUpperCase()} (basic validation)`,
     processedData: imageData,
   };
 }
 
 /**
- * Validate flipbook atlas
+ * Validate flipbook atlas — same format-agnostic check as the sprite
+ * validator. Atlas geometry validation would need an image decoder.
  */
 export function validateFlipbookAtlas(
   imageData: Buffer,
   _expectedCols: number,
   _expectedRows: number
 ): ValidationResult {
-  // Basic PNG validation
   if (imageData.length < 100) {
+    return { isValid: false, message: 'Image data too small' };
+  }
+  const format = detectImageFormat(imageData);
+  if (format === 'unknown') {
     return {
       isValid: false,
-      message: 'Image data too small',
+      message: `Unrecognized image format (first 12 bytes: ${imageData.subarray(0, 12).toString('hex')})`,
     };
   }
-
-  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  if (!imageData.subarray(0, 8).equals(pngSignature)) {
-    return {
-      isValid: false,
-      message: 'Not a valid PNG file',
-    };
-  }
-
-  // TODO: Add sharp for proper atlas validation
   return {
     isValid: true,
-    message: 'Valid PNG atlas (basic validation)',
+    message: `Valid ${format.toUpperCase()} atlas (basic validation)`,
     processedData: imageData,
   };
 }

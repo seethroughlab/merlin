@@ -5,9 +5,9 @@
  */
 
 import { send, isConnected } from './connection';
-import type { SceneParams, SkeletonOverlay, ZoneName, AnalysisUpdate, FlipbookConfigMessage } from './types';
+import type { ZoneName, FlipbookConfigMessage } from './types';
 import type { TrackingFrame, CastingOrigin } from '../../shared/types';
-import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
+import type { CastEnvelope } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
 import { validateZoneCode, ZoneValidationError, isValidZoneName } from '../merlin/zone-registry';
 import { zoneStateManager } from '../merlin/zone-state';
@@ -23,55 +23,6 @@ function guardedSend(message: object, description: string): boolean {
     return false;
   }
   return send(message);
-}
-
-// ===== Mood & Scene =====
-
-/**
- * Update the current mood/atmosphere
- */
-export function pushMoodUpdate(mood: string, color?: string, intensity?: number): boolean {
-  return guardedSend({ type: 'mood_update', mood, color, intensity }, 'push mood');
-}
-
-/**
- * Update scene parameters (particles, aura, etc.)
- */
-export function pushSceneParams(params: SceneParams): boolean {
-  return guardedSend({ type: 'scene_params', params }, 'push scene params');
-}
-
-// ===== Effects =====
-
-/**
- * Trigger a visual reveal effect
- */
-export function pushRevealEffect(
-  effect_type: string,
-  intensity: number,
-  duration: number,
-  landmark?: number
-): boolean {
-  return guardedSend(
-    { type: 'reveal_effect', effect_type, intensity, duration, landmark },
-    'push reveal effect'
-  );
-}
-
-/**
- * Update the aura around the participant
- */
-export function pushAuraUpdate(color: string, size: number, behavior: string): boolean {
-  return guardedSend({ type: 'aura_update', color, size, behavior }, 'push aura update');
-}
-
-// ===== Skeleton =====
-
-/**
- * Update skeleton overlay effects
- */
-export function pushSkeletonAugment(overlays: SkeletonOverlay[]): boolean {
-  return guardedSend({ type: 'skeleton_augment', overlays }, 'push skeleton augment');
 }
 
 // ===== GLSL Zones =====
@@ -250,48 +201,7 @@ export function pushMerlinState(state: MerlinStateUpdate): boolean {
   return guardedSend({ type: 'merlin_state', ...state }, 'push merlin state');
 }
 
-// ===== Analysis =====
-
-/**
- * Push psychological analysis values to TD for visual feedback.
- * These values drive the "mirror/echo" AR effects:
- * - tension: edge energy around silhouette
- * - openness: aura expansion/contraction
- * - valence: color temperature and particle direction
- * - arousal: overall visual energy/speed
- * - engagement: skeleton glow intensity
- * - primary_emotion: color palette selection
- */
-export function pushAnalysisUpdate(analysis: AnalysisUpdate): boolean {
-  return guardedSend(
-    {
-      type: 'analysis_update',
-      valence: analysis.valence,
-      arousal: analysis.arousal,
-      tension: analysis.tension,
-      openness: analysis.openness,
-      engagement: analysis.engagement,
-      primary_emotion: analysis.primary_emotion,
-    },
-    'push analysis update'
-  );
-}
-
-// ===== Particle Spell Program =====
-
-/**
- * Push a complete particle spell program to TD.
- * Used for both buildup and release mode changes.
- */
-export function pushParticleSpellProgram(
-  mode: SpellVisualMode,
-  program: ParticleSpellProgram
-): boolean {
-  console.log(
-    `[TDBridge ${ts()}] Pushing spell program: mode=${mode} archetype=${program.archetype} energy=${program.energy.toFixed(2)}`
-  );
-  return guardedSend({ type: 'particle_spell_program', mode, program }, `push particle program (${mode})`);
-}
+// ===== Spell Cast =====
 
 /**
  * Push spell charge state (particles tightening around origin).
@@ -310,21 +220,21 @@ export function pushSpellCharge(
 }
 
 /**
- * Push spell cast trigger with envelope timing.
- * Called when magic word + gesture detected.
+ * Push spell cast trigger with envelope timing. TD switches to release
+ * mode and animates the cast envelope; visuals come from whatever GLSL
+ * Gemini wrote into the zones via set_zone_shader.
  */
 export function pushSpellCast(
   origin: CastingOrigin,
   intensity: number,
   durationMs: number,
-  envelope: CastEnvelope,
-  program: ParticleSpellProgram
+  envelope: CastEnvelope
 ): boolean {
   console.log(
-    `[TDBridge ${ts()}] SPELL CAST! origin=${origin} duration=${durationMs}ms archetype=${program.archetype}`
+    `[TDBridge ${ts()}] SPELL CAST! origin=${origin} duration=${durationMs}ms`
   );
   return guardedSend(
-    { type: 'spell_cast', origin, intensity, durationMs, envelope, program },
+    { type: 'spell_cast', origin, intensity, durationMs, envelope },
     'push spell cast'
   );
 }

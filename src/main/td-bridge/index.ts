@@ -27,19 +27,12 @@ export type { TDMetrics, TDScreenshot, VisibilityMetrics } from './metrics';
 
 // Re-export push methods
 export {
-  pushMoodUpdate,
-  pushSceneParams,
-  pushRevealEffect,
-  pushAuraUpdate,
-  pushSkeletonAugment,
   pushZoneUpdate,
   pushZoneUpdateWithValidation,
   pushOrientationUpdate,
   pushTrackingFrame,
   pushMerlinState,
-  pushAnalysisUpdate,
-  // Particle spell program push methods
-  pushParticleSpellProgram,
+  // Spell cast push methods
   pushSpellCharge,
   pushSpellCast,
   // Sprite system push methods
@@ -50,27 +43,6 @@ export {
 
 // Re-export push types
 export type { MerlinStateUpdate, ZoneUpdateResult } from './push';
-
-// Re-export insight visual functions
-export {
-  getPhaseVisualConfig,
-  getInsightVisualEffect,
-  calculateAccumulatedState,
-  getAccumulatedSceneParams,
-  INSIGHT_COLORS,
-  MOOD_COLORS,
-  PHASE_COLORS,
-} from './insight-visuals';
-
-// Re-export phase transition functions
-export {
-  resetVisualState,
-  triggerPhaseTransition,
-  applySessionStartVisuals,
-  applySessionEndVisuals,
-  updateVisualsForInsight,
-  getCurrentVisualState,
-} from './phase-transitions';
 
 import { startServer, stopServer } from './connection';
 import type { TDBridgeCallbacks } from './types';

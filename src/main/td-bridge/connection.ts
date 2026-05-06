@@ -42,7 +42,21 @@ export function startServer(port = DEFAULT_PORT, cbs: TDBridgeCallbacks = {}): v
   console.log(`[TDBridge ${ts()}] WebSocket server started on port ${port}`);
 
   wss.on('connection', handleConnection);
-  wss.on('error', (error) => {
+  wss.on('error', (error: NodeJS.ErrnoException) => {
+    // EADDRINUSE: another process owns the port. Normally `predev`
+    // (scripts/kill-stale-merlin.cjs) reaps stale Merlin instances before we
+    // get here, but a third-party listener or a missed kill can still hit
+    // this path. Soft-fail so the rest of the app keeps running — Merlin
+    // is usable without TD bridge, just degraded.
+    if (error.code === 'EADDRINUSE') {
+      console.error(
+        `[TDBridge ${ts()}] Port ${port} is in use — TD bridge disabled. ` +
+          `If a stale Merlin is holding it, restart dev (predev should reap it).`
+      );
+      state.connected = false;
+      callbacks.onError?.(`TD bridge port ${port} in use`);
+      return;
+    }
     console.error(`[TDBridge ${ts()}] Server error:`, error);
     callbacks.onError?.(error.message);
   });

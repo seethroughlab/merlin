@@ -9,13 +9,16 @@ void main() {
     float lifeSpan = TDIn_PartLifeSpan();
     float life = 1.0 - (age / max(lifeSpan, 0.001));
 
-    // Default size with life fade. baseSize matches the vibe-agent
-    // reference (0.05) — large enough that a single particle reads as a
-    // visible disc against the camera at the project's typical 0.4–0.7
-    // unit camera distance, instead of a sub-pixel smudge.
-    float baseSize = 0.05;
+    // Default size with life fade. baseSize=0.08 keeps idle particles
+    // big enough to be visible over the webcam (which the additive
+    // composite blends them onto) while letting high-energy spells push
+    // size up further via the (0.5 + uSpellEnergy) multiplier.
+    //   idle (energy=0.2): size ≈ 0.056
+    //   buildup (energy=0.5): size ≈ 0.080
+    //   release (energy=1.0): size ≈ 0.120
+    float baseSize = 0.08;
     float size = baseSize * life;
-    size *= (0.8 + uSpellEnergy * 0.4);
+    size *= (0.5 + uSpellEnergy);
 
     // {zone_code}
 

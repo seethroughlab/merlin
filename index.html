@@ -124,7 +124,7 @@
 
       /* Sidebar */
       #sidebar {
-        width: 280px;
+        width: 400px;
         background: #111;
         padding: 16px;
         overflow-y: auto;
@@ -1303,6 +1303,27 @@
         font-family: 'Monaco', 'Consolas', monospace;
       }
 
+      .gemini-screenshot {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid #222;
+      }
+
+      .gemini-screenshot-caption {
+        color: #cdd;
+        font-style: italic;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+
+      .gemini-screenshot-img {
+        max-width: 100%;
+        height: auto;
+        border: 1px solid #333;
+        border-radius: 2px;
+        display: block;
+      }
+
       /* ============ TD CONTROLS (sidebar) ============ */
 
       /* Stay visible during live Merlin / test mode (overrides the
@@ -1453,7 +1474,6 @@
         <section id="voice-controls">
           <h3>Voice Commands</h3>
           <div id="voice-status" class="voice-status voice-idle">Loading...</div>
-          <div class="voice-hint">Shift+M = Merlin Mode</div>
         </section>
 
         <!-- Merlin mode panel (hidden by default) -->

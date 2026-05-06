@@ -4,7 +4,7 @@
  * Type definitions for WebSocket communication between Merlin and TouchDesigner.
  */
 
-import type { ParticleSpellProgram, CastEnvelope, SpellVisualMode } from '../merlin/types';
+import type { CastEnvelope } from '../merlin/types';
 import type { CastingOrigin, PlaybackMode, DriveSource, FlipbookConfig } from '../../shared/types';
 
 // Re-export so existing td-bridge consumers don't have to change their import path.
@@ -31,19 +31,12 @@ export interface TDCapabilities {
 // ===== Outbound Messages (Merlin → TD) =====
 
 export type TDOutboundMessage =
-  | { type: 'mood_update'; mood: string; color?: string; intensity?: number }
-  | { type: 'reveal_effect'; effect_type: string; intensity: number; duration: number; landmark?: number }
-  | { type: 'aura_update'; color: string; size: number; behavior: string }
-  | { type: 'skeleton_augment'; overlays: SkeletonOverlay[] }
-  | { type: 'scene_params'; params: SceneParams }
   | { type: 'zone_update'; zone: ZoneName; glsl_code: string }
   | { type: 'orientation_update'; portrait: boolean; width: number; height: number }
   | { type: 'tracking_frame'; timestamp: number; fps: number; frame: FrameInfo; pose: PoseData; face: FaceData }
   | { type: 'merlin_state'; active: boolean; phase?: string; spell?: MerlinSpellState }
-  | { type: 'analysis_update'; valence: number; arousal: number; tension: number; openness: number; engagement: number; primary_emotion: string }
-  | { type: 'particle_spell_program'; mode: SpellVisualMode; program: ParticleSpellProgram }
   | { type: 'spell_charge'; origin: CastingOrigin; intensity: number; castingLandmarks: number[] }
-  | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope; program: ParticleSpellProgram }
+  | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope }
   | { type: 'ping' }
   | { type: 'request_screenshot' }
   | { type: 'request_metrics' }
@@ -62,27 +55,6 @@ export interface MerlinSpellState {
   castingOrigin?: string | null;
   palette?: string | null;
   confidence?: number;
-}
-
-// ===== Analysis Data (for visuals) =====
-
-/**
- * Psychological analysis values sent to TD to drive visuals.
- * Sent after each turn when AI provides analysis.
- */
-export interface AnalysisUpdate {
-  /** Emotional valence: -1 (negative) to 1 (positive) */
-  valence: number;
-  /** Arousal level: 0 (calm) to 1 (excited) */
-  arousal: number;
-  /** Tension level: 0 (relaxed) to 1 (tense) */
-  tension: number;
-  /** Openness: -1 (closed/defensive) to 1 (open/receptive) */
-  openness: number;
-  /** Engagement: 0 (disengaged) to 1 (highly engaged) */
-  engagement: number;
-  /** Primary detected emotion */
-  primary_emotion: 'joy' | 'fear' | 'anger' | 'sadness' | 'surprise' | 'neutral';
 }
 
 // ===== Tracking Data Types =====
@@ -113,23 +85,6 @@ export type ZoneName =
   | 'color_over_life'    // Color gradients (emotion, valence)
   | 'size_over_life'     // Size animation (arousal, tension)
   | 'velocity_modifier'; // Velocity adjustments (arousal, tension)
-
-export interface SkeletonOverlay {
-  landmark_start: number;
-  landmark_end: number;
-  effect: 'glow' | 'trail' | 'geometric' | 'energy_line';
-  color: string;
-  intensity: number;
-}
-
-export interface SceneParams {
-  particle_intensity?: 'subtle' | 'moderate' | 'intense' | 'overwhelming';
-  particle_behavior?: 'calm' | 'orbiting' | 'attracted' | 'repelled' | 'burst' | 'trailing';
-  particle_color?: string;
-  aura_color?: string;
-  aura_size?: number;
-  background_mood?: 'mysterious' | 'warm' | 'cold' | 'electric' | 'transcendent';
-}
 
 // (Sprite system types — PlaybackMode, DriveSource, FlipbookConfig —
 // are re-exported from shared/types at the top.)

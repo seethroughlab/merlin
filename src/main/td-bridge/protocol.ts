@@ -84,6 +84,23 @@ export function handleInbound(
       // sidebar already shows the reset outcome.
       break;
 
+    case 'sprite_loaded':
+      // TD confirms a sprite_texture push was received and applied. No
+      // direct UI surface for this today; logging at debug level keeps
+      // it from spamming the console.
+      if (!message.success) {
+        console.warn(
+          `[TDBridge ${ts()}] sprite_loaded reported failure for asset ${message.assetId}:`,
+          message.error
+        );
+      }
+      callbacks.onSpriteLoaded?.({
+        assetId: message.assetId,
+        success: message.success,
+        error: message.error,
+      });
+      break;
+
     default:
       console.log(`[TDBridge ${ts()}] Unknown message type:`, (message as { type: string }).type);
   }

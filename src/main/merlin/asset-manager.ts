@@ -12,6 +12,24 @@ import { randomUUID } from 'crypto';
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
+/**
+ * Pick a file extension based on the image bytes' magic header. TD's
+ * moviefilein loads by extension, so writing a JPEG to a `.png` file
+ * fails to decode.
+ */
+function detectExtensionFromBytes(b: Buffer): 'png' | 'jpg' | 'webp' {
+  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'jpg';
+  if (
+    b.length >= 12 &&
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  ) return 'webp';
+  // Fallback to .png — sprite-generator validators reject unknown formats
+  // upstream, so this branch is only hit if someone bypasses validation.
+  return 'png';
+}
+
 // ============ TYPES ============
 
 import type { PlaybackMode, DriveSource, FlipbookConfig } from '../../shared/types';
@@ -149,7 +167,10 @@ export function saveSprite(
   const m = loadManifest();
 
   const assetId = randomUUID();
-  const filename = `${assetId}.png`;
+  // Match the file extension to the actual format TD will read. Gemini
+  // returns JPEG by default; older PNG-only path still works.
+  const ext = detectExtensionFromBytes(imageData);
+  const filename = `${assetId}.${ext}`;
   const texturePath = path.join(getAssetsDir(), filename);
 
   // Write image to disk

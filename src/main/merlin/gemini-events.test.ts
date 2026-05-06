@@ -82,13 +82,13 @@ describe('emitGeminiTurn', () => {
     const long = 'b'.repeat(800);
     emitGeminiTurn({
       id: 'x',
-      source: 'test_spell_program',
-      toolCalls: [{ name: 'set_spell_program', args: { palette: { primary: long, secondary: '#ff0000' } } }],
+      source: 'test_live_spell',
+      toolCalls: [{ name: 'set_zone_shader', args: { zone: 'force_field', glsl_code: long, description: '#ff0000' } }],
     });
 
     const payload = win.webContents.send.mock.calls[0][1];
-    expect(payload.toolCalls[0].args.palette.primary.length).toBeLessThan(long.length);
-    expect(payload.toolCalls[0].args.palette.secondary).toBe('#ff0000');
+    expect(payload.toolCalls[0].args.glsl_code.length).toBeLessThan(long.length);
+    expect(payload.toolCalls[0].args.description).toBe('#ff0000');
   });
 
   it('emits each call separately when called multiple times for the same turn id', () => {

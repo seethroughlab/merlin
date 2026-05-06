@@ -2,33 +2,73 @@
  * Gemini Multi-Turn Chat Wrapper for Merlin
  *
  * Manages a stateful conversation with Gemini including tool calling.
+ * Built on `@google/genai` (the v1+ SDK) so that `request_visual_feedback`
+ * can deliver its screenshot via nested multimodal parts inside the
+ * function response — a Gemini 3 capability the older SDK doesn't expose.
  */
 
 import {
-  GoogleGenerativeAI,
-  ChatSession,
+  GoogleGenAI,
+  Chat,
   Content,
-  FunctionCallingMode,
-  GenerateContentResult,
+  FunctionCallingConfigMode,
+  GenerateContentResponse,
   Part,
-} from '@google/generative-ai';
-import { MERLIN_SYSTEM_PROMPT, MERLIN_TOOLS, INTRO_WITH_IMAGE_PROMPT, MERLIN_CLOSING_PROMPT } from './prompts';
+} from '@google/genai';
+import {
+  MERLIN_SYSTEM_PROMPT,
+  MERLIN_TOOLS,
+  MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT,
+  MERLIN_VISUAL_AUTHOR_TOOLS,
+  INTRO_WITH_IMAGE_PROMPT,
+  MERLIN_CLOSING_PROMPT,
+} from './prompts';
 import type { MerlinToolCall } from './types';
 
-let genAI: GoogleGenerativeAI | null = null;
+const MERLIN_MODEL = 'gemini-3-flash-preview';
 
-/**
- * Initialize the Gemini client for chat
- */
-function ensureGenAI(): GoogleGenerativeAI {
+let genAI: GoogleGenAI | null = null;
+
+function ensureGenAI(): GoogleGenAI {
   if (!genAI) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY not set');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    genAI = new GoogleGenAI({ apiKey });
   }
   return genAI;
+}
+
+/**
+ * Chat mode selects which system prompt + tool registry the chat
+ * is created with.
+ *  - 'merlin'         : full Merlin character + all tools (live experience)
+ *  - 'visual-author'  : stripped prompt focused on visual authoring,
+ *                        only the 3 visual tools — no perception, no
+ *                        casting, no metadata. Used by Live Spell test.
+ */
+export type ChatMode = 'merlin' | 'visual-author';
+
+function buildChat(history: Content[], mode: ChatMode = 'merlin'): Chat {
+  const ai = ensureGenAI();
+  const systemInstruction =
+    mode === 'visual-author' ? MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT : MERLIN_SYSTEM_PROMPT;
+  const tools =
+    mode === 'visual-author' ? MERLIN_VISUAL_AUTHOR_TOOLS : MERLIN_TOOLS;
+  return ai.chats.create({
+    model: MERLIN_MODEL,
+    history,
+    config: {
+      systemInstruction,
+      tools: [{ functionDeclarations: tools }],
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingConfigMode.AUTO,
+        },
+      },
+    },
+  });
 }
 
 /**
@@ -41,10 +81,23 @@ export interface ChatTurnResult {
 }
 
 /**
+ * One screenshot to deliver alongside a tool result via the Gemini 3
+ * multimodal-function-response feature: the inline image rides inside
+ * the `parts` field of the matching `functionResponse`, so the model
+ * sees it as part of a single tool result.
+ */
+export interface ToolResultImage {
+  /** Match against `MerlinToolCall.id` so the inline data is attached to the right function response. */
+  callId?: string;
+  mimeType: string;
+  base64: string;
+}
+
+/**
  * MerlinChat - manages multi-turn conversation with Gemini
  */
 export class MerlinChat {
-  private chat: ChatSession | null = null;
+  private chat: Chat | null = null;
   private history: Content[] = [];
 
   /**
@@ -52,25 +105,9 @@ export class MerlinChat {
    * The image is used to personalize the intro observation
    */
   async startChatWithImage(imageBase64: string): Promise<ChatTurnResult> {
-    const ai = ensureGenAI();
-
-    const model = ai.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      systemInstruction: MERLIN_SYSTEM_PROMPT,
-      tools: [{ functionDeclarations: MERLIN_TOOLS }],
-      toolConfig: {
-        functionCallingConfig: {
-          mode: FunctionCallingMode.AUTO,
-        },
-      },
-    });
-
     this.history = [];
-    this.chat = model.startChat({
-      history: this.history,
-    });
+    this.chat = buildChat(this.history);
 
-    // Send image + intro prompt together
     const messageParts: Part[] = [
       {
         inlineData: {
@@ -81,10 +118,9 @@ export class MerlinChat {
       { text: INTRO_WITH_IMAGE_PROMPT },
     ];
 
-    const result = await this.chat.sendMessage(messageParts);
-    const response = this.parseResult(result);
+    const result = await this.chat.sendMessage({ message: messageParts });
+    const response = parseResult(result);
 
-    // Update history (store text representation for history)
     this.history.push(
       { role: 'user', parts: [{ text: '[Image of person] ' + INTRO_WITH_IMAGE_PROMPT }] },
       { role: 'model', parts: [{ text: response.text || '[processing tools]' }] }
@@ -97,30 +133,12 @@ export class MerlinChat {
    * Start a new chat session without an image (fallback)
    */
   async startChat(): Promise<ChatTurnResult> {
-    const ai = ensureGenAI();
-
-    const model = ai.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      systemInstruction: MERLIN_SYSTEM_PROMPT,
-      tools: [{ functionDeclarations: MERLIN_TOOLS }],
-      toolConfig: {
-        functionCallingConfig: {
-          mode: FunctionCallingMode.AUTO,
-        },
-      },
-    });
-
     this.history = [];
-    this.chat = model.startChat({
-      history: this.history,
-    });
+    this.chat = buildChat(this.history);
 
-    // Send opening prompt without image
-    const result = await this.chat.sendMessage(INTRO_WITH_IMAGE_PROMPT);
+    const result = await this.chat.sendMessage({ message: INTRO_WITH_IMAGE_PROMPT });
+    const response = parseResult(result);
 
-    const response = this.parseResult(result);
-
-    // Update history with this exchange
     this.history.push(
       { role: 'user', parts: [{ text: INTRO_WITH_IMAGE_PROMPT }] },
       { role: 'model', parts: [{ text: response.text || '[processing tools]' }] }
@@ -130,17 +148,34 @@ export class MerlinChat {
   }
 
   /**
-   * Send a message and get a response
+   * Initialize a chat session WITHOUT sending an opening message.
+   * Used by Test Mode's Live Spell tab so the caller can send the
+   * user's spell description through the same `sendMessage` path live
+   * Merlin uses, instead of the live `INTRO_WITH_IMAGE_PROMPT`.
+   *
+   * `mode` defaults to 'visual-author' — Live Spell test should not
+   * inherit the conversational Merlin character (it produces
+   * hallucinated participant interaction in a context where there is
+   * no participant). Pass 'merlin' explicitly if you really want the
+   * full character + all tools.
+   */
+  initChat(opts: { mode?: ChatMode } = {}): void {
+    const mode = opts.mode ?? 'visual-author';
+    this.history = [];
+    this.chat = buildChat(this.history, mode);
+  }
+
+  /**
+   * Send a plain user-text message and get a response.
    */
   async sendMessage(message: string): Promise<ChatTurnResult> {
     if (!this.chat) {
       throw new Error('Chat not started - call startChat() first');
     }
 
-    const result = await this.chat.sendMessage(message);
-    const response = this.parseResult(result);
+    const result = await this.chat.sendMessage({ message });
+    const response = parseResult(result);
 
-    // Update history
     this.history.push(
       { role: 'user', parts: [{ text: message }] },
       { role: 'model', parts: [{ text: response.text }] }
@@ -150,22 +185,61 @@ export class MerlinChat {
   }
 
   /**
-   * Provide tool results back to the model
+   * Provide tool results back to the model, optionally with inline
+   * images attached to specific function responses.
+   *
+   * In Gemini 3, a function response can carry multimodal parts
+   * (`parts: FunctionResponsePart[]`) alongside its structured
+   * response. This is the canonical way to deliver something like a
+   * screenshot back to the model — it avoids both the old text-only
+   * `response: { base64: '...' }` (opaque) and the workaround of
+   * sending a separate user-role message (an extra round-trip).
+   *
+   * Inline images are matched to function responses by `callId`. If a
+   * `ToolResultImage` has no matching call, it's attached to the first
+   * response in the batch as a safety fallback.
    */
-  async sendToolResults(results: Array<{ name: string; response: unknown }>): Promise<ChatTurnResult> {
+  async sendToolResults(
+    results: Array<{ name: string; response: unknown; callId?: string }>,
+    images: ToolResultImage[] = []
+  ): Promise<ChatTurnResult> {
     if (!this.chat) {
       throw new Error('Chat not started');
     }
 
-    const functionResponses: Part[] = results.map((r) => ({
-      functionResponse: {
-        name: r.name,
-        response: r.response as object,
-      },
-    }));
+    const imagesByCallId = new Map<string, ToolResultImage[]>();
+    const orphans: ToolResultImage[] = [];
+    for (const img of images) {
+      if (img.callId) {
+        const arr = imagesByCallId.get(img.callId) ?? [];
+        arr.push(img);
+        imagesByCallId.set(img.callId, arr);
+      } else {
+        orphans.push(img);
+      }
+    }
 
-    const result = await this.chat.sendMessage(functionResponses);
-    return this.parseResult(result);
+    const parts: Part[] = results.map((r, i) => {
+      const matched = r.callId ? imagesByCallId.get(r.callId) ?? [] : [];
+      const fallback = i === 0 ? orphans : [];
+      const inlineParts = [...matched, ...fallback].map((img) => ({
+        inlineData: {
+          mimeType: img.mimeType,
+          data: img.base64,
+        },
+      }));
+      return {
+        functionResponse: {
+          ...(r.callId ? { id: r.callId } : {}),
+          name: r.name,
+          response: r.response as Record<string, unknown>,
+          ...(inlineParts.length > 0 ? { parts: inlineParts } : {}),
+        },
+      };
+    });
+
+    const result = await this.chat.sendMessage({ message: parts });
+    return parseResult(result);
   }
 
   /**
@@ -176,66 +250,54 @@ export class MerlinChat {
       return 'Session was not active.';
     }
 
-    const result = await this.chat.sendMessage(MERLIN_CLOSING_PROMPT);
-
-    const response = this.parseResult(result);
+    const result = await this.chat.sendMessage({ message: MERLIN_CLOSING_PROMPT });
+    const response = parseResult(result);
     this.chat = null;
 
     return response.text;
   }
 
-  /**
-   * Check if chat is active
-   */
   isActive(): boolean {
     return this.chat !== null;
   }
 
-  /**
-   * Get conversation history length
-   */
   getTurnCount(): number {
     return Math.floor(this.history.length / 2);
   }
+}
 
-  /**
-   * Parse Gemini result into our format
-   */
-  private parseResult(result: GenerateContentResult): ChatTurnResult {
-    const response = result.response;
-    const candidate = response.candidates?.[0];
+function parseResult(result: GenerateContentResponse): ChatTurnResult {
+  const candidate = result.candidates?.[0];
 
-    if (!candidate || !candidate.content || !candidate.content.parts) {
-      return {
-        text: 'No response generated',
-        toolCalls: [],
-        finishReason: 'ERROR',
-      };
-    }
-
-    const parts = candidate.content.parts;
-
-    // Extract text parts
-    const textParts = parts
-      .filter((p) => 'text' in p)
-      .map((p) => (p as { text: string }).text);
-    const text = textParts.join('');
-
-    // Extract function calls
-    const toolCalls: MerlinToolCall[] = parts
-      .filter((p) => 'functionCall' in p)
-      .map((p) => {
-        const fc = (p as { functionCall: { name: string; args: Record<string, unknown> } }).functionCall;
-        return {
-          name: fc.name as MerlinToolCall['name'],
-          args: fc.args,
-        };
-      });
-
+  if (!candidate || !candidate.content || !candidate.content.parts) {
     return {
-      text,
-      toolCalls,
-      finishReason: candidate.finishReason || 'STOP',
+      text: 'No response generated',
+      toolCalls: [],
+      finishReason: 'ERROR',
     };
   }
+
+  const parts = candidate.content.parts;
+
+  const text = parts
+    .filter((p) => typeof p.text === 'string')
+    .map((p) => p.text as string)
+    .join('');
+
+  const toolCalls: MerlinToolCall[] = parts
+    .filter((p) => p.functionCall)
+    .map((p) => {
+      const fc = p.functionCall!;
+      return {
+        name: (fc.name ?? '') as MerlinToolCall['name'],
+        args: (fc.args ?? {}) as Record<string, unknown>,
+        ...(fc.id ? { id: fc.id } : {}),
+      };
+    });
+
+  return {
+    text,
+    toolCalls,
+    finishReason: candidate.finishReason ?? 'STOP',
+  };
 }

@@ -4,6 +4,7 @@
   "description": "Merlin Mirror - AI-powered spell casting experience",
   "main": "dist/main/index.js",
   "scripts": {
+    "predev": "node scripts/kill-stale-merlin.cjs",
     "dev": "vite",
     "dev:spout": "vite -- --spout",
     "build": "tsc && vite build",

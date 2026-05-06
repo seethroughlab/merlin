@@ -44,18 +44,18 @@ vi.mock('./zone-registry', () => ({
   },
 }));
 
-// Gemini SDK mock — chat-based as of Phase 5.
-const { mockSendMessage, mockStartChat, mockGetGenerativeModel } = vi.hoisted(() => ({
+// Gemini SDK mock — @google/genai chat-based.
+const { mockSendMessage, mockChatsCreate } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(),
-  mockStartChat: vi.fn(),
-  mockGetGenerativeModel: vi.fn(),
+  mockChatsCreate: vi.fn(),
 }));
 
-vi.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: class MockGoogleGenerativeAI {
-    getGenerativeModel = mockGetGenerativeModel;
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: class MockGoogleGenAI {
+    chats = { create: mockChatsCreate };
   },
-  FunctionCallingMode: { ANY: 'ANY' },
+  FunctionCallingConfigMode: { ANY: 'ANY', AUTO: 'AUTO' },
+  Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
 }));
 
 vi.mock('./gemini-events', () => ({
@@ -67,28 +67,25 @@ vi.mock('./gemini-events', () => ({
 
 function geminiCallsForZones(zones: string[]) {
   return {
-    response: {
-      candidates: [
-        {
-          content: {
-            parts: zones.map((zone) => ({
-              functionCall: {
-                name: 'set_zone_shader',
-                args: { zone, glsl_code: `// snippet for ${zone}`, description: `desc for ${zone}` },
-              },
-            })),
-          },
+    candidates: [
+      {
+        content: {
+          parts: zones.map((zone) => ({
+            functionCall: {
+              name: 'set_zone_shader',
+              args: { zone, glsl_code: `// snippet for ${zone}`, description: `desc for ${zone}` },
+            },
+          })),
         },
-      ],
-    },
+      },
+    ],
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.GEMINI_API_KEY = 'test-key';
-  mockStartChat.mockReturnValue({ sendMessage: mockSendMessage });
-  mockGetGenerativeModel.mockReturnValue({ startChat: mockStartChat });
+  mockChatsCreate.mockReturnValue({ sendMessage: mockSendMessage });
   mockPushZoneUpdateWithValidation.mockResolvedValue({ success: true, warnings: [] });
 });
 
@@ -109,8 +106,8 @@ describe('testShaderGeneration', () => {
     expect(result.zones.map(z => z.zone).sort()).toEqual([...expected].sort());
 
     // Tool config built with all 8 — confirm via the model call
-    const modelArgs = mockGetGenerativeModel.mock.calls[0][0];
-    const toolEnum = modelArgs.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
+    const createArgs = mockChatsCreate.mock.calls[0][0];
+    const toolEnum = createArgs.config.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
     expect(toolEnum.sort()).toEqual([...expected].sort());
 
     // Each returned zone went through pushZoneUpdateWithValidation
@@ -132,8 +129,8 @@ describe('testShaderGeneration', () => {
     expect(result.success).toBe(true);
     expect(result.zones.map(z => z.zone)).toEqual(subset);
 
-    const modelArgs = mockGetGenerativeModel.mock.calls[0][0];
-    const toolEnum = modelArgs.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
+    const createArgs = mockChatsCreate.mock.calls[0][0];
+    const toolEnum = createArgs.config.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
     expect(toolEnum).toEqual(subset);
 
     expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(2);
@@ -150,8 +147,8 @@ describe('testShaderGeneration', () => {
       zones: ['force_field', 'billboard_vertex'],
     });
 
-    const modelArgs = mockGetGenerativeModel.mock.calls[0][0];
-    const toolEnum = modelArgs.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
+    const createArgs = mockChatsCreate.mock.calls[0][0];
+    const toolEnum = createArgs.config.tools[0].functionDeclarations[0].parameters.properties.zone.enum;
     expect(toolEnum).toEqual(['force_field', 'billboard_vertex']);
   });
 

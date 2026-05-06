@@ -4,7 +4,7 @@
  * Coordinates conversation, body/face analysis, and spell state accumulation.
  */
 
-import { MerlinChat, ChatTurnResult } from './gemini-chat';
+import { MerlinChat } from './gemini-chat';
 import { createTurnContext } from './prompts';
 import type {
   MerlinPhase,
@@ -14,36 +14,29 @@ import type {
 } from '../../shared/types';
 import type {
   MerlinSessionState,
-  MerlinToolCall,
   MerlinPhaseConfig,
   ConversationMessage,
-  SetSpellProfileParams,
-  PrepareCastingParams,
-  BodySnapshot,
-  FaceSnapshot,
 } from './types';
 import type { BodyLanguageAnalysis, MicroExpressionAnalysis } from '../../shared/types';
-import {
-  createInitialSpellState,
-  mergeSpellUpdate,
-  defaultOriginForIntent,
-  paletteForElement,
-} from './spell-state';
-import {
-  createBuildupProgram,
-  createReleaseProgram,
-  createIdleProgram,
-  getCastDuration,
-} from './particle-program';
-import {
-  pushParticleSpellProgram,
-  pushSpellCast,
-  pushZoneUpdateWithValidation,
-} from '../td-bridge';
+import { createInitialSpellState } from './spell-state';
+import { pushSpellCast } from '../td-bridge';
+import { resetTDBaseline } from './reset-td';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
-import type { GeminiToolCall } from '../../shared/types';
+import { runMerlinTurn, dispatchToolCalls, type TurnDispatchContext } from './turn-runner';
 
-const LIVE_RETRY_MAX = 2;
+// Default cast envelope timing (in ms). Used by triggerCast() to drive
+// the release-mode TD-side phase transitions. Was previously archetype-
+// specific via createReleaseProgram; collapsed to a single default now
+// that the archetype layer is gone.
+const DEFAULT_CAST_ENVELOPE = {
+  ignitionMs: 400,
+  projectionMs: 1200,
+  afterglowMs: 2900,
+  peakIntensity: 1.0,
+};
+function getCastDuration(env: typeof DEFAULT_CAST_ENVELOPE): number {
+  return env.ignitionMs + env.projectionMs + env.afterglowMs;
+}
 
 /**
  * Callback for when spell state updates
@@ -159,10 +152,23 @@ export class MerlinSession {
       result = await this.chat.startChat();
     }
 
-    // Handle tool calls until we get text
+    // Handle tool calls until we get text. Intro flow doesn't need a
+    // sidebar turn id since it pre-dates user input — pass synthetic.
+    const introTurnId = nextTurnId();
+    const introZoneAttempts = new Map<string, number>();
+    const ctx: TurnDispatchContext = {
+      state: this.state,
+      onSpellUpdate: this.config.onSpellUpdate,
+      onRequestAnalysis: this.config.onRequestAnalysis,
+    };
+    // The intro flow doesn't expect request_visual_feedback (it runs
+    // before any spell shaders exist), so dispatch.extraImages should
+    // always be empty here. We dispatch only function responses; if a
+    // tool ever does emit extras during intro, they'd be silently
+    // dropped. The full image flow lives in runMerlinTurn.
     while (result.toolCalls.length > 0) {
-      const toolResults = await this.handleToolCalls(result.toolCalls);
-      result = await this.chat.sendToolResults(toolResults);
+      const dispatch = await dispatchToolCalls(result.toolCalls, ctx, introTurnId, 'live', introZoneAttempts);
+      result = await this.chat.sendToolResults(dispatch.toolResults);
     }
 
     const introText = result.text;
@@ -234,31 +240,18 @@ export class MerlinSession {
     // Create context message for Gemini
     const contextMessage = createTurnContext(transcript, this.state);
 
-    // Open a sidebar turn for this user input. Per-zone retry counts
-    // live in this map for the duration of the turn (set_zone_shader
-    // failures emit retry markers for the same zone).
+    // Open a sidebar turn for this user input.
     const turnId = nextTurnId();
-    const zoneAttempts = new Map<string, number>();
     emitGeminiTurn({ id: turnId, source: 'live', userPrompt: transcript });
 
-    // Send to Gemini
-    let result = await this.chat.sendMessage(contextMessage);
-    this.emitChatResult(turnId, result);
-
-    // Accumulate text across all responses (ignore error placeholder)
-    let accumulatedText = result.text === 'No response generated' ? '' : result.text;
-
-    // Handle tool calls
-    while (result.toolCalls.length > 0) {
-      const toolResults = await this.handleToolCalls(result.toolCalls, turnId, zoneAttempts);
-      result = await this.chat.sendToolResults(toolResults);
-      this.emitChatResult(turnId, result);
-
-      // Append any new text
-      if (result.text && result.text !== 'No response generated') {
-        accumulatedText += result.text;
-      }
-    }
+    // Run Gemini turn through the shared dispatcher.
+    const ctx: TurnDispatchContext = {
+      state: this.state,
+      onSpellUpdate: this.config.onSpellUpdate,
+      onRequestAnalysis: this.config.onRequestAnalysis,
+    };
+    const turn = await runMerlinTurn(this.chat, contextMessage, ctx, turnId, 'live');
+    let accumulatedText = turn.finalText;
 
     // If still no text after tool calls, ask for a spoken response
     if (!accumulatedText.trim()) {
@@ -292,9 +285,11 @@ export class MerlinSession {
 
   /**
    * Emit Gemini's response (text + tool calls) to the sidebar.
+   * Used by the post-turn followUp prompt; main turn handling goes
+   * through runMerlinTurn which emits its own events.
    */
-  private emitChatResult(turnId: string, result: ChatTurnResult): void {
-    const toolCalls: GeminiToolCall[] = result.toolCalls.map(tc => ({
+  private emitChatResult(turnId: string, result: import('./gemini-chat').ChatTurnResult): void {
+    const toolCalls = result.toolCalls.map(tc => ({
       name: tc.name,
       args: tc.args as Record<string, unknown>,
     }));
@@ -309,348 +304,6 @@ export class MerlinSession {
     }
   }
 
-  /**
-   * Handle tool calls from Gemini
-   */
-  private async handleToolCalls(
-    toolCalls: MerlinToolCall[],
-    turnId?: string,
-    zoneAttempts?: Map<string, number>,
-  ): Promise<Array<{ name: string; response: unknown }>> {
-    const results: Array<{ name: string; response: unknown }> = [];
-
-    for (const call of toolCalls) {
-      let response: unknown;
-
-      switch (call.name) {
-        case 'get_posture': {
-          if (this.config.onRequestAnalysis) {
-            const focus = (call.args as { focus?: string }).focus;
-            const analysis = await this.config.onRequestAnalysis('body', focus);
-            if (analysis) {
-              this.state.lastPosture = analysis as Partial<BodyLanguageAnalysis>;
-              this.state.lastPerceptionTime = Date.now();
-            }
-            response = analysis ?? { error: 'Analysis not available' };
-          } else {
-            // Return cached analysis
-            response = this.state.lastPosture ?? { error: 'No posture data available' };
-          }
-          break;
-        }
-
-        case 'get_expression': {
-          if (this.config.onRequestAnalysis) {
-            const focus = (call.args as { focus?: string }).focus;
-            const analysis = await this.config.onRequestAnalysis('face', focus);
-            if (analysis) {
-              this.state.lastExpression = analysis as Partial<MicroExpressionAnalysis>;
-              this.state.lastPerceptionTime = Date.now();
-            }
-            response = analysis ?? { error: 'Analysis not available' };
-          } else {
-            // Return cached analysis
-            response = this.state.lastExpression ?? { error: 'No expression data available' };
-          }
-          break;
-        }
-
-        case 'set_spell_profile': {
-          const params = call.args as unknown as SetSpellProfileParams;
-
-          // Merge spell update
-          const update: Partial<SpellState> = {};
-
-          if (params.intent) {
-            update.intent = params.intent as SpellState['intent'];
-            // Auto-set origin if not already set
-            if (!this.state.spell.castingOrigin && update.intent) {
-              update.castingOrigin = defaultOriginForIntent(update.intent);
-            }
-          }
-          if (params.element) {
-            update.element = params.element as SpellState['element'];
-            // Auto-set palette if not already set
-            if (!this.state.spell.palette && update.element) {
-              update.palette = paletteForElement(update.element);
-            }
-          }
-          if (params.tone) {
-            update.tone = params.tone as SpellState['tone'];
-          }
-          if (typeof params.energy === 'number') {
-            update.energy = params.energy;
-          }
-          if (params.castingOrigin) {
-            update.castingOrigin = params.castingOrigin as SpellState['castingOrigin'];
-          }
-          if (params.visualArchetype) {
-            update.visualArchetype = params.visualArchetype;
-          }
-          if (params.palette) {
-            update.palette = params.palette;
-          }
-
-          // Increase confidence based on completeness
-          const completenessBoost =
-            (update.intent ? 0.15 : 0) +
-            (update.element ? 0.15 : 0) +
-            (update.castingOrigin ? 0.1 : 0);
-          if (completenessBoost > 0) {
-            update.confidence = Math.min(1, this.state.spell.confidence + completenessBoost);
-          }
-
-          this.state.spell = mergeSpellUpdate(this.state.spell, update);
-
-          // Notify callback
-          if (this.config.onSpellUpdate) {
-            this.config.onSpellUpdate(this.state.spell);
-          }
-
-          // Push updated buildup program to TD
-          this.pushCurrentBuildupProgram();
-
-          response = {
-            success: true,
-            spell: this.state.spell,
-          };
-          break;
-        }
-
-        case 'prepare_casting': {
-          const params = call.args as unknown as PrepareCastingParams;
-
-          // Set magic word
-          this.state.spell = mergeSpellUpdate(this.state.spell, {
-            magicWord: params.magicWord,
-            confidence: 1.0, // Ready to cast
-          });
-
-          this.state.castReady = true;
-
-          // Notify callback
-          if (this.config.onSpellUpdate) {
-            this.config.onSpellUpdate(this.state.spell);
-          }
-
-          response = {
-            success: true,
-            magicWord: params.magicWord,
-            gestureHint: params.gestureHint,
-            spell: this.state.spell,
-          };
-          break;
-        }
-
-        case 'set_zone_shader': {
-          const { zone, glsl_code, description } = call.args as {
-            zone: string;
-            glsl_code: string;
-            description?: string;
-          };
-
-          // Track per-zone attempt count within this turn so we can
-          // mark retries in the sidebar and stop encouraging retries
-          // after MAX_RETRIES.
-          const priorAttempts = zoneAttempts?.get(zone) ?? 0;
-          if (turnId && priorAttempts > 0) {
-            emitGeminiTurn({
-              id: turnId,
-              source: 'live',
-              retry: { attempt: priorAttempts, total: LIVE_RETRY_MAX, zone },
-            });
-          }
-
-          // Push the GLSL code with full validation pipeline
-          const result = await pushZoneUpdateWithValidation(zone, glsl_code);
-          if (zoneAttempts) zoneAttempts.set(zone, priorAttempts + 1);
-
-          console.log(
-            `[MerlinSession] set_zone_shader: zone=${zone}, attempt=${priorAttempts + 1}, ` +
-            `success=${result.success}, desc=${description || 'none'}` +
-            `${result.error ? `, error=${result.error}` : ''}`
-          );
-
-          if (turnId) {
-            emitGeminiTurn({
-              id: turnId,
-              source: 'live',
-              pushResults: [{ zone, success: result.success, error: result.error, warnings: result.warnings }],
-            });
-          }
-
-          if (result.success) {
-            response = {
-              success: true,
-              zone,
-              description: description || 'Custom shader applied',
-              warnings: result.warnings,
-            };
-          } else {
-            // Use vibe-agent's iterative-refinement phrasing so Gemini
-            // produces better corrections. Capped at LIVE_RETRY_MAX
-            // attempts per zone before we stop encouraging retries.
-            const attempt = priorAttempts + 1;
-            const exhausted = attempt > LIVE_RETRY_MAX;
-            response = {
-              success: false,
-              zone,
-              error: result.error,
-              warnings: result.warnings,
-              instruction: exhausted
-                ? `The zone "${zone}" has now failed ${attempt} times. Stop trying to fix this zone for now and respond to the user.`
-                : `COMPILE ERROR (iteration ${attempt}/${LIVE_RETRY_MAX}):\n\n` +
-                  `Tool result for "${zone}": ${result.error ?? 'unknown error'}\n\n` +
-                  `CRITICAL: The GLSL zone "${zone}" failed to compile. The zone code was reverted to defaults.\n` +
-                  `You MUST call set_zone_shader again with corrected GLSL for zone "${zone}".\n` +
-                  `Common fixes: check for syntax errors, undefined variables, missing semicolons, ` +
-                  `redeclaration of template-provided variables, or invalid GLSL.\n` +
-                  `Explain what you think went wrong and provide fixed code.`,
-            };
-          }
-          break;
-        }
-
-        case 'request_visual_feedback': {
-          const { intent } = call.args as { intent: string };
-
-          console.log(`[MerlinSession] request_visual_feedback: intent=${intent}`);
-
-          // Request screenshot from TD
-          const { send } = await import('../td-bridge/connection');
-          const { requestScreenshot } = await import('../td-bridge/metrics');
-
-          const screenshot = await requestScreenshot(send, 5000);
-
-          if (screenshot) {
-            // Return screenshot data for Gemini to analyze
-            response = {
-              success: true,
-              intent,
-              screenshot: {
-                base64: screenshot.base64,
-                width: screenshot.width,
-                height: screenshot.height,
-              },
-              instruction: 'Analyze this screenshot. Does it match the intended effect? If not, use set_zone_shader to refine.',
-            };
-          } else {
-            response = {
-              success: false,
-              error: 'Failed to capture screenshot from TouchDesigner',
-            };
-          }
-          break;
-        }
-
-        case 'generate_sprite': {
-          const {
-            description,
-            style,
-            animation,
-            frameCount,
-            playbackMode,
-            driveSource,
-          } = call.args as {
-            description: string;
-            style?: string;
-            animation?: string;
-            frameCount?: number;
-            playbackMode?: string;
-            driveSource?: string;
-          };
-
-          console.log(`[MerlinSession] generate_sprite: description="${description}"${animation ? `, animation=${animation}` : ''}`);
-
-          try {
-            // Import sprite generator and push functions
-            const { getSpriteGenerator } = await import('./sprite-generator');
-            const { pushSpriteTexture, pushFlipbookConfig } = await import('../td-bridge');
-            const { getFlipbookConfig } = await import('./asset-manager');
-
-            const generator = getSpriteGenerator();
-
-            // Determine if this is a flipbook request
-            const isFlipbook = animation || (frameCount && frameCount > 1);
-
-            if (isFlipbook) {
-              // Generate flipbook
-              const validFrameCount = (frameCount ?? 16) as 4 | 8 | 9 | 12 | 16 | 25;
-              const result = await generator.generateFlipbookSync(description, {
-                frameCount: validFrameCount,
-                style,
-                animation,
-                playbackMode: (playbackMode ?? 'loop') as 'loop' | 'once' | 'pingpong' | 'random',
-                driveSource: (driveSource ?? 'age') as 'age' | 'life' | 'velocity' | 'id' | 'time',
-              });
-
-              if (result.success && result.asset) {
-                // Push texture and flipbook config to TD
-                pushSpriteTexture(result.asset.assetId, result.asset.texturePath);
-                if (result.flipbookConfig) {
-                  const flipbookPushed = pushFlipbookConfig(result.flipbookConfig);
-                  // Reflect into the test-mode mirror so the Render Mode tab
-                  // readout shows what live just sent (not the defaults).
-                  if (flipbookPushed) {
-                    const { recordFlipbookConfigPush } = await import('./td-state-mirror');
-                    recordFlipbookConfigPush(result.flipbookConfig);
-                  }
-                }
-
-                response = {
-                  success: true,
-                  assetId: result.asset.assetId,
-                  assetType: 'flipbook',
-                  frameCount: result.asset.frameCount,
-                  message: `Generated ${result.asset.frameCount}-frame flipbook sprite: "${description}"`,
-                };
-              } else {
-                response = {
-                  success: false,
-                  error: result.error ?? 'Failed to generate flipbook sprite',
-                };
-              }
-            } else {
-              // Generate single sprite
-              const result = await generator.generateSpriteSync(description, { style });
-
-              if (result.success && result.asset) {
-                // Push texture to TD
-                pushSpriteTexture(result.asset.assetId, result.asset.texturePath);
-
-                response = {
-                  success: true,
-                  assetId: result.asset.assetId,
-                  assetType: 'single',
-                  message: `Generated sprite: "${description}"`,
-                };
-              } else {
-                response = {
-                  success: false,
-                  error: result.error ?? 'Failed to generate sprite',
-                };
-              }
-            }
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`[MerlinSession] generate_sprite error: ${errorMessage}`);
-            response = {
-              success: false,
-              error: errorMessage,
-            };
-          }
-          break;
-        }
-
-        default:
-          response = { error: `Unknown tool: ${call.name}` };
-      }
-
-      results.push({ name: call.name, response });
-    }
-
-    return results;
-  }
 
   /**
    * Update phase based on conversation progress
@@ -688,14 +341,11 @@ export class MerlinSession {
         this.config.onPhaseChange(newPhase);
       }
 
-      // Push initial buildup program when entering discovery
-      if (newPhase === 'discovery' && !wasDiscovery) {
-        this.pushCurrentBuildupProgram();
-      }
-
-      // Push idle program when session ends
+      // Visual state is now driven entirely by Gemini's set_zone_shader
+      // calls during the conversation. On session end (outro), reset
+      // zones to baseline so the next session starts clean.
       if (newPhase === 'outro') {
-        this.pushIdleProgram();
+        void resetTDBaseline();
       }
     }
 
@@ -784,27 +434,14 @@ export class MerlinSession {
     return this.chat.isActive();
   }
 
-  // ===== Particle Program Integration =====
+  // ===== Spell Cast =====
 
   /**
-   * Push the current buildup program to TouchDesigner
-   */
-  private pushCurrentBuildupProgram(): void {
-    const program = createBuildupProgram(this.state.spell);
-    pushParticleSpellProgram('buildup', program);
-  }
-
-  /**
-   * Push idle program to TouchDesigner (for session end)
-   */
-  private pushIdleProgram(): void {
-    const program = createIdleProgram();
-    pushParticleSpellProgram('idle', program);
-  }
-
-  /**
-   * Trigger the spell cast effect
-   * Called when magic word + casting gesture are detected
+   * Trigger the spell cast effect. Called when magic word + casting
+   * gesture are detected. Sends a `spell_cast` message to TD with a
+   * default envelope; TD switches to release mode and animates the
+   * release through the cast_state machinery. Visuals come from
+   * whatever GLSL Gemini wrote into the zones via set_zone_shader.
    */
   triggerCast(): void {
     if (!this.state.castReady || this.state.castCompleted) {
@@ -812,16 +449,14 @@ export class MerlinSession {
       return;
     }
 
-    const releaseProgram = createReleaseProgram(this.state.spell);
-    const envelope = releaseProgram.castEnvelope!;
+    const envelope = DEFAULT_CAST_ENVELOPE;
     const durationMs = getCastDuration(envelope);
 
     pushSpellCast(
       this.state.spell.castingOrigin!,
       1.0,
       durationMs,
-      envelope,
-      releaseProgram
+      envelope
     );
 
     this.markCastCompleted();

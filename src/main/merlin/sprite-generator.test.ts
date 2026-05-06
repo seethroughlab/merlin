@@ -269,29 +269,32 @@ describe('sprite-generator', () => {
       expect(result.message).toContain('too small');
     });
 
-    it('should reject non-PNG data', () => {
-      // JPEG signature starts with FF D8 FF
+    it('should accept JPEG (Gemini-3.x default)', () => {
       const jpegData = Buffer.concat([
         Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
         Buffer.alloc(200),
       ]);
-
       const result = validateSpriteImage(jpegData);
-
-      expect(result.isValid).toBe(false);
-      expect(result.message).toContain('Not a valid PNG');
+      expect(result.isValid).toBe(true);
+      expect(result.message).toContain('JPEG');
     });
 
-    it('should reject random data without PNG signature', () => {
-      const randomData = Buffer.alloc(500);
-      for (let i = 0; i < 500; i++) {
-        randomData[i] = Math.floor(Math.random() * 256);
-      }
-
-      const result = validateSpriteImage(randomData);
-
+    it('should reject unrecognized formats (e.g. GIF)', () => {
+      const gifData = Buffer.concat([
+        Buffer.from('GIF89a'),
+        Buffer.alloc(200),
+      ]);
+      const result = validateSpriteImage(gifData);
       expect(result.isValid).toBe(false);
-      expect(result.message).toContain('Not a valid PNG');
+      expect(result.message).toMatch(/unrecognized/i);
+    });
+
+    it('should reject random data without a known signature', () => {
+      // Use deterministic non-magic-matching bytes to avoid flaking
+      const data = Buffer.alloc(500, 0x42);
+      const result = validateSpriteImage(data);
+      expect(result.isValid).toBe(false);
+      expect(result.message).toMatch(/unrecognized/i);
     });
 
     it('should return processedData when valid', () => {
@@ -322,7 +325,17 @@ describe('sprite-generator', () => {
       const result = validateFlipbookAtlas(validPng, 4, 4);
 
       expect(result.isValid).toBe(true);
-      expect(result.message).toContain('Valid PNG atlas');
+      expect(result.message).toContain('PNG atlas');
+    });
+
+    it('should accept JPEG atlas (Gemini-3.x default)', () => {
+      const jpegData = Buffer.concat([
+        Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+        Buffer.alloc(200),
+      ]);
+      const result = validateFlipbookAtlas(jpegData, 3, 3);
+      expect(result.isValid).toBe(true);
+      expect(result.message).toContain('JPEG');
     });
 
     it('should reject atlas that is too small', () => {
@@ -334,16 +347,14 @@ describe('sprite-generator', () => {
       expect(result.message).toContain('too small');
     });
 
-    it('should reject non-PNG atlas', () => {
+    it('should reject unrecognized formats (e.g. GIF)', () => {
       const gifData = Buffer.concat([
         Buffer.from('GIF89a'),
         Buffer.alloc(200),
       ]);
-
       const result = validateFlipbookAtlas(gifData, 3, 3);
-
       expect(result.isValid).toBe(false);
-      expect(result.message).toContain('Not a valid PNG');
+      expect(result.message).toMatch(/unrecognized/i);
     });
 
     it('should return processedData when valid', () => {

@@ -77,6 +77,8 @@ export interface MerlinToolCall {
     | 'request_visual_feedback'
     | 'generate_sprite';
   args: Record<string, unknown>;
+  /** Gemini-assigned id for this call. Used to pair the function response back to the call (genai SDK populates this when present). */
+  id?: string;
 }
 
 /**
@@ -96,8 +98,6 @@ export interface SetSpellProfileParams {
   tone?: string;
   energy?: number;
   castingOrigin?: string;
-  visualArchetype?: string;
-  palette?: string;
 }
 
 /**
@@ -144,67 +144,14 @@ export interface ConversationMessage {
   faceSnapshot?: Partial<MicroExpressionAnalysis>;
 }
 
-// ============ PARTICLE SPELL PROGRAM TYPES ============
+// ============ CAST ENVELOPE ============
 
 /**
- * Visual mode for the particle system
- */
-export type SpellVisualMode = 'idle' | 'buildup' | 'release';
-
-/**
- * Supported particle spell archetypes
- */
-export type ParticleSpellArchetype =
-  | 'rising_embers'
-  | 'breathing_aura_mist'
-  | 'orbiting_stardust';
-
-/**
- * Shader zone names (matches TD template system)
- */
-export type ShaderZoneName = 'spawn' | 'force' | 'velmod' | 'size' | 'color';
-
-/**
- * Zone name mapping to legacy TD names
- */
-export const ZONE_NAME_TO_TD: Record<ShaderZoneName, string> = {
-  spawn: 'spawn_behavior',
-  force: 'force_field',
-  velmod: 'velocity_modifier',
-  size: 'size_over_life',
-  color: 'color_over_life',
-};
-
-/**
- * Zone-specific particle parameters
- */
-export interface ZoneParams {
-  // Spawn parameters
-  spawnRadius?: number;        // 0.1-0.5
-  spawnRate?: number;          // 0.5-3.0 multiplier
-
-  // Force parameters
-  forceStrength?: number;      // 0-1
-  forceDirection?: 'inward' | 'outward' | 'tangential' | 'upward';
-  orbitSpeed?: number;         // 0-2
-  turbulence?: number;         // 0-1
-
-  // Velocity parameters
-  velocityScale?: number;      // 0.5-3.0
-  damping?: number;            // 0-1
-
-  // Size parameters
-  baseSize?: number;           // 0.01-0.15
-  sizeVariation?: number;      // 0-1
-
-  // Color parameters
-  saturation?: number;         // 0-1
-  brightness?: number;         // 0-1
-  alphaFade?: number;          // 0-1
-}
-
-/**
- * Cast envelope timing (three-beat structure per PRD §8.3)
+ * Cast envelope timing (three-beat structure per PRD §8.3). Used by
+ * triggerCast() to drive TD's release-mode phase transitions. Other
+ * "particle spell program" types (archetypes, zone params, palettes
+ * encoded as state) have been pruned — visuals come entirely from
+ * Gemini's set_zone_shader calls.
  */
 export interface CastEnvelope {
   ignitionMs: number;    // sharp rise at casting origin (default: 400)
@@ -214,45 +161,16 @@ export interface CastEnvelope {
 }
 
 /**
- * Color palette for a spell
+ * Long-form zone names live alongside the templates (force_field,
+ * spawn_behavior, ...). This export is kept as a stable string union
+ * for any consumer that imports it; the previous short→long mapping
+ * was tied to the deleted ZoneParams structure and is no longer
+ * needed.
  */
-export interface SpellPalette {
-  primary: string;    // hex color
-  secondary: string;  // hex color
-  accent: string;     // hex color
-}
-
-/**
- * Complete particle spell program sent to TouchDesigner
- */
-export interface ParticleSpellProgram {
-  version: '1.0';
-  spellId: string;
-  timestamp: number;
-
-  // Spell identity
-  intent: import('../../shared/types').SpellIntent | null;
-  element: import('../../shared/types').SpellElement | null;
-  archetype: ParticleSpellArchetype;
-
-  // Visual mode
-  mode: SpellVisualMode;
-
-  // Energy envelope
-  energy: number;           // 0-1, clamped to 0.55 max in buildup
-  energyFloor: number;      // minimum energy (for idle drift)
-  energyCeiling: number;    // maximum energy for this mode
-
-  // Casting anchor
-  castingOrigin: import('../../shared/types').CastingOrigin | null;
-  castingLandmarks: number[]; // MediaPipe landmark indices for this origin
-
-  // Color palette
-  palette: SpellPalette;
-
-  // Zone parameters (per-zone overrides)
-  zones: Partial<Record<ShaderZoneName, ZoneParams>>;
-
-  // Cast-specific (only populated in release mode)
-  castEnvelope?: CastEnvelope;
-}
+export const ZONE_NAME_TO_TD: Record<string, string> = {
+  force_field: 'force_field',
+  spawn_behavior: 'spawn_behavior',
+  velocity_modifier: 'velocity_modifier',
+  size_over_life: 'size_over_life',
+  color_over_life: 'color_over_life',
+};

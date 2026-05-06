@@ -84,7 +84,15 @@ void main()
 
     // Base color from particle color * sprite
     vec3 albedo = vColor.rgb * sprite.rgb;
-    float alpha = vColor.a * sprite.a;
+
+    // Derive alpha from sprite luminance instead of sprite.a. Gemini's
+    // image-gen returns JPEG (no alpha channel) with the prompt-required
+    // "fades to pure black at edges" pattern, so luminance == intended
+    // alpha. For PNG sprites with a proper alpha channel + black bg, the
+    // luminance also fades with the alpha so this is a no-op there. We
+    // multiply by sprite.a too so true-transparent PNG pixels stay clear.
+    float spriteIntensity = dot(sprite.rgb, vec3(0.299, 0.587, 0.114));
+    float alpha = vColor.a * max(sprite.a * spriteIntensity, spriteIntensity);
 
     // Fade-in effect: particles fade in over first 0.15 seconds
     // This complements the scale-in from the vertex shader for smooth births

@@ -4,11 +4,13 @@
  * Pushes a known-good clean state to TouchDesigner: empty zone code so
  * each shader template runs its default behavior, an explicit pass-
  * through for post_fx (the template's vignette would otherwise still
- * apply), the default sprite, a 1x1 single-frame flipbook config, and
- * the idle particle program.
+ * apply), the default sprite, and a 1x1 single-frame flipbook config.
  *
  * Mesh-mode rendering and its render_mode reset step have been pruned;
- * see docs/mesh-mode-pipeline.md if we ever bring it back.
+ * see docs/mesh-mode-pipeline.md if we ever bring it back. Archetype /
+ * spell-program pushes have also been pruned — visuals come entirely
+ * from Gemini's set_zone_shader calls during a session, and "baseline"
+ * means "no zone code, just template defaults."
  *
  * Used by the sidebar "Reset to Baseline" button.
  */
@@ -17,9 +19,7 @@ import {
   pushZoneUpdateWithValidation,
   pushFlipbookConfig,
   pushResetSprite,
-  pushParticleSpellProgram,
 } from '../td-bridge';
-import { createIdleProgram } from './particle-program';
 import { getMarkerBearingZones } from './test-shader';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
@@ -36,8 +36,13 @@ const POSTFX_PASSTHROUGH = '// reset baseline: bypass any earlier modifications\
 /**
  * Baseline flipbook config pushed during reset: a 1x1 single-frame
  * "atlas" so the billboard shader's flipbook math becomes a no-op.
+ *
+ * Exported because the single-sprite push paths (turn-runner.ts and
+ * test-sprite.ts) reuse this to clear any prior multi-frame flipbook
+ * state when a non-flipbook sprite arrives — otherwise TD keeps
+ * slicing the new texture by the previous spell's atlas grid.
  */
-const BASELINE_FLIPBOOK: FlipbookConfig = {
+export const BASELINE_FLIPBOOK: FlipbookConfig = {
   atlasCols: 1,
   atlasRows: 1,
   frameCount: 1,
@@ -97,10 +102,6 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   const fbOK = pushFlipbookConfig(BASELINE_FLIPBOOK);
   if (fbOK) recordFlipbookConfigPush(BASELINE_FLIPBOOK);
   record('flipbook', fbOK ? 'ok' : 'error', { error: fbOK ? undefined : 'TD not connected' });
-
-  // 4. Idle particle program (low energy, generic motion).
-  const idleOK = pushParticleSpellProgram('idle', createIdleProgram());
-  record('idle_program', idleOK ? 'ok' : 'error', { error: idleOK ? undefined : 'TD not connected' });
 
   const errors = steps.filter(s => s.status === 'error').length;
   const skipped = steps.filter(s => s.status === 'skipped').length;

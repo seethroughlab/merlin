@@ -307,6 +307,18 @@ export interface ShaderTestPreset {
 }
 
 /**
+ * A named natural-language scenario that pre-fills the Live Spell tab's
+ * prompt textarea. Selecting one drops a known-interesting spell
+ * description into the input so the developer can iterate without
+ * retyping.
+ */
+export interface LiveSpellTestPreset {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
+/**
  * Individual zone shader result
  */
 export interface ZoneShaderResult {
@@ -430,36 +442,28 @@ export interface FlipbookTestResult {
   error?: string;
 }
 
-// ============ TEST SPELL PROGRAM TYPES ============
-
-export type SpellProgramMode = 'buildup' | 'release';
+// ============ LIVE SPELL TEST (highest-scope) ============
 
 /**
- * Input for the Spell Program test tab. The user picks a mode and a
- * free-text prompt; intent/element/origin are optional steering hints.
- * Gemini fills in the visual parameters via the set_spell_program tool.
+ * Input for the Live Spell test tab. The user free-text-describes a
+ * spell and Gemini drives the entire creative process — same system
+ * prompt, same tool registry, same dispatch as live Merlin during
+ * discovery/formation. Exercises set_spell_profile, set_zone_shader,
+ * generate_sprite, request_visual_feedback in whatever order Gemini
+ * picks.
  */
-export interface SpellProgramTestInput {
+export interface LiveSpellTestInput {
   prompt: string;
-  mode: SpellProgramMode;
-  intent?: SpellIntent | null;
-  element?: SpellElement | null;
-  castingOrigin?: CastingOrigin | null;
 }
 
-/**
- * Result of a spell-program test push. `pushed` is false when TD is
- * disconnected. `geminiArgs` carries the raw structured args Gemini
- * returned (for UI inspection); `program` is the merged final payload
- * that was actually pushed.
- */
-export interface SpellProgramTestResult {
+export interface LiveSpellTestResult {
   success: boolean;
-  pushed: boolean;
-  /** Final ParticleSpellProgram pushed to TD (typed loosely here so shared/ doesn't depend on main/merlin/types). */
-  program?: Record<string, unknown>;
-  /** Raw structured args Gemini chose. */
-  geminiArgs?: Record<string, unknown>;
+  /** Number of tool calls Gemini executed across the turn(s). */
+  toolCallCount: number;
+  /** Final accumulated spell state at end of turn. Loosely typed here so shared/ doesn't depend on main/merlin/types. */
+  finalSpell?: Record<string, unknown>;
+  /** Gemini's free-text response (may be empty if it only called tools). */
+  finalText?: string;
   error?: string;
 }
 
@@ -474,7 +478,7 @@ export type GeminiTurnSource =
   | 'live'
   | 'test_shader'
   | 'test_sprite'
-  | 'test_spell_program';
+  | 'test_live_spell';
 
 /**
  * One Gemini tool call as it appears in the sidebar — name + args, plus
@@ -520,6 +524,19 @@ export interface GeminiRetryMarker {
  *   4. Optional retry markers + further response events
  *   5. Final event with `final: true` (turn closes)
  */
+/**
+ * A screenshot Gemini received as visual feedback. Surfaced to the
+ * sidebar so the operator can see exactly what the model saw.
+ */
+export interface GeminiScreenshot {
+  /** PNG base64. */
+  base64: string;
+  width: number;
+  height: number;
+  /** The `intent` Gemini passed to request_visual_feedback. */
+  caption?: string;
+}
+
 export interface GeminiTurn {
   /** Stable id for the whole turn — same across all partial emissions. */
   id: string;
@@ -533,6 +550,8 @@ export interface GeminiTurn {
   toolCalls?: GeminiToolCall[];
   pushResults?: GeminiPushResult[];
   retry?: GeminiRetryMarker;
+  /** Screenshot delivered to Gemini via request_visual_feedback. */
+  screenshot?: GeminiScreenshot;
   /** True on the final emission; lets the renderer mark the card done. */
   final?: boolean;
 }

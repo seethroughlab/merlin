@@ -6,29 +6,18 @@ const {
   mockPushZoneUpdateWithValidation,
   mockPushFlipbookConfig,
   mockPushResetSprite,
-  mockPushParticleSpellProgram,
 } = vi.hoisted(() => ({
   mockPushZoneUpdateWithValidation: vi.fn<(zone: string, code: string) => Promise<{ success: boolean; error?: string }>>(() =>
     Promise.resolve({ success: true })
   ),
   mockPushFlipbookConfig: vi.fn(() => true),
   mockPushResetSprite: vi.fn(() => true),
-  mockPushParticleSpellProgram: vi.fn(() => true),
 }));
 
 vi.mock('../td-bridge', () => ({
   pushZoneUpdateWithValidation: mockPushZoneUpdateWithValidation,
   pushFlipbookConfig: mockPushFlipbookConfig,
   pushResetSprite: mockPushResetSprite,
-  pushParticleSpellProgram: mockPushParticleSpellProgram,
-}));
-
-const { mockCreateIdleProgram } = vi.hoisted(() => ({
-  mockCreateIdleProgram: vi.fn(() => ({ archetype: 'breathing_aura_mist', mode: 'idle', energy: 0.1 })),
-}));
-
-vi.mock('./particle-program', () => ({
-  createIdleProgram: mockCreateIdleProgram,
 }));
 
 const ALL_ZONES = [
@@ -59,16 +48,15 @@ beforeEach(() => {
   mockPushZoneUpdateWithValidation.mockResolvedValue({ success: true });
   mockPushFlipbookConfig.mockReturnValue(true);
   mockPushResetSprite.mockReturnValue(true);
-  mockPushParticleSpellProgram.mockReturnValue(true);
 });
 
 describe('resetTDBaseline', () => {
-  it('happy path: pushes 8 zones, sprite, flipbook, idle program', async () => {
+  it('happy path: pushes 8 zones, sprite, flipbook', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    expect(result.steps).toHaveLength(11); // 8 zones + sprite + flipbook + idle
+    expect(result.steps).toHaveLength(10); // 8 zones + sprite + flipbook
     expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
     // Each marker-bearing zone got a push
@@ -82,12 +70,9 @@ describe('resetTDBaseline', () => {
       atlasCols: 1, atlasRows: 1, frameCount: 1,
       playbackMode: 'loop', frameDuration: 0.1, driveSource: 'age',
     });
-    expect(mockPushParticleSpellProgram).toHaveBeenCalledWith('idle', expect.any(Object));
   });
 
   it('classifies "zone not found" as skipped, not failure', async () => {
-    // A zone returns the not-found error; success should still be true
-    // because skips don't count as failures.
     mockPushZoneUpdateWithValidation.mockImplementation(async (zone) => {
       if (zone === 'post_fx') {
         return { success: false, error: 'zone not found: post_fx' };
@@ -102,7 +87,6 @@ describe('resetTDBaseline', () => {
     const step = result.steps.find(s => s.label === 'zone:post_fx');
     expect(step?.status).toBe('skipped');
     expect(step?.note).toMatch(/not found/i);
-    // No errors recorded
     expect(result.steps.filter(s => s.status === 'error')).toHaveLength(0);
   });
 
@@ -116,9 +100,6 @@ describe('resetTDBaseline', () => {
     expect(postFxCall).toBeDefined();
     expect(postFxCall![1]).toContain('texture(sTD2DInputs[0]');
     expect(forceFieldCall).toBeDefined();
-    // The validator rejects literally empty strings, so the reset uses
-    // a comment as the no-op. Templates inject it at {zone_code} where
-    // it has no effect, leaving the template's defaults in place.
     expect(forceFieldCall![1]).toMatch(/^\/\/\s/);
     expect(forceFieldCall![1].trim().length).toBeGreaterThan(0);
   });
@@ -146,7 +127,6 @@ describe('resetTDBaseline', () => {
   });
 
   it('partial failure: continues attempting remaining steps', async () => {
-    // Sprite reset fails but everything else works
     mockPushResetSprite.mockReturnValue(false);
 
     const { resetTDBaseline } = await import('./reset-td');
@@ -154,13 +134,11 @@ describe('resetTDBaseline', () => {
 
     expect(result.success).toBe(false);
     expect(result.steps.find(s => s.label === 'sprite')?.status).toBe('error');
-    // flipbook / idle still attempted
+    // flipbook still attempted after the sprite step fails
     expect(mockPushFlipbookConfig).toHaveBeenCalled();
-    expect(mockPushParticleSpellProgram).toHaveBeenCalled();
   });
 
   it('zone push failure is recorded but does not stop the loop', async () => {
-    // First zone fails; subsequent zones still attempted
     mockPushZoneUpdateWithValidation
       .mockResolvedValueOnce({ success: false, error: 'compile error' })
       .mockResolvedValue({ success: true });

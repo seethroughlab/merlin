@@ -9,10 +9,10 @@
  */
 
 import {
+  Type,
   FunctionDeclaration,
-  SchemaType,
   Part,
-} from '@google/generative-ai';
+} from '@google/genai';
 import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { loadTemplate, ZONE_TEMPLATE_FILES } from './shader-templates';
 import { ZONE_CONTRACTS } from './zone-registry';
@@ -195,19 +195,19 @@ function buildToolDefinition(zones: string[]): FunctionDeclaration {
     name: 'set_zone_shader',
     description: 'Set custom GLSL code for a particle zone',
     parameters: {
-      type: 'object' as SchemaType,
+      type: Type.OBJECT,
       properties: {
         zone: {
-          type: 'string' as SchemaType,
+          type: Type.STRING,
           enum: zones,
           description: 'Which shader zone to customize',
         },
         glsl_code: {
-          type: 'string' as SchemaType,
+          type: Type.STRING,
           description: 'GLSL snippet replacing the {zone_code} placeholder. Use the variables and uniforms listed for this zone in the system prompt.',
         },
         description: {
-          type: 'string' as SchemaType,
+          type: Type.STRING,
           description: 'Brief description of the visual effect',
         },
       },

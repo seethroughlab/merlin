@@ -21,6 +21,7 @@ import { getSpriteGenerator } from './sprite-generator';
 import { getFlipbookConfig } from './asset-manager';
 import { pushSpriteTexture, pushFlipbookConfig } from '../td-bridge';
 import { recordFlipbookConfigPush } from './td-state-mirror';
+import { BASELINE_FLIPBOOK } from './reset-td';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
 import { startSingleToolChat } from './gemini-chat-helper';
 import type {
@@ -160,12 +161,17 @@ export async function generateSpriteDirect(
 
   const asset = result.asset;
   const texturePushed = pushSpriteTexture(asset.assetId, asset.texturePath);
+  // Reset flipbook to 1×1 single-frame so a prior multi-frame atlas
+  // doesn't keep slicing this single sprite. See note in reset-td.ts.
+  const flipbookPushed = pushFlipbookConfig(BASELINE_FLIPBOOK);
+  if (flipbookPushed) recordFlipbookConfigPush(BASELINE_FLIPBOOK);
 
   emitGeminiTurn({
     id: turnId,
     source: 'test_sprite',
     pushResults: [
       { label: `sprite_texture (${asset.assetId})`, success: texturePushed, error: texturePushed ? undefined : 'TD not connected' },
+      { label: 'flipbook_config (reset 1×1)', success: flipbookPushed, error: flipbookPushed ? undefined : 'TD not connected' },
     ],
     final: emitOwnTurn,
   });
@@ -176,7 +182,7 @@ export async function generateSpriteDirect(
     assetType: 'single',
     texturePath: asset.texturePath,
     previewPng: readPngAsBase64(asset.texturePath),
-    pushed: { texture: texturePushed, flipbook: false },
+    pushed: { texture: texturePushed, flipbook: flipbookPushed },
   };
 }
 

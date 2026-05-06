@@ -21,12 +21,12 @@ void main() {
     float age = TDIn_PartAge();
 
     if (age < uDeltaTime * 1.5) {
-        // Particle just born. Leave `pos` alone — particle1 already
-        // chose a random input point from the pointgenerator's spawn
-        // pool (verified per-particle distinct via rndinputpts=True).
-        // Only initialise velocity, with an outward radial component
-        // plus a small id-keyed perturbation so neighbouring particles
-        // diverge instead of stacking.
+        // Particle just born. `pos` is already a random point in a
+        // 0.2-radius sphere centered on the participant's chest (the
+        // pointgenerator's translate is bound to uChestPos). Default
+        // behavior: leave `pos` alone, give it a small outward velocity.
+        // Snippets that emit from a non-chest body part should set
+        // `pos = uEyeLPos + r * 0.05;` etc.
         vec3 r = hash31(id);
         vec3 outward = normalize(pos + vec3(1e-5)) * (0.05 + r.x * 0.05);
         vec3 jitter = (r - 0.5) * 0.05;

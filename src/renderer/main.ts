@@ -71,9 +71,8 @@ import type {
   FlipbookTestResult,
   MirroredTDState,
   ShaderTestPreset,
-  SpellProgramTestInput,
-  SpellProgramTestResult,
-  SpellProgramMode,
+  LiveSpellTestInput,
+  LiveSpellTestResult,
   GeminiTurn,
   GeminiToolCall,
   GeminiPushResult,
@@ -81,6 +80,7 @@ import type {
   GeminiTurnSource,
 } from '../shared/types';
 import { SHADER_TEST_PRESETS } from '../shared/test-shader-presets';
+import { LIVE_SPELL_PRESETS } from '../shared/live-spell-presets';
 
 // DOM Elements
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -1388,7 +1388,7 @@ function createTestShaderPanel(): HTMLElement {
         <button class="test-shader-tab active" data-tab="shaders">Shaders</button>
         <button class="test-shader-tab" data-tab="sprites">Sprites</button>
         <button class="test-shader-tab" data-tab="flipbook">Flipbook</button>
-        <button class="test-shader-tab" data-tab="spell-program">Spell Program</button>
+        <button class="test-shader-tab" data-tab="live-spell">Live Spell</button>
       </div>
       <button class="close-btn">×</button>
     </div>
@@ -1506,34 +1506,24 @@ function createTestShaderPanel(): HTMLElement {
       </div>
     </div>
 
-    <div class="test-shader-tab-content" data-tab="spell-program" style="display: none;">
-      <div class="spell-program-mode-toggle">
-        <label><input type="radio" name="spell-program-mode" value="buildup" checked> Buildup</label>
-        <label><input type="radio" name="spell-program-mode" value="release"> Release</label>
-      </div>
-
+    <div class="test-shader-tab-content" data-tab="live-spell" style="display: none;">
       <div class="test-shader-config spell-program-form">
         <div class="config-row">
-          <label>Prompt:</label>
-          <textarea id="sp-prompt" rows="3" placeholder="a slow-pulsing protective shield that explodes outward at release"></textarea>
+          <label>Preset:</label>
+          <select id="ls-preset">
+            <option value="">Custom (type your own)</option>
+            ${LIVE_SPELL_PRESETS.map(p => `<option value="${p.id}">${p.label}</option>`).join('')}
+          </select>
         </div>
         <div class="config-row">
-          <label>Intent:</label>
-          <select id="sp-intent"><option value="">(let Gemini decide)</option>${intentOptions}</select>
+          <label>Describe a spell:</label>
+          <textarea id="ls-prompt" rows="3" placeholder="a slow-pulsing protective shield that explodes outward at release"></textarea>
         </div>
-        <div class="config-row">
-          <label>Element:</label>
-          <select id="sp-element"><option value="">(let Gemini decide)</option>${elementOptions}</select>
-        </div>
-        <div class="config-row">
-          <label>Origin:</label>
-          <select id="sp-origin"><option value="">(default)</option>${castingOriginOptions}</select>
-        </div>
-        <button id="sp-generate-btn" class="generate-btn">Interpret &amp; Push</button>
+        <button id="ls-run-btn" class="generate-btn">Run Full Creative Process</button>
       </div>
 
-      <div id="sp-status" class="test-shader-status"></div>
-      <div id="sp-results" class="test-shader-results"></div>
+      <div id="ls-status" class="test-shader-status"></div>
+      <div id="ls-results" class="test-shader-results"></div>
     </div>
   `;
 
@@ -1578,9 +1568,16 @@ function createTestShaderPanel(): HTMLElement {
   const applyFlipbookBtn = panel.querySelector('#rm-apply-flipbook-btn') as HTMLButtonElement;
   applyFlipbookBtn.addEventListener('click', runApplyFlipbookConfig);
 
-  // === Spell Program tab event listeners ===
-  const spGenerateBtn = panel.querySelector('#sp-generate-btn') as HTMLButtonElement;
-  spGenerateBtn.addEventListener('click', runSpellProgramGenerate);
+  // === Live Spell tab event listeners ===
+  const lsRunBtn = panel.querySelector('#ls-run-btn') as HTMLButtonElement;
+  lsRunBtn.addEventListener('click', runLiveSpell);
+
+  const lsPresetSelect = panel.querySelector('#ls-preset') as HTMLSelectElement;
+  const lsPromptEl = panel.querySelector('#ls-prompt') as HTMLTextAreaElement;
+  lsPresetSelect.addEventListener('change', () => {
+    const preset = LIVE_SPELL_PRESETS.find(p => p.id === lsPresetSelect.value);
+    if (preset) lsPromptEl.value = preset.prompt;
+  });
 
   // === Tab switching ===
   panel.querySelectorAll('.test-shader-tab').forEach(tabBtn => {
@@ -1948,95 +1945,53 @@ async function runApplyFlipbookConfig(): Promise<void> {
   }
 }
 
-// ============ SPELL PROGRAM TAB ============
+// ============ LIVE SPELL TAB ============
 
-async function runSpellProgramGenerate(): Promise<void> {
-  const btn = document.getElementById('sp-generate-btn') as HTMLButtonElement;
-  const statusDiv = document.getElementById('sp-status') as HTMLDivElement;
-  const resultsDiv = document.getElementById('sp-results') as HTMLDivElement;
-  const promptEl = document.getElementById('sp-prompt') as HTMLTextAreaElement;
-  const intentEl = document.getElementById('sp-intent') as HTMLSelectElement;
-  const elementEl = document.getElementById('sp-element') as HTMLSelectElement;
-  const originEl = document.getElementById('sp-origin') as HTMLSelectElement;
-
-  const modeRadio = document.querySelector<HTMLInputElement>(
-    'input[name="spell-program-mode"]:checked'
-  );
-  const mode = (modeRadio?.value ?? 'buildup') as SpellProgramMode;
+async function runLiveSpell(): Promise<void> {
+  const btn = document.getElementById('ls-run-btn') as HTMLButtonElement;
+  const statusDiv = document.getElementById('ls-status') as HTMLDivElement;
+  const resultsDiv = document.getElementById('ls-results') as HTMLDivElement;
+  const promptEl = document.getElementById('ls-prompt') as HTMLTextAreaElement;
 
   const prompt = promptEl.value.trim();
   if (!prompt) {
-    statusDiv.textContent = 'Prompt is required';
+    statusDiv.textContent = 'Describe a spell first';
     statusDiv.className = 'test-shader-status error';
     return;
   }
 
-  const input: SpellProgramTestInput = {
-    mode,
-    prompt,
-    intent: intentEl.value ? (intentEl.value as SpellProgramTestInput['intent']) : null,
-    element: elementEl.value ? (elementEl.value as SpellProgramTestInput['element']) : null,
-    castingOrigin: originEl.value ? (originEl.value as SpellProgramTestInput['castingOrigin']) : null,
-  };
+  const input: LiveSpellTestInput = { prompt };
 
   btn.disabled = true;
-  btn.textContent = 'Interpreting...';
-  statusDiv.textContent = `Asking Gemini to interpret a ${mode} program...`;
+  btn.textContent = 'Running…';
+  statusDiv.textContent = 'Gemini is creating the spell — watch the sidebar for tool calls';
   statusDiv.className = 'test-shader-status loading';
   resultsDiv.innerHTML = '';
 
   try {
-    const result: SpellProgramTestResult = await window.electronAPI.merlinTestSpellProgram(input);
-    renderSpellProgramResult(result, statusDiv, resultsDiv);
+    const result: LiveSpellTestResult = await window.electronAPI.merlinTestLiveSpell(input);
+    if (result.success) {
+      statusDiv.textContent = `Done — ${result.toolCallCount} tool call(s) executed`;
+      statusDiv.className = 'test-shader-status success';
+      const parts: string[] = [];
+      if (result.finalText) {
+        parts.push(`<div class="gemini-args"><div class="gemini-args-title">Gemini said:</div><pre>${escapeHtml(result.finalText)}</pre></div>`);
+      }
+      if (result.finalSpell) {
+        parts.push(`<div class="gemini-args"><div class="gemini-args-title">Final spell state:</div><pre>${escapeHtml(JSON.stringify(result.finalSpell, null, 2))}</pre></div>`);
+      }
+      resultsDiv.innerHTML = parts.join('');
+    } else {
+      statusDiv.textContent = result.error || 'Run failed';
+      statusDiv.className = 'test-shader-status error';
+    }
   } catch (error) {
     statusDiv.textContent = `Error: ${error}`;
     statusDiv.className = 'test-shader-status error';
   }
 
   btn.disabled = false;
-  btn.textContent = 'Interpret & Push';
-}
-
-function renderSpellProgramResult(
-  result: SpellProgramTestResult,
-  statusDiv: HTMLDivElement,
-  resultsDiv: HTMLDivElement
-): void {
-  if (!result.success) {
-    statusDiv.textContent = result.error || 'Generation failed';
-    statusDiv.className = 'test-shader-status error';
-    return;
-  }
-
-  if (result.pushed) {
-    statusDiv.textContent = 'Spell program pushed to TD';
-    statusDiv.className = 'test-shader-status success';
-  } else {
-    statusDiv.textContent = 'Generated, but TD not connected — program not pushed';
-    statusDiv.className = 'test-shader-status error';
-  }
-
-  const parts: string[] = [];
-
-  if (result.geminiArgs) {
-    parts.push(`
-      <div class="gemini-args">
-        <div class="gemini-args-title">Gemini chose:</div>
-        <pre>${escapeHtml(JSON.stringify(result.geminiArgs, null, 2))}</pre>
-      </div>
-    `);
-  }
-
-  if (result.program) {
-    parts.push(`
-      <div class="gemini-args">
-        <div class="gemini-args-title">Final program (pushed):</div>
-        <pre>${escapeHtml(JSON.stringify(result.program, null, 2))}</pre>
-      </div>
-    `);
-  }
-
-  resultsDiv.innerHTML = parts.join('');
+  btn.textContent = 'Run Full Creative Process';
 }
 
 /**
@@ -2249,7 +2204,7 @@ const SOURCE_LABELS: Record<GeminiTurnSource, string> = {
   live: 'Live',
   test_shader: 'Shaders',
   test_sprite: 'Sprites',
-  test_spell_program: 'Spell Program',
+  test_live_spell: 'Live Spell',
 };
 
 function ensureTurnCard(turn: Partial<GeminiTurn> & { id: string; source: GeminiTurnSource }): HTMLElement | null {
@@ -2341,6 +2296,29 @@ function appendGeminiTurn(turn: Partial<GeminiTurn> & { id: string; source: Gemi
       resultsDiv.appendChild(renderPushResult(pr));
     }
     body.appendChild(resultsDiv);
+  }
+
+  // Screenshot — what Gemini saw via request_visual_feedback.
+  if (turn.screenshot) {
+    const shotDiv = document.createElement('div');
+    shotDiv.className = 'gemini-screenshot';
+    const role = document.createElement('div');
+    role.className = 'gemini-role';
+    role.textContent = 'Screenshot';
+    shotDiv.appendChild(role);
+    if (turn.screenshot.caption) {
+      const cap = document.createElement('div');
+      cap.className = 'gemini-screenshot-caption';
+      cap.textContent = turn.screenshot.caption;
+      shotDiv.appendChild(cap);
+    }
+    const img = document.createElement('img');
+    img.className = 'gemini-screenshot-img';
+    img.src = `data:image/png;base64,${turn.screenshot.base64}`;
+    img.width = turn.screenshot.width;
+    img.height = turn.screenshot.height;
+    shotDiv.appendChild(img);
+    body.appendChild(shotDiv);
   }
 
   // Retry marker — visual divider before the next response.
