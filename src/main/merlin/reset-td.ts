@@ -23,7 +23,7 @@ import {
   recordRenderModePush,
   recordFlipbookConfigPush,
 } from './td-state-mirror';
-import type { ResetTDResult, ResetTDStep, FlipbookConfig } from '../../shared/types';
+import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
@@ -47,12 +47,29 @@ const BASELINE_FLIPBOOK: FlipbookConfig = {
   driveSource: 'age',
 };
 
+/**
+ * "TD doesn't have nodes for this zone" surfaces as an error string
+ * containing one of these phrases. We treat those as skips, not
+ * failures — the project just doesn't wire that zone up.
+ */
+const NOT_FOUND_PATTERNS = ['not found', 'unknown'];
+
+function classifyPushError(error: string | undefined): { status: ResetTDStatus; note?: string; error?: string } {
+  if (!error) return { status: 'ok' };
+  const lower = error.toLowerCase();
+  if (NOT_FOUND_PATTERNS.some(p => lower.includes(p))) {
+    return { status: 'skipped', note: error };
+  }
+  return { status: 'error', error };
+}
+
 export async function resetTDBaseline(): Promise<ResetTDResult> {
   console.log(`[ResetTD ${ts()}] Starting baseline reset`);
   const steps: ResetTDStep[] = [];
-  const record = (label: string, ok: boolean, error?: string) => {
-    steps.push({ label, ok, error });
-    console.log(`[ResetTD ${ts()}]   ${label}: ${ok ? 'OK' : `FAIL${error ? ` - ${error}` : ''}`}`);
+  const record = (label: string, status: ResetTDStatus, opts: { error?: string; note?: string } = {}) => {
+    steps.push({ label, status, ...opts });
+    const tag = status === 'ok' ? 'OK' : status === 'skipped' ? `SKIPPED${opts.note ? ` - ${opts.note}` : ''}` : `FAIL${opts.error ? ` - ${opts.error}` : ''}`;
+    console.log(`[ResetTD ${ts()}]   ${label}: ${tag}`);
   };
 
   // 1. Reset all marker-bearing zones. The validator rejects literally
@@ -65,27 +82,35 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   for (const zone of getMarkerBearingZones()) {
     const code = zone === 'post_fx' ? POSTFX_PASSTHROUGH : NOOP;
     const r = await pushZoneUpdateWithValidation(zone, code);
-    record(`zone:${zone}`, r.success, r.error);
+    if (r.success) {
+      record(`zone:${zone}`, 'ok');
+    } else {
+      const { status, note, error } = classifyPushError(r.error);
+      record(`zone:${zone}`, status, { note, error });
+    }
   }
 
   // 2. Sprite reset (TD reverts to its default radial gradient).
-  record('sprite', pushResetSprite());
+  const spriteOK = pushResetSprite();
+  record('sprite', spriteOK ? 'ok' : 'error', { error: spriteOK ? undefined : 'TD not connected' });
 
   // 3. Render mode = mesh.
   const renderOK = pushRenderMode('mesh');
   if (renderOK) recordRenderModePush('mesh');
-  record('render_mode', renderOK, renderOK ? undefined : 'TD not connected');
+  record('render_mode', renderOK ? 'ok' : 'error', { error: renderOK ? undefined : 'TD not connected' });
 
   // 4. Flipbook 1x1 single frame.
   const fbOK = pushFlipbookConfig(BASELINE_FLIPBOOK);
   if (fbOK) recordFlipbookConfigPush(BASELINE_FLIPBOOK);
-  record('flipbook', fbOK, fbOK ? undefined : 'TD not connected');
+  record('flipbook', fbOK ? 'ok' : 'error', { error: fbOK ? undefined : 'TD not connected' });
 
   // 5. Idle particle program (low energy, generic motion).
   const idleOK = pushParticleSpellProgram('idle', createIdleProgram());
-  record('idle_program', idleOK, idleOK ? undefined : 'TD not connected');
+  record('idle_program', idleOK ? 'ok' : 'error', { error: idleOK ? undefined : 'TD not connected' });
 
-  const success = steps.every(s => s.ok);
-  console.log(`[ResetTD ${ts()}] Done: ${success ? 'all steps OK' : `${steps.filter(s => !s.ok).length} step(s) failed`}`);
+  const errors = steps.filter(s => s.status === 'error').length;
+  const skipped = steps.filter(s => s.status === 'skipped').length;
+  const success = errors === 0;
+  console.log(`[ResetTD ${ts()}] Done: ${success ? `all OK${skipped ? ` (${skipped} skipped)` : ''}` : `${errors} step(s) failed`}`);
   return { success, steps };
 }

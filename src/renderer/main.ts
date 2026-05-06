@@ -872,14 +872,19 @@ function setupTDResetButton(): void {
 
     try {
       const result = await window.electronAPI.merlinResetTDBaseline();
-      const failed = result.steps.filter(s => !s.ok);
+      const errors = result.steps.filter(s => s.status === 'error');
+      const skipped = result.steps.filter(s => s.status === 'skipped');
+      const ok = result.steps.filter(s => s.status === 'ok');
       if (result.success) {
-        statusEl.textContent = `✓ ${result.steps.length} step(s) reset`;
+        const skipNote = skipped.length > 0
+          ? ` (${skipped.length} skipped: ${skipped.map(s => s.label.replace(/^zone:/, '')).join(', ')})`
+          : '';
+        statusEl.textContent = `✓ ${ok.length}/${result.steps.length} reset${skipNote}`;
         statusEl.className = 'td-reset-status success';
       } else {
-        const summary = failed.map(s => `${s.label}: ${s.error ?? 'failed'}`).join('; ');
-        statusEl.textContent = `✗ ${failed.length}/${result.steps.length} failed — ${summary}`;
-        statusEl.className = failed.length === result.steps.length ? 'td-reset-status error' : 'td-reset-status partial';
+        const summary = errors.map(s => `${s.label}: ${s.error ?? 'failed'}`).join('; ');
+        statusEl.textContent = `✗ ${errors.length}/${result.steps.length} failed — ${summary}`;
+        statusEl.className = errors.length === result.steps.length ? 'td-reset-status error' : 'td-reset-status partial';
       }
     } catch (error) {
       statusEl.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`;

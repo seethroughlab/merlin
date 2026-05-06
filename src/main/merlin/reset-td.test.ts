@@ -76,7 +76,7 @@ describe('resetTDBaseline', () => {
 
     expect(result.success).toBe(true);
     expect(result.steps).toHaveLength(13); // 9 zones + sprite + render + flipbook + idle
-    expect(result.steps.every(s => s.ok)).toBe(true);
+    expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
     // Each marker-bearing zone got a push
     expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
@@ -91,6 +91,27 @@ describe('resetTDBaseline', () => {
       playbackMode: 'loop', frameDuration: 0.1, driveSource: 'age',
     });
     expect(mockPushParticleSpellProgram).toHaveBeenCalledWith('idle', expect.any(Object));
+  });
+
+  it('classifies "MAT zone not found" as skipped, not failure', async () => {
+    // material_pixel zone returns the not-found error; success should
+    // still be true because skips don't count as failures.
+    mockPushZoneUpdateWithValidation.mockImplementation(async (zone) => {
+      if (zone === 'material_pixel') {
+        return { success: false, error: 'MAT zone not found: material_pixel' };
+      }
+      return { success: true };
+    });
+
+    const { resetTDBaseline } = await import('./reset-td');
+    const result = await resetTDBaseline();
+
+    expect(result.success).toBe(true);
+    const matStep = result.steps.find(s => s.label === 'zone:material_pixel');
+    expect(matStep?.status).toBe('skipped');
+    expect(matStep?.note).toMatch(/not found/i);
+    // No errors recorded
+    expect(result.steps.filter(s => s.status === 'error')).toHaveLength(0);
   });
 
   it('post_fx gets the explicit pass-through, others get a no-op comment', async () => {
@@ -131,7 +152,7 @@ describe('resetTDBaseline', () => {
     expect(mockRecordFlipbookConfigPush).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
     const renderStep = result.steps.find(s => s.label === 'render_mode');
-    expect(renderStep?.ok).toBe(false);
+    expect(renderStep?.status).toBe('error');
     expect(renderStep?.error).toMatch(/not connected/i);
   });
 
@@ -143,7 +164,7 @@ describe('resetTDBaseline', () => {
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(false);
-    expect(result.steps.find(s => s.label === 'sprite')?.ok).toBe(false);
+    expect(result.steps.find(s => s.label === 'sprite')?.status).toBe('error');
     // render / flipbook / idle still attempted
     expect(mockPushRenderMode).toHaveBeenCalled();
     expect(mockPushFlipbookConfig).toHaveBeenCalled();
@@ -161,7 +182,7 @@ describe('resetTDBaseline', () => {
 
     expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
     const failedStep = result.steps.find(s => s.label === 'zone:force_field');
-    expect(failedStep?.ok).toBe(false);
+    expect(failedStep?.status).toBe('error');
     expect(failedStep?.error).toBe('compile error');
     expect(result.success).toBe(false);
   });

@@ -539,18 +539,31 @@ export interface GeminiTurn {
 // ============ RESET TD ============
 
 /**
+ * Status of one Reset to Baseline step.
+ *  - 'ok'      : step pushed cleanly
+ *  - 'skipped' : TD reported the target zone/node doesn't exist in this
+ *                project (e.g. material_pixel without its glslMAT). Not
+ *                a real failure — the project just doesn't use it.
+ *  - 'error'   : actual push or compile failure
+ */
+export type ResetTDStatus = 'ok' | 'skipped' | 'error';
+
+/**
  * One step of a TD baseline reset (e.g. "zone:force_field", "sprite",
  * "render_mode", "flipbook", "idle_program").
  */
 export interface ResetTDStep {
   label: string;
-  ok: boolean;
+  status: ResetTDStatus;
+  /** Compile error or push failure detail. */
   error?: string;
+  /** Skip reason (e.g. "MAT zone not found"). */
+  note?: string;
 }
 
 /**
- * Result of a Reset to Baseline action. `success` is true only if every
- * step succeeded; the renderer can show per-step ✓/✗ from `steps`.
+ * Result of a Reset to Baseline action. `success` is true when no step
+ * has status 'error' — skips do not count as failure.
  */
 export interface ResetTDResult {
   success: boolean;

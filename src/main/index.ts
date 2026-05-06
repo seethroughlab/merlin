@@ -718,8 +718,9 @@ ipcMain.handle('merlin-reset-td-baseline', async () => {
   const startTime = Date.now();
   try {
     const result = await resetTDBaseline();
-    const failed = result.steps.filter(s => !s.ok).length;
-    console.log(`[Merlin ${ts()}] Reset complete in ${Date.now() - startTime}ms (${failed} failed)`);
+    const failed = result.steps.filter(s => s.status === 'error').length;
+    const skipped = result.steps.filter(s => s.status === 'skipped').length;
+    console.log(`[Merlin ${ts()}] Reset complete in ${Date.now() - startTime}ms (${failed} failed, ${skipped} skipped)`);
     return result;
   } catch (error) {
     console.error(`[Merlin ${ts()}] Reset failed:`, error);
