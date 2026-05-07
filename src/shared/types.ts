@@ -599,6 +599,17 @@ export interface ResetTDResult {
   steps: ResetTDStep[];
 }
 
+// ============ SESSION PERSISTENCE TYPES ============
+
+export interface SessionSummary {
+  sessionId: string;
+  timestamp: number;
+  spellIntent: string | null;
+  spellElement: string | null;
+  zoneCount: number;
+  name?: string;
+}
+
 // ============ TTS TYPES ============
 
 /**

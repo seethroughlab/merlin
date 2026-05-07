@@ -19,6 +19,8 @@ import type {
   LiveSpellTestResult,
   GeminiTurn,
   ResetTDResult,
+  SessionSummary,
+  SpellState,
 } from '@shared/types';
 
 // Expose protected methods to the renderer process
@@ -166,6 +168,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-reset-td-baseline');
   },
 
+  // ============ SESSION PERSISTENCE ============
+
+  merlinListSessions: (): Promise<SessionSummary[]> => {
+    return ipcRenderer.invoke('merlin-list-sessions');
+  },
+  merlinSaveSession: (name?: string): Promise<{ success: boolean; sessionId?: string; error?: string }> => {
+    return ipcRenderer.invoke('merlin-save-session', name);
+  },
+  merlinLoadSession: (sessionId: string): Promise<{ success: boolean; spell?: SpellState; zoneResults?: Record<string, boolean>; error?: string }> => {
+    return ipcRenderer.invoke('merlin-load-session', sessionId);
+  },
+  merlinDeleteSession: (sessionId: string): Promise<{ success: boolean }> => {
+    return ipcRenderer.invoke('merlin-delete-session', sessionId);
+  },
+
   // Listen for Gemini conversation events (used by the unified sidebar)
   onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => {
     const handler = (_event: unknown, turn: Partial<GeminiTurn>) => callback(turn);
@@ -261,6 +278,10 @@ declare global {
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
       merlinTestLiveSpell: (input: LiveSpellTestInput) => Promise<LiveSpellTestResult>;
       merlinResetTDBaseline: () => Promise<ResetTDResult>;
+      merlinListSessions: () => Promise<SessionSummary[]>;
+      merlinSaveSession: (name?: string) => Promise<{ success: boolean; sessionId?: string; error?: string }>;
+      merlinLoadSession: (sessionId: string) => Promise<{ success: boolean; spell?: SpellState; zoneResults?: Record<string, boolean>; error?: string }>;
+      merlinDeleteSession: (sessionId: string) => Promise<{ success: boolean }>;
       onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => () => void;
       // TTS
       generateSpeech: (text: string, mood?: string) => Promise<TTSResult>;

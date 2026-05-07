@@ -1389,6 +1389,7 @@ function createTestShaderPanel(): HTMLElement {
         <button class="test-shader-tab" data-tab="sprites">Sprites</button>
         <button class="test-shader-tab" data-tab="flipbook">Flipbook</button>
         <button class="test-shader-tab" data-tab="live-spell">Live Spell</button>
+        <button class="test-shader-tab" data-tab="sessions">Sessions</button>
       </div>
       <button class="close-btn">×</button>
     </div>
@@ -1525,6 +1526,19 @@ function createTestShaderPanel(): HTMLElement {
       <div id="ls-status" class="test-shader-status"></div>
       <div id="ls-results" class="test-shader-results"></div>
     </div>
+
+    <div class="test-shader-tab-content" data-tab="sessions" style="display: none;">
+      <div class="test-shader-config">
+        <div class="config-row">
+          <label>Name (optional):</label>
+          <input type="text" id="session-name-input" placeholder="e.g. blue fire shield">
+        </div>
+        <button id="session-save-btn" class="generate-btn">Save Current Session</button>
+        <p class="session-note">Note: sprite texture is not saved — particle texture will default to placeholder after loading.</p>
+      </div>
+      <div id="session-status" class="test-shader-status"></div>
+      <div id="session-list" class="test-shader-results"></div>
+    </div>
   `;
 
   // === Shader tab event listeners ===
@@ -1579,6 +1593,23 @@ function createTestShaderPanel(): HTMLElement {
     if (preset) lsPromptEl.value = preset.prompt;
   });
 
+  // === Sessions tab event listeners ===
+  const sessionSaveBtn = panel.querySelector('#session-save-btn') as HTMLButtonElement;
+  sessionSaveBtn.addEventListener('click', async () => {
+    const nameInput = panel.querySelector('#session-name-input') as HTMLInputElement;
+    const statusDiv = panel.querySelector('#session-status') as HTMLDivElement;
+    const name = nameInput.value.trim() || undefined;
+    statusDiv.textContent = 'Saving…';
+    const result = await window.electronAPI.merlinSaveSession(name);
+    if (result.success) {
+      statusDiv.textContent = `Saved (${result.sessionId})`;
+      nameInput.value = '';
+      await refreshSessionList(panel);
+    } else {
+      statusDiv.textContent = `Error: ${result.error}`;
+    }
+  });
+
   // === Tab switching ===
   panel.querySelectorAll('.test-shader-tab').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
@@ -1591,6 +1622,9 @@ function createTestShaderPanel(): HTMLElement {
       });
       if (tabName === 'flipbook') {
         refreshFlipbookTabFromMirror();
+      }
+      if (tabName === 'sessions') {
+        refreshSessionList(panel);
       }
     });
   });
@@ -1855,6 +1889,61 @@ function renderSpriteResult(
  * into the readout + the read-only atlas/frame-count fields. Called on
  * tab open and after every push.
  */
+async function refreshSessionList(panel: HTMLElement): Promise<void> {
+  const listDiv = panel.querySelector('#session-list') as HTMLDivElement;
+  if (!listDiv) return;
+  try {
+    const sessions = await window.electronAPI.merlinListSessions();
+    if (sessions.length === 0) {
+      listDiv.innerHTML = '<p class="session-empty">No saved sessions.</p>';
+      return;
+    }
+    listDiv.innerHTML = sessions.map(s => {
+      const label = s.name || new Date(s.timestamp).toLocaleString();
+      const meta = [s.spellIntent, s.spellElement, `${s.zoneCount} zone${s.zoneCount !== 1 ? 's' : ''}`]
+        .filter(Boolean).join(' · ');
+      return `
+        <div class="session-row" data-id="${escapeHtml(s.sessionId)}">
+          <div class="session-row-label">
+            <strong>${escapeHtml(label)}</strong>
+            <span class="session-meta">${escapeHtml(meta)}</span>
+          </div>
+          <div class="session-row-actions">
+            <button class="session-load-btn" data-id="${escapeHtml(s.sessionId)}">Load</button>
+            <button class="session-delete-btn" data-id="${escapeHtml(s.sessionId)}">Delete</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    listDiv.querySelectorAll('.session-load-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = (btn as HTMLButtonElement).dataset.id!;
+        const statusDiv = panel.querySelector('#session-status') as HTMLDivElement;
+        statusDiv.textContent = 'Loading…';
+        const result = await window.electronAPI.merlinLoadSession(id);
+        if (result.success) {
+          const zonesSummary = Object.entries(result.zoneResults ?? {})
+            .map(([z, ok]) => `${z}:${ok ? '✓' : '✗'}`).join(' ');
+          statusDiv.textContent = `Loaded. Zones: ${zonesSummary || 'none'}`;
+        } else {
+          statusDiv.textContent = `Error: ${result.error}`;
+        }
+      });
+    });
+
+    listDiv.querySelectorAll('.session-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = (btn as HTMLButtonElement).dataset.id!;
+        await window.electronAPI.merlinDeleteSession(id);
+        await refreshSessionList(panel);
+      });
+    });
+  } catch (error) {
+    listDiv.innerHTML = `<p class="session-empty">Error loading sessions.</p>`;
+    console.error('[Sessions] Failed to list sessions:', error);
+  }
+}
+
 async function refreshFlipbookTabFromMirror(): Promise<void> {
   try {
     const state = await window.electronAPI.merlinTestGetMirroredState();

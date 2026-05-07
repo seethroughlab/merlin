@@ -14,6 +14,7 @@ import { applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-flip
 import { testLiveSpell } from './merlin/test-live-spell';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
 import { resetTDBaseline } from './merlin/reset-td';
+import { saveSessionState, loadSessionState, applySessionState, listSavedSessions, deleteSession } from './merlin/state-persistence';
 import {
   initTDBridge,
   closeTDBridge,
@@ -22,6 +23,7 @@ import {
   pushOrientationUpdate,
   pushTrackingFrame,
   pushMerlinState,
+  pushZoneUpdateWithValidation,
   state as tdState,
 } from './td-bridge';
 import { store, getAllSettings, setSetting } from './settings';
@@ -717,6 +719,38 @@ ipcMain.handle('merlin-reset-td-baseline', async () => {
     console.error(`[Merlin ${ts()}] Reset failed:`, error);
     throw error;
   }
+});
+
+// ============ SESSION PERSISTENCE IPC HANDLERS ============
+
+ipcMain.handle('merlin-list-sessions', async () => {
+  return listSavedSessions();
+});
+
+ipcMain.handle('merlin-save-session', async (_event, name?: string) => {
+  const state = merlinSession?.getState();
+  if (!state) return { success: false, error: 'No active session' };
+  const id = `session_${Date.now()}`;
+  const ok = saveSessionState(id, state.spell, name ? { name } : undefined);
+  return { success: ok, sessionId: id };
+});
+
+ipcMain.handle('merlin-load-session', async (_event, sessionId: string) => {
+  const state = loadSessionState(sessionId);
+  if (!state) return { success: false, error: 'Session not found' };
+  applySessionState(state);
+  const zoneResults: Record<string, boolean> = {};
+  for (const [zone, code] of Object.entries(state.zones)) {
+    if (code) {
+      const result = await pushZoneUpdateWithValidation(zone, code);
+      zoneResults[zone] = result.success;
+    }
+  }
+  return { success: true, spell: state.spell, zoneResults };
+});
+
+ipcMain.handle('merlin-delete-session', async (_event, sessionId: string) => {
+  return { success: deleteSession(sessionId) };
 });
 
 // Test live spell - end-to-end Gemini creative process (Shift+T Live Spell tab)
