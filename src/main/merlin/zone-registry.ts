@@ -40,10 +40,10 @@ export type ZoneName = (typeof ZONE_NAMES)[number];
 export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
   force_field: {
     description:
-      'Apply forces to particles. The template applies NO default forces — your snippet is the sole source of motion (other than emission velocity, drag, and a tiny per-id drift). Without a force_field snippet, particles coast on inertia. The template multiplies the final force by (0.5 + uSpellEnergy) so spell intensity scales automatically. Use `uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos` (vec3 world positions) to pull/push particles toward body parts — e.g. `force += normalize(uHandRPos - pos) * 5.0` makes particles converge on the right hand.',
+      'Apply forces to particles. The template applies NO default forces — your snippet is the sole source of motion (other than emission velocity, drag, and a tiny per-id drift). Without a force_field snippet, particles coast on inertia. The template multiplies the final force by (0.5 + uSpellEnergy) so spell intensity scales automatically. Use `uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos` (vec3 world positions, last-good-held when MediaPipe loses the body part) to pull/push particles — e.g. `force += normalize(uHandRPos - pos) * 5.0` makes particles converge on the right hand. `uChestVis`, `uEyeLVis`, `uEyeRVis`, `uHandLVis`, `uHandRVis` (float [0,1]) report current MediaPipe visibility so you can branch (e.g. fall back to chest when hand isn\'t visible). Note: drag in velocity_modifier compounds per frame — at 60fps `vel *= 0.9` leaves only 0.18% velocity after 1 second, which can swallow your forces. Either keep drag gentle (`vel *= 0.98`) or scale forces 10× to match.',
     modifies: 'force',
     availableVars: ['pos', 'vel', 'age', 'lifeSpan', 'life', 'force', 'id', 'idx'],
-    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos', 'uChestVis', 'uEyeLVis', 'uEyeRVis', 'uHandLVis', 'uHandRVis'],
     maxLines: 25,
   },
   color_over_life: {
@@ -64,18 +64,20 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
   spawn_behavior: {
     description:
       "Initialize a newborn particle's position and velocity. The template provides these locals already populated — DO NOT redeclare them: `pos` (vec3, **default = a random point in a 0.2-radius sphere centered on the participant's chest — already body-tracked, follows them as they move**), `vel` (vec3, default outward radial + jitter from `pos`), `age` (float), `id` (float, persistent particle id), `idx` (uint, slot index), and **`r` (vec3 of pseudo-random values from hash31(id) — already a variable, do not write `vec3 r = ...` again**, just reference it). " +
-      "**Body-target uniforms (vec3 world positions, all body-tracked)**: `uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos`. " +
+      "**Body-target uniforms (vec3 world positions, last-good-held when MediaPipe loses tracking)**: `uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos`. " +
+      "**Body-visibility uniforms (float [0,1])**: `uChestVis`, `uEyeLVis`, `uEyeRVis`, `uHandLVis`, `uHandRVis`. ~1 means tracked, <0.5 means MediaPipe lost the body part (and the position is held / falling back to chest). Use these if you want the spell to *behave differently* when a body part is occluded. " +
       "**Spawning rules**: If the spell emits from the chest, leave `pos` alone — it's already there. If the spell emits from another body part, set `pos = uEyeLPos + r * 0.05;` (or eye_r/hand_l/hand_r) — the small jitter keeps the spawn from being a single point. **NEVER set `pos` to a static vector near world origin** (e.g. `vec3(r.x*0.2, r.y*0.2, 0)`); that throws away body tracking and the spell will appear to come from empty space instead of the participant. To change spawn behavior assign to `pos` and/or `vel`. The template handles `P[idx] = pos; PartVel[idx] = vel;` after your snippet runs — don't write to P[] or PartVel[] yourself, they're write-only output buffers. There's no built-in `PI` constant; use `6.2832` for tau or `3.14159`. Snippet runs only when age < ~1 frame.",
     modifies: ['pos', 'vel'],
     availableVars: ['pos', 'vel', 'age', 'r', 'id', 'idx'],
-    uniforms: ['uDeltaTime', 'uTime', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos'],
+    uniforms: ['uDeltaTime', 'uTime', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos', 'uChestVis', 'uEyeLVis', 'uEyeRVis', 'uHandLVis', 'uHandRVis'],
     maxLines: 20,
   },
   velocity_modifier: {
-    description: 'Modify particle velocity. Body-target uniforms `uChestPos`/`uEyeLPos`/`uEyeRPos`/`uHandLPos`/`uHandRPos` (vec3) are available if the spell needs to steer particles toward or away from a body part mid-flight.',
+    description:
+      'Modify particle velocity. Default drag is `vel *= 0.98` — gentle, leaves room for force_field. **DRAG COMPOUNDS PER FRAME**: at 60fps, `vel *= 0.9` leaves only 0.18% of original velocity after 1 second, swallowing typical force_field magnitudes (0.05–0.3). Either keep drag mild (≥0.95) or scale your force_field 10× to compensate. Body-target uniforms `uChestPos`/`uEyeLPos`/`uEyeRPos`/`uHandLPos`/`uHandRPos` (vec3) and visibility uniforms `uChestVis`/`uEyeLVis`/`uEyeRVis`/`uHandLVis`/`uHandRVis` (float) are also available for mid-flight steering.',
     modifies: 'vel',
     availableVars: ['pos', 'vel', 'age', 'lifeSpan', 'life', 'id', 'idx'],
-    uniforms: ['uTime', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos'],
+    uniforms: ['uTime', 'uChestPos', 'uEyeLPos', 'uEyeRPos', 'uHandLPos', 'uHandRPos', 'uChestVis', 'uEyeLVis', 'uEyeRVis', 'uHandLVis', 'uHandRVis'],
     maxLines: 20,
   },
   post_fx: {
