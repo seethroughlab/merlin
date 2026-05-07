@@ -115,6 +115,7 @@ let drawSegmentEnabled = true;
 // Latest analysis results
 let lastFaceAnalysis: MicroExpressionAnalysis | null = null;
 let lastBodyAnalysis: BodyLanguageAnalysis | null = null;
+let lastFlipbookMirror: MirroredTDState | null = null;
 let lastFaceStripUrl: string | null = null;
 let lastBodyStripUrl: string | null = null;
 
@@ -1227,17 +1228,9 @@ function createTestShaderPanel(): HTMLElement {
   panel.id = 'test-shader-panel';
   panel.className = 'test-shader-panel';
 
-  // Intent options
-  const intents = ['confidence', 'calm', 'protection', 'clarity', 'creativity', 'transformation', 'release', 'focus', 'joy', 'wonder'];
-  const intentOptions = intents.map(i => `<option value="${i}">${i}</option>`).join('');
-
-  // Element options
-  const elements = ['fire', 'water', 'air', 'earth', 'light', 'shadow', 'crystal', 'storm', 'flora', 'cosmic'];
-  const elementOptions = elements.map(e => `<option value="${e}">${e}</option>`).join('');
-
   // Shader preset dropdown options
   const presetOptions = [
-    `<option value="">Custom (no preset)</option>`,
+    `<option value="">Custom (type your own)</option>`,
     ...SHADER_TEST_PRESETS.map(p => `<option value="${p.id}">${p.label}</option>`),
   ].join('');
 
@@ -1293,17 +1286,8 @@ function createTestShaderPanel(): HTMLElement {
           <select id="test-preset">${presetOptions}</select>
         </div>
         <div class="config-row">
-          <label>Intent:</label>
-          <select id="test-intent">${intentOptions}</select>
-        </div>
-        <div class="config-row">
-          <label>Element:</label>
-          <select id="test-element">${elementOptions}</select>
-        </div>
-        <div class="config-row">
-          <label>Energy:</label>
-          <input type="range" id="test-energy" min="0" max="1" step="0.1" value="0.7">
-          <span id="test-energy-value">0.7</span>
+          <label>Spell:</label>
+          <textarea id="test-prompt" rows="3" placeholder="A fire eruption spell — intense confidence, scorching orange plasma blasting upward from the chest"></textarea>
         </div>
         <div class="config-row zones-row">
           <label>Zones:</label>
@@ -1368,15 +1352,6 @@ function createTestShaderPanel(): HTMLElement {
     <div class="test-shader-tab-content" data-tab="flipbook" style="display: none;">
       <div class="test-shader-config flipbook-reconfig-form">
         <div class="config-row">
-          <label>Atlas:</label>
-          <input type="text" id="rm-atlas-cols" readonly value="1"> ×
-          <input type="text" id="rm-atlas-rows" readonly value="1">
-        </div>
-        <div class="config-row">
-          <label>Frames:</label>
-          <input type="text" id="rm-frame-count" readonly value="1">
-        </div>
-        <div class="config-row">
           <label>Playback:</label>
           <select id="rm-playback">${playbackOptions}</select>
         </div>
@@ -1434,20 +1409,11 @@ function createTestShaderPanel(): HTMLElement {
   `;
 
   // === Shader tab event listeners ===
-  const energySlider = panel.querySelector('#test-energy') as HTMLInputElement;
-  const energyValue = panel.querySelector('#test-energy-value') as HTMLSpanElement;
-  energySlider.addEventListener('input', () => {
-    energyValue.textContent = energySlider.value;
-  });
-
   const presetSelect = panel.querySelector('#test-preset') as HTMLSelectElement;
+  const promptTextarea = panel.querySelector('#test-prompt') as HTMLTextAreaElement;
   presetSelect.addEventListener('change', () => {
     const preset = SHADER_TEST_PRESETS.find(p => p.id === presetSelect.value);
-    if (!preset) return;
-    (panel.querySelector('#test-intent') as HTMLSelectElement).value = preset.intent;
-    (panel.querySelector('#test-element') as HTMLSelectElement).value = preset.element;
-    energySlider.value = String(preset.energy);
-    energyValue.textContent = String(preset.energy);
+    if (preset) promptTextarea.value = preset.prompt;
   });
 
   const generateBtn = panel.querySelector('#generate-shaders-btn') as HTMLButtonElement;
@@ -1535,12 +1501,17 @@ function createTestShaderPanel(): HTMLElement {
  * Run the test shader generation
  */
 async function runTestShaderGeneration(): Promise<void> {
-  const intentSelect = document.getElementById('test-intent') as HTMLSelectElement;
-  const elementSelect = document.getElementById('test-element') as HTMLSelectElement;
-  const energySlider = document.getElementById('test-energy') as HTMLInputElement;
+  const promptTextarea = document.getElementById('test-prompt') as HTMLTextAreaElement;
   const statusDiv = document.getElementById('test-shader-status') as HTMLDivElement;
   const resultsDiv = document.getElementById('test-shader-results') as HTMLDivElement;
   const generateBtn = document.getElementById('generate-shaders-btn') as HTMLButtonElement;
+
+  const prompt = promptTextarea.value.trim();
+  if (!prompt) {
+    statusDiv.textContent = 'Enter a spell description';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
 
   // Gather selected zones from the checkbox grid
   const zoneCheckboxes = document.querySelectorAll<HTMLInputElement>(
@@ -1556,17 +1527,12 @@ async function runTestShaderGeneration(): Promise<void> {
     return;
   }
 
-  const config = {
-    intent: intentSelect.value,
-    element: elementSelect.value,
-    energy: parseFloat(energySlider.value),
-    zones,
-  };
+  const config = { prompt, zones };
 
   // Update UI to loading state
   generateBtn.disabled = true;
   generateBtn.textContent = 'Generating...';
-  statusDiv.textContent = `Generating ${zones.length} zone(s): ${config.element}/${config.intent} at ${config.energy} energy...`;
+  statusDiv.textContent = `Generating ${zones.length} zone(s)...`;
   statusDiv.className = 'test-shader-status loading';
   resultsDiv.innerHTML = '';
 
@@ -1846,14 +1812,12 @@ async function refreshFlipbookTabFromMirror(): Promise<void> {
 }
 
 function paintMirroredState(state: MirroredTDState): void {
-  // Read-only atlas display
+  lastFlipbookMirror = state;
+
   const setVal = (id: string, value: string | number) => {
     const el = document.getElementById(id) as HTMLInputElement | null;
     if (el) el.value = String(value);
   };
-  setVal('rm-atlas-cols', state.flipbook.atlasCols);
-  setVal('rm-atlas-rows', state.flipbook.atlasRows);
-  setVal('rm-frame-count', state.flipbook.frameCount);
 
   // Pre-fill the editable fields with current values so Apply doesn't
   // surprise the user by reverting to defaults.
@@ -1891,9 +1855,9 @@ function setFlipbookStatus(text: string, kind: 'loading' | 'success' | 'error'):
 }
 
 async function runApplyFlipbookConfig(): Promise<void> {
-  const atlasCols = parseInt((document.getElementById('rm-atlas-cols') as HTMLInputElement).value, 10);
-  const atlasRows = parseInt((document.getElementById('rm-atlas-rows') as HTMLInputElement).value, 10);
-  const frameCount = parseInt((document.getElementById('rm-frame-count') as HTMLInputElement).value, 10);
+  const atlasCols = lastFlipbookMirror?.flipbook.atlasCols ?? 1;
+  const atlasRows = lastFlipbookMirror?.flipbook.atlasRows ?? 1;
+  const frameCount = lastFlipbookMirror?.flipbook.frameCount ?? 1;
   const playbackMode = (document.getElementById('rm-playback') as HTMLSelectElement).value as SpritePlaybackMode;
   const driveSource = (document.getElementById('rm-drive') as HTMLSelectElement).value as SpriteDriveSource;
   const frameDuration = parseFloat((document.getElementById('rm-frame-duration') as HTMLInputElement).value);

@@ -254,16 +254,13 @@ function parseShaderResponse(parts: Part[], requested: Set<string>): ParsedRespo
 export async function testShaderGeneration(config: TestShaderConfig): Promise<TestShaderResult> {
   const selectedZones = resolveZones(config.zones);
   console.log(
-    `[TestShader ${ts()}] Starting: intent=${config.intent} element=${config.element} ` +
-    `energy=${config.energy} zones=[${selectedZones.join(', ')}]`
+    `[TestShader ${ts()}] Starting: prompt="${config.prompt.slice(0, 60)}..." zones=[${selectedZones.join(', ')}]`
   );
 
   const turnId = nextTurnId();
   const systemPrompt = buildSystemPrompt(selectedZones);
   const userPrompt =
-    `Generate shaders for a "${config.intent}" spell with "${config.element}" element ` +
-    `at ${config.energy.toFixed(1)} energy.\n\n` +
-    `Create expressive, creative GLSL that embodies this combination. ` +
+    `${config.prompt}\n\n` +
     `Call set_zone_shader once for each of these zones: ${selectedZones.join(', ')}.`;
 
   emitGeminiTurn({ id: turnId, source: 'test_shader', systemPrompt, userPrompt });

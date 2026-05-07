@@ -285,25 +285,17 @@ export interface MerlinSessionInfo {
  * Configuration for test shader generation
  */
 export interface TestShaderConfig {
-  intent: string;
-  element: string;
-  energy: number;
-  /**
-   * Optional subset of zones to generate. When omitted or empty, defaults to
-   * all marker-bearing zones. Used by the Shaders-tab zone checkboxes.
-   */
+  prompt: string;
   zones?: string[];
 }
 
 /**
- * A named natural-language scenario that pre-fills the Shaders tab form.
+ * A named natural-language scenario that pre-fills the Shaders tab prompt textarea.
  */
 export interface ShaderTestPreset {
   id: string;
   label: string;
-  intent: string;
-  element: string;
-  energy: number;
+  prompt: string;
 }
 
 /**
