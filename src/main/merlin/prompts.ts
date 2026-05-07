@@ -264,6 +264,157 @@ Don't request feedback after every single set_zone_shader — that wastes
 a turn. Do it after a coherent batch (typically all your shader writes
 for the current spell direction), then iterate based on what you see.`;
 
+const VISUAL_TECHNIQUES = `## VFX Technique Library
+
+These named patterns are what professional real-time VFX artists reach for. They work across any element or spell type — combine them with the element recipes above to create effects that feel alive, dramatic, and intentional. The element recipes answer WHAT (fire = warm + upward); these techniques answer HOW.
+
+### 1. Phase-Gate — three distinct visual states (force_field, color_over_life, size_over_life)
+
+Idle / buildup / release should look like three different spells, not one spell at different volumes. The most common mistake: writing a single force that just scales with uSpellEnergy.
+
+\`\`\`glsl
+// force_field: gather on buildup, blast on release
+if (uSpellMode > 0.5) {
+    // Release — explode outward from chest
+    vec3 fromChest = pos - uChestPos;
+    force += normalize(fromChest + vec3(1e-5)) * 0.35 * uSpellEnergy;
+} else if (uSpellMode > -0.5) {
+    // Buildup — converge toward chest with tangential orbit (prevents collapse)
+    vec3 toChest = uChestPos - pos;
+    force += normalize(toChest) * (0.08 + uSpellEnergy * 0.12);
+    force.xy += vec2(-toChest.y, toChest.x) * 0.04;
+} else {
+    // Idle — slow ambient orbit
+    vec2 toCenter = -pos.xy;
+    force.xy += vec2(-toCenter.y, toCenter.x) * 0.04;
+}
+\`\`\`
+
+### 2. Turbulence — organic non-repetitive motion (force_field)
+
+Layered sin/cos that approximates curl noise. Prevents the "regular ripple" look of single-frequency forces. Combine with a directional bias (e.g. \`force.y += 0.05;\`) for rising fire, drifting smoke, ascending energy.
+
+\`\`\`glsl
+// Layered turbulence — no two particles take the same path
+float f = 4.0;
+vec3 turb = vec3(
+    sin(pos.y * f + uTime * 1.3) * cos(pos.z * f * 0.7 + uTime * 0.9),
+    sin(pos.z * f + uTime * 0.7) * cos(pos.x * f * 1.1 + uTime * 1.1),
+    sin(pos.x * f + uTime * 1.1) * cos(pos.y * f * 0.9 + uTime * 0.7)
+);
+force += turb * 0.07 * uSpellEnergy;
+\`\`\`
+
+### 3. Velocity Stretch — streaks / trails (billboard_vertex)
+
+Elongates billboard quads along the particle's movement direction. Turns floating dots into streaks. Essential for lightning, comets, fast energy beams. \`uTDMats\` is a TD global; \`camIdx\` is already declared by the vertex template, so both are usable directly in zone code.
+
+\`\`\`glsl
+// Velocity stretch — quads elongate along movement direction
+float speed = length(vel);
+if (speed > 0.001) {
+    vec3 velView = (uTDMats[camIdx].cam * vec4(normalize(vel), 0.0)).xyz;
+    vec2 velDir2D = normalize(velView.xy);
+    vec4 center = uTDMats[camIdx].cam * worldOrigin;
+    vec2 offset = viewPos.xy - center.xy;
+    float along = dot(offset, velDir2D);
+    float perp = dot(offset, vec2(-velDir2D.y, velDir2D.x));
+    float stretch = 1.0 + speed * 8.0; // raise 8.0 for more dramatic streaks
+    viewPos.xy = center.xy + velDir2D * along * stretch
+               + vec2(-velDir2D.y, velDir2D.x) * perp * 0.5;
+}
+\`\`\`
+
+### 4. Velocity-to-Color — fast = hot, slow = cool (billboard_pixel or color_over_life)
+
+Fast-moving particles are bright and washed-out (white-hot); slow ones are dim and saturated. Physically accurate for fire and plasma; adds depth to any spell. \`vel\` is available in both \`color_over_life\` and \`billboard_pixel\`.
+
+\`\`\`glsl
+// billboard_pixel: speed drives brightness and saturation
+float speed = length(vel);
+float heat = smoothstep(0.0, 0.4, speed);
+brightness = 0.5 + heat * 1.2;
+saturation = 1.0 - heat * 0.5; // bleach toward white at high speed
+\`\`\`
+\`\`\`glsl
+// color_over_life: speed-reactive color (vel IS available here)
+float speed = length(vel);
+float heat = smoothstep(0.0, 0.35, speed);
+color.rgb = mix(vec3(0.7, 0.2, 0.05), vec3(1.0, 0.95, 0.85), heat);
+color.a = life * (0.7 + heat * 0.3);
+\`\`\`
+
+### 5. Death Flare — flash and puff before dying (size_over_life + color_over_life)
+
+Prevents the hard pixel-wink that makes particle fields look digital. Apply both zones together for a satisfying micro-burst on particle death.
+
+\`\`\`glsl
+// size_over_life: puff outward on death
+float baseSize = 0.06;
+float deathPuff = smoothstep(0.18, 0.0, life) * 1.8;
+size = (baseSize * life + baseSize * deathPuff) * uSpellEnergy;
+\`\`\`
+\`\`\`glsl
+// color_over_life: brightness flash on death
+float deathFlash = smoothstep(0.15, 0.0, life);
+color.rgb *= (1.0 + deathFlash * 2.5);
+color.a = max(life * 0.85, deathFlash * 0.4);
+\`\`\`
+
+### 6. Geometric Spawn — ring, shell, and burst patterns (spawn_behavior)
+
+Break out of the random-sphere default. Ring spawn creates halos, shields, orbit effects. Shell spawn gives even radial coverage. Directional burst shoots from a body point.
+
+\`\`\`glsl
+// Ring spawn — flat ring around chest (halo, orbit, shield)
+float angle = id * 6.2832 * 0.618; // golden ratio spacing — no clumping
+float radius = 0.15 + r.x * 0.04;
+pos = uChestPos + vec3(cos(angle) * radius, r.y * 0.04, sin(angle) * radius);
+vel = vec3(cos(angle), 0.1 + r.z * 0.15, sin(angle)) * 0.06;
+\`\`\`
+\`\`\`glsl
+// Shell spawn — uniform sphere surface instead of interior (clean outward burst)
+vec3 dir = normalize(r * 2.0 - 1.0);
+pos = uChestPos + dir * (0.1 + r.z * 0.05);
+vel = dir * (0.05 + r.x * 0.08);
+\`\`\`
+
+### 7. Spatial Color — color from position, not just age (color_over_life)
+
+\`pos\` and \`vel\` are available in \`color_over_life\` but the element recipes never use them. Coloring by height (pos.y) creates naturally warm-at-floor / cool-at-ceiling gradients for fire, smoke, ascending spells.
+
+\`\`\`glsl
+// Height gradient — warm low, cool high (fire, smoke, ascending energy)
+// pos.y ≈ 0 at chest height, negative toward floor, positive toward ceiling
+float height = pos.y + 0.15;
+vec3 lowColor = vec3(0.9, 0.3, 0.05);
+vec3 highColor = vec3(0.15, 0.05, 0.35);
+color.rgb = mix(lowColor, highColor, smoothstep(-0.3, 0.4, height));
+color.a = life * 0.8;
+\`\`\`
+\`\`\`glsl
+// Radial fade — bright near body center, transparent at distance
+float distFromCenter = length(pos.xy);
+color.rgb = vec3(0.8, 0.5, 1.0) * (0.6 + life * 0.4);
+color.a = life * smoothstep(0.5, 0.1, distFromCenter) * 0.9;
+\`\`\`
+
+### 8. Per-Particle Flicker — independent random brightness (billboard_pixel or color_over_life)
+
+Transforms a uniform glowing field into a field of distinct individual lights. Critical for fire, starfields, swarms. Use \`id * 0.137\` as the phase offset — NOT \`idx\` (which is a recycled slot and doesn't produce stable per-particle variation). hash31() is not available in these zones; use the multiplier pattern instead.
+
+\`\`\`glsl
+// billboard_pixel: each particle flickers on its own cycle
+float flicker = 0.65 + 0.35 * step(0.5, fract(uTime * 14.0 + id * 0.137));
+brightness = flicker;
+\`\`\`
+\`\`\`glsl
+// color_over_life: same pattern (id available here too)
+float flicker = 0.7 + 0.3 * step(0.45, fract(uTime * 12.0 + id * 0.137));
+color.rgb *= flicker;
+color.a = life * flicker * 0.9;
+\`\`\``;
+
 /**
  * Build the complete system prompt
  */
@@ -279,6 +430,7 @@ export function buildSystemPrompt(): string {
     MERLIN_SAFETY_RULES,
     PERCEPTION_ETHIC,
     SHADER_AUTHORSHIP,
+    VISUAL_TECHNIQUES,
     templatesSection,
   ]
     .filter(Boolean)
@@ -341,7 +493,7 @@ You do NOT have access to perception, conversational profile metadata, or castin
 `;
 
   const templatesSection = formatTemplatesForSystemPrompt();
-  return [VISUAL_AUTHOR_INTRO, SHADER_AUTHORSHIP, templatesSection]
+  return [VISUAL_AUTHOR_INTRO, SHADER_AUTHORSHIP, VISUAL_TECHNIQUES, templatesSection]
     .filter(Boolean)
     .join('\n\n');
 }
@@ -769,32 +921,6 @@ Examples:
 };
 
 /**
- * Get tools available for a given phase
- */
-export function getToolsForPhase(phase: MerlinPhase): FunctionDeclaration[] {
-  // Base tools available in all phases
-  const tools: FunctionDeclaration[] = [
-    GET_POSTURE_TOOL,
-    GET_EXPRESSION_TOOL,
-  ];
-
-  // Add set_spell_profile in discovery phases
-  if (phase === 'intro' || phase === 'discovery' || phase === 'formation') {
-    tools.push(SET_SPELL_PROFILE_TOOL);
-    tools.push(SET_ZONE_SHADER_TOOL);
-    tools.push(REQUEST_VISUAL_FEEDBACK_TOOL);
-    tools.push(GENERATE_SPRITE_TOOL);
-  }
-
-  // Add prepare_casting in formation
-  if (phase === 'formation' || phase === 'ready_to_cast') {
-    tools.push(PREPARE_CASTING_TOOL);
-  }
-
-  return tools;
-}
-
-/**
  * All tools (for initial chat setup)
  */
 export const MERLIN_TOOLS: FunctionDeclaration[] = [
@@ -823,34 +949,6 @@ export const MERLIN_VISUAL_AUTHOR_TOOLS: FunctionDeclaration[] = [
   GENERATE_SPRITE_TOOL,
 ];
 
-// ============ LAYER 4: OUTPUT CONTRACT ============
-
-/**
- * Schema for structured Merlin output (for reference/validation)
- */
-export const MERLIN_OUTPUT_SCHEMA = {
-  type: 'object',
-  properties: {
-    spokenText: {
-      type: 'string',
-      description: 'What Merlin says aloud',
-    },
-    spellUpdate: {
-      type: 'object',
-      description: 'Partial spell state updates',
-    },
-    control: {
-      type: 'object',
-      properties: {
-        expectUserReply: { type: 'boolean' },
-        advancePhase: { type: 'boolean' },
-        endSession: { type: 'boolean' },
-      },
-    },
-  },
-  required: ['spokenText'],
-};
-
 // ============ HELPER PROMPTS ============
 
 /**
@@ -874,8 +972,6 @@ EXAMPLE OUTPUT:
 
 Keep it brief. Three sentences total. YOU MUST START WITH THE EXPLANATION.`;
 
-// Legacy export for backwards compatibility
-export const MERLIN_OPENING_PROMPT = INTRO_WITH_IMAGE_PROMPT;
 
 /**
  * Closing prompt for ending the session

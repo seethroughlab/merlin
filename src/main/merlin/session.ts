@@ -18,7 +18,7 @@ import type {
   ConversationMessage,
 } from './types';
 import type { BodyLanguageAnalysis, MicroExpressionAnalysis } from '../../shared/types';
-import { createInitialSpellState } from './spell-state';
+import { createInitialSpellState, isSpellReady } from './spell-state';
 import { pushSpellCast } from '../td-bridge';
 import { resetTDBaseline } from './reset-td';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
@@ -444,7 +444,7 @@ export class MerlinSession {
    * whatever GLSL Gemini wrote into the zones via set_zone_shader.
    */
   triggerCast(): void {
-    if (!this.state.castReady || this.state.castCompleted) {
+    if (!this.state.castReady || !isSpellReady(this.state.spell) || this.state.castCompleted) {
       console.log('[MerlinSession] Cannot cast: not ready or already completed');
       return;
     }

@@ -89,9 +89,9 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     bannedKeywords: ['discard'],
   },
   billboard_vertex: {
-    description: 'Billboard particle vertex shader. Snippet runs in view space after the camera-facing quad has been positioned, before final projection — typically used to perturb viewPos for wobble, jitter, or other position effects.',
+    description: 'Billboard particle vertex shader. Snippet runs in view space after the camera-facing quad has been positioned, before final projection — typically used to perturb viewPos for wobble, jitter, or other position effects. TD globals uTDMats and TDCameraIndex() are accessible; camIdx is already declared by the template so zone code can use it directly (e.g. uTDMats[camIdx].cam for view-space velocity transform in velocity-stretch effects).',
     modifies: 'viewPos',
-    availableVars: ['localPos', 'worldOrigin', 'viewPos', 'instanceScale', 'finalScale', 'vel', 'age', 'life', 'id'],
+    availableVars: ['localPos', 'worldOrigin', 'viewPos', 'instanceScale', 'finalScale', 'vel', 'age', 'life', 'id', 'camIdx'],
     uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
     maxLines: 20,
   },
