@@ -33,7 +33,6 @@ export {
   pushTrackingFrame,
   pushMerlinState,
   // Spell cast push methods
-  pushSpellCharge,
   pushSpellCast,
   // Sprite system push methods
   pushSpriteTexture,

@@ -204,22 +204,6 @@ export function pushMerlinState(state: MerlinStateUpdate): boolean {
 // ===== Spell Cast =====
 
 /**
- * Push spell charge state (particles tightening around origin).
- * Called as user approaches casting readiness.
- */
-export function pushSpellCharge(
-  origin: CastingOrigin,
-  intensity: number,
-  castingLandmarks: number[]
-): boolean {
-  console.log(`[TDBridge ${ts()}] Pushing spell charge: origin=${origin} intensity=${intensity.toFixed(2)}`);
-  return guardedSend(
-    { type: 'spell_charge', origin, intensity, castingLandmarks },
-    'push spell charge'
-  );
-}
-
-/**
  * Push spell cast trigger with envelope timing. TD switches to release
  * mode and animates the cast envelope; visuals come from whatever GLSL
  * Gemini wrote into the zones via set_zone_shader.

@@ -215,62 +215,6 @@ export function defaultOriginForIntent(intent: SpellIntent): CastingOrigin {
 }
 
 /**
- * Get a suggested element for a given intent
- */
-export function suggestElementForIntent(intent: SpellIntent): SpellElement {
-  switch (intent) {
-    case 'confidence':
-      return 'fire';
-    case 'calm':
-      return 'water';
-    case 'protection':
-      return 'earth';
-    case 'clarity':
-      return 'light';
-    case 'creativity':
-      return 'cosmic';
-    case 'transformation':
-      return 'storm';
-    case 'release':
-      return 'air';
-    case 'focus':
-      return 'crystal';
-    case 'joy':
-      return 'flora';
-    case 'wonder':
-      return 'cosmic';
-  }
-}
-
-/**
- * Get a suggested tone for a given intent
- */
-export function suggestToneForIntent(intent: SpellIntent): SpellTone {
-  switch (intent) {
-    case 'confidence':
-      return 'heroic';
-    case 'calm':
-      return 'calm';
-    case 'protection':
-      return 'mysterious';
-    case 'clarity':
-      return 'gentle';
-    case 'creativity':
-      return 'playful';
-    case 'transformation':
-      return 'wild';
-    case 'release':
-      return 'calm';
-    case 'focus':
-      return 'mysterious';
-    case 'joy':
-      return 'playful';
-    case 'wonder':
-      return 'mysterious';
-  }
-}
-
-/**
  * Check if the spell state is complete enough for casting
  */
 export function isSpellReady(spell: SpellState): boolean {
@@ -283,30 +227,3 @@ export function isSpellReady(spell: SpellState): boolean {
   );
 }
 
-/**
- * Get a palette color suggestion for a given element
- */
-export function paletteForElement(element: SpellElement): string {
-  switch (element) {
-    case 'fire':
-      return '#FF6B35';
-    case 'water':
-      return '#4ECDC4';
-    case 'air':
-      return '#A8DADC';
-    case 'earth':
-      return '#8B4513';
-    case 'light':
-      return '#FFD700';
-    case 'shadow':
-      return '#4A0E4E';
-    case 'crystal':
-      return '#E0E7FF';
-    case 'storm':
-      return '#5C5CFF';
-    case 'flora':
-      return '#2D6A4F';
-    case 'cosmic':
-      return '#9B5DE5';
-  }
-}

@@ -35,11 +35,9 @@ export type TDOutboundMessage =
   | { type: 'orientation_update'; portrait: boolean; width: number; height: number }
   | { type: 'tracking_frame'; timestamp: number; fps: number; frame: FrameInfo; pose: PoseData; face: FaceData }
   | { type: 'merlin_state'; active: boolean; phase?: string; spell?: MerlinSpellState }
-  | { type: 'spell_charge'; origin: CastingOrigin; intensity: number; castingLandmarks: number[] }
   | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope }
   | { type: 'ping' }
   | { type: 'request_screenshot' }
-  | { type: 'request_metrics' }
   // Sprite system messages
   | { type: 'sprite_texture'; assetId: string; texturePath: string }
   | { type: 'flipbook_config'; config: FlipbookConfigMessage }

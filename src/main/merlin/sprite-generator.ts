@@ -171,22 +171,6 @@ export function buildSpritePromptFromSpell(
 // ============ VALIDATION ============
 
 /**
- * Apply luminance-based alpha to raw RGBA pixel data
- * Black pixels become transparent, bright pixels become opaque
- */
-function applyLuminanceAlpha(pixels: Uint8Array, width: number, height: number): void {
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * 4;
-    const r = pixels[idx];
-    const g = pixels[idx + 1];
-    const b = pixels[idx + 2];
-    // ITU-R BT.601 luminance formula
-    const luminance = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-    pixels[idx + 3] = luminance;
-  }
-}
-
-/**
  * Calculate average brightness of a region
  */
 function getRegionBrightness(

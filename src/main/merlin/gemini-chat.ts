@@ -86,7 +86,7 @@ export interface ChatTurnResult {
  * the `parts` field of the matching `functionResponse`, so the model
  * sees it as part of a single tool result.
  */
-export interface ToolResultImage {
+interface ToolResultImage {
   /** Match against `MerlinToolCall.id` so the inline data is attached to the right function response. */
   callId?: string;
   mimeType: string;

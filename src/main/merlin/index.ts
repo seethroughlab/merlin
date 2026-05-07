@@ -38,11 +38,8 @@ export {
   createInitialSpellState,
   mergeSpellUpdate,
   defaultOriginForIntent,
-  suggestElementForIntent,
-  suggestToneForIntent,
   isSpellReady,
-  paletteForElement,
 } from './spell-state';
 
 // Prompts (for reference/testing)
-export { MERLIN_SYSTEM_PROMPT, MERLIN_TOOLS, getToolsForPhase } from './prompts';
+export { MERLIN_SYSTEM_PROMPT, MERLIN_TOOLS } from './prompts';
