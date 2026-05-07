@@ -1429,6 +1429,7 @@
             <label>Mic:</label>
             <select id="mic-select"></select>
           </div>
+          <div id="voice-status" class="voice-status voice-idle">Loading...</div>
         </section>
 
         <!-- Camera orientation -->
@@ -1451,29 +1452,6 @@
             <label>Mask:</label>
             <input type="text" id="spout-mask-name" value="Merlin Mask" />
           </div>
-        </section>
-
-        <!-- WebSocket Bridge -->
-        <section id="ws-controls">
-          <h3>WebSocket Bridge</h3>
-          <div class="ws-info">
-            <div class="ws-row">
-              <span class="ws-label">Port:</span>
-              <span id="ws-port" class="ws-value">8001</span>
-            </div>
-            <div class="ws-row">
-              <span class="ws-label">Status:</span>
-              <span id="ws-status" class="ws-value">--</span>
-            </div>
-            <a href="#" id="ws-format-link" class="ws-link">View Message Format</a>
-          </div>
-        </section>
-
-
-        <!-- Voice controls -->
-        <section id="voice-controls">
-          <h3>Voice Commands</h3>
-          <div id="voice-status" class="voice-status voice-idle">Loading...</div>
         </section>
 
         <!-- Merlin mode panel (hidden by default) -->
@@ -1522,6 +1500,10 @@
         <!-- TD-level controls (always visible, even during Merlin/test mode) -->
         <section id="td-controls">
           <h3>TouchDesigner</h3>
+          <div class="ws-info">
+            <span class="ws-label">Bridge:</span>
+            <span id="ws-status" class="ws-value">--</span>
+          </div>
           <button id="td-reset-btn" class="td-reset-btn" title="Push baseline shaders, default sprite, mesh mode, and idle program to TD">
             Reset to Baseline
           </button>

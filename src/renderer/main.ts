@@ -112,7 +112,7 @@ let drawPoseEnabled = true;
 let drawFaceEnabled = true;
 let drawSegmentEnabled = true;
 
-// Latest analysis results (used by mentalist mode)
+// Latest analysis results
 let lastFaceAnalysis: MicroExpressionAnalysis | null = null;
 let lastBodyAnalysis: BodyLanguageAnalysis | null = null;
 let lastFaceStripUrl: string | null = null;
@@ -558,7 +558,6 @@ async function captureAndAnalyzeBodyLanguage(): Promise<void> {
 
 /**
  * Quick face analysis - 3 frames over ~1 second
- * Used for real-time mentalist mode analysis
  */
 async function captureQuickFaceAnalysis(): Promise<typeof lastFaceAnalysis> {
   if (isCapturing) {
@@ -599,7 +598,6 @@ async function captureQuickFaceAnalysis(): Promise<typeof lastFaceAnalysis> {
 
 /**
  * Quick body analysis - 3 frames over ~1 second
- * Used for real-time mentalist mode analysis
  */
 async function captureQuickBodyAnalysis(): Promise<typeof lastBodyAnalysis> {
   if (isCapturingBody) {
@@ -835,13 +833,6 @@ function setupSidebar(): void {
   landscapeBtn?.addEventListener('click', () => setOrientation(false, true));
   portraitBtn?.addEventListener('click', () => setOrientation(true, true));
 
-  // WebSocket format link handler
-  const wsFormatLink = document.getElementById('ws-format-link');
-  wsFormatLink?.addEventListener('click', (e) => {
-    e.preventDefault();
-    showWsFormatModal();
-  });
-
   // Start WebSocket stats polling
   startWsStatsPoll();
 
@@ -985,90 +976,6 @@ function startWsStatsPoll(): void {
 }
 
 /**
- * Show WebSocket message format modal
- */
-function showWsFormatModal(): void {
-  // Check if modal already exists
-  let modal = document.getElementById('ws-format-modal');
-  if (modal) {
-    modal.style.display = 'flex';
-    return;
-  }
-
-  // Create modal
-  modal = document.createElement('div');
-  modal.id = 'ws-format-modal';
-  modal.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  `;
-
-  modal.innerHTML = `
-    <div style="background: #1a1a1a; padding: 24px; border-radius: 8px; max-width: 700px; max-height: 80vh; overflow-y: auto; border: 1px solid #333;">
-      <h2 style="margin: 0 0 16px; color: #fff; font-size: 18px;">WebSocket Message Format</h2>
-      <p style="color: #888; font-size: 13px; margin-bottom: 16px;">
-        Merlin runs a WebSocket server on localhost. Clients connect to receive tracking data and scene control messages as JSON.
-      </p>
-      <h3 style="color: #0f0; font-size: 14px; margin: 16px 0 8px;">High-Frequency (30fps):</h3>
-      <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">tracking_frame</td>
-          <td style="padding: 6px 8px; color: #888;">fps, frame {width, height, portrait}, pose {detected, landmarks[]}, face {detected, bbox}</td>
-        </tr>
-      </table>
-      <h3 style="color: #0f0; font-size: 14px; margin: 16px 0 8px;">Event-Driven:</h3>
-      <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">orientation_update</td>
-          <td style="padding: 6px 8px; color: #888;">portrait, width, height</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">mood_update</td>
-          <td style="padding: 6px 8px; color: #888;">mood, color, intensity</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">scene_params</td>
-          <td style="padding: 6px 8px; color: #888;">params {particle_*, aura_*, ...}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">mentalist_state</td>
-          <td style="padding: 6px 8px; color: #888;">active, phase, mood, colorAccent</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #333;">
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">reveal_effect</td>
-          <td style="padding: 6px 8px; color: #888;">effect_type, intensity, duration</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 8px; color: #6af; font-family: monospace;">zone_update</td>
-          <td style="padding: 6px 8px; color: #888;">zone, glsl_code</td>
-        </tr>
-      </table>
-      <p style="color: #666; font-size: 11px; margin-top: 16px;">
-        Coordinates are normalized 0-1. Pose landmarks follow the MediaPipe BlazePose topology (33 landmarks).
-      </p>
-      <button id="ws-modal-close" style="margin-top: 16px; background: #333; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Close</button>
-    </div>
-  `;
-
-  document.body.appendChild(modal);
-
-  // Close on click outside or close button
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal || (e.target as HTMLElement).id === 'ws-modal-close') {
-      modal!.style.display = 'none';
-    }
-  });
-}
-
-/**
  * Execute a voice command action
  */
 function executeVoiceCommand(action: VoiceCommandAction): void {
@@ -1078,11 +985,6 @@ function executeVoiceCommand(action: VoiceCommandAction): void {
   const drawPoseCheckbox = document.getElementById('draw-pose') as HTMLInputElement;
   const drawFaceCheckbox = document.getElementById('draw-face') as HTMLInputElement;
   const drawSegmentCheckbox = document.getElementById('draw-segment') as HTMLInputElement;
-  const autoFaceCheckbox = document.getElementById('auto-face') as HTMLInputElement;
-  const autoBodyCheckbox = document.getElementById('auto-body') as HTMLInputElement;
-  const faceIntervalInput = document.getElementById('face-interval') as HTMLInputElement;
-  const bodyIntervalInput = document.getElementById('body-interval') as HTMLInputElement;
-
   switch (action.type) {
     case 'toggle_pose':
       detectPoseEnabled = action.enabled;
@@ -1135,16 +1037,6 @@ function executeVoiceCommand(action: VoiceCommandAction): void {
 
     case 'capture_body':
       captureAndAnalyzeBodyLanguage();
-      break;
-
-    // Legacy auto-analysis commands (UI removed, kept for voice command compatibility)
-    case 'start_auto_face':
-    case 'stop_auto_face':
-    case 'start_auto_body':
-    case 'stop_auto_body':
-    case 'set_face_interval':
-    case 'set_body_interval':
-      console.log('Auto-analysis commands not available (UI removed)');
       break;
 
     default:
