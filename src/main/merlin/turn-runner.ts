@@ -308,28 +308,30 @@ export async function dispatchToolCalls(
       case 'request_visual_feedback': {
         const { intent } = call.args as { intent: string };
 
-        // Block screenshots while any zone is in 'error' state — that
-        // zone's code reset to default, so the screenshot would be
-        // misleading. Force Gemini to fix the broken shader first.
+        // Block screenshots while any zone's most recent compile
+        // attempt failed — even if it has since been rolled back to
+        // 'default' status. Otherwise Gemini gets a screenshot of
+        // template-default visuals and reads it as evidence of its
+        // intended spell, leading to confident hallucinated summaries.
         const { zoneStateManager } = await import('./zone-state');
-        const allStatuses = zoneStateManager.getAllZoneStatuses();
-        const errorZones = Object.entries(allStatuses)
-          .filter(([, status]) => status === 'error')
-          .map(([name]) => name);
-        if (errorZones.length > 0) {
+        const { ZONE_NAMES } = await import('./zone-registry');
+        const failedZones = ZONE_NAMES.filter(
+          (z) => zoneStateManager.getLastCompileSuccess(z) === false
+        );
+        if (failedZones.length > 0) {
           response = {
             success: false,
             error:
-              `Cannot capture screenshot — these zones are in an error state and reverted to defaults: ` +
-              `${errorZones.join(', ')}. ` +
+              `Cannot capture screenshot — these zones recently failed to compile and reverted to defaults: ` +
+              `${failedZones.join(', ')}. ` +
               `Fix them with set_zone_shader before requesting visual feedback. ` +
-              `A screenshot taken now would not reflect your intended visuals.`,
+              `A screenshot taken now would show template defaults, not your intended visuals.`,
           };
           break;
         }
 
         const { send } = await import('../td-bridge/connection');
-        const { requestScreenshot } = await import('../td-bridge/metrics');
+        const { requestScreenshot, getLatestMetrics, getLatestVisibility } = await import('../td-bridge/metrics');
         const screenshot = await requestScreenshot(send, 5000);
         if (screenshot) {
           // Gemini 3: attach the screenshot as a multimodal part on
@@ -353,14 +355,70 @@ export async function dispatchToolCalls(
               caption: intent,
             },
           });
+          // Also attach the most-recently-pushed sprite (if any) as a
+          // SECOND inline image so Gemini can A/B compare: "is the
+          // texture in the screenshot the same as the sprite I just
+          // generated?" Without this, Gemini has no visual reference
+          // for what the active sprite should look like and can miss
+          // sprite-load failures even when the screenshot clearly
+          // shows the wrong texture.
+          let activeSpriteAttached = false;
+          let activeSpriteDescription: string | null = null;
+          let activeSpriteAssetType: 'flipbook' | 'single' | null = null;
+          try {
+            const { getLastSpritePush } = await import('./td-state-mirror');
+            const lastSprite = getLastSpritePush();
+            if (lastSprite) {
+              const { readFileSync } = await import('fs');
+              const png = readFileSync(lastSprite.texturePath);
+              extraImages.push({
+                mimeType: 'image/png',
+                base64: png.toString('base64'),
+                callId: call.id,
+              });
+              activeSpriteAttached = true;
+              activeSpriteDescription = lastSprite.description ?? null;
+              activeSpriteAssetType = lastSprite.assetType;
+            }
+          } catch (e) {
+            console.warn(
+              `[TurnRunner] Couldn't attach active sprite preview: ${e instanceof Error ? e.message : String(e)}`
+            );
+          }
+
+          // Quantitative ground truth alongside the screenshot. If
+          // visible_particles is 0 or render_vs_webcam_diff is near 0,
+          // particles aren't visible regardless of what the screenshot
+          // suggests. Gemini is instructed (in the system prompt) to
+          // check these before declaring the spell complete.
+          const m = getLatestMetrics();
+          const v = getLatestVisibility();
+          const baseInstruction =
+            'The screenshot is attached as the FIRST inline image on this function response. ' +
+            'Cross-reference it with the metrics: visible_particles tells you how many particles cleared culling; ' +
+            'avg_brightness near 0 means particles render dim/invisible; render_vs_webcam_diff near 0 means the ' +
+            'final composite is essentially the webcam (your particles are not contributing). ' +
+            'Refine via set_zone_shader if the visuals do not match the intent.';
+          const spriteInstruction = activeSpriteAttached
+            ? ` A SECOND inline image is also attached: the ${activeSpriteAssetType ?? ''} sprite that should currently be on every particle (described as "${activeSpriteDescription ?? '(no description)'}"). Compare its texture to what you see in the screenshot — if the screenshot's particles don't show this sprite's texture, the sprite load failed or a shader is masking it; investigate before iterating on visual style.`
+            : '';
           response = {
             success: true,
             intent,
             width: screenshot.width,
             height: screenshot.height,
-            instruction:
-              'The screenshot is attached as a multimodal part on this function response. ' +
-              'Analyze it and refine via set_zone_shader if it does not match the intent.',
+            metrics: {
+              fps: m?.fps ?? null,
+              particle_count: m?.particleCount ?? null,
+              coverage: m?.coverage ?? null,
+              visible_particles: v?.visibleParticles ?? null,
+              avg_brightness: v?.avgBrightness ?? null,
+              render_vs_webcam_diff: v?.renderVsWebcamDiff ?? null,
+            },
+            active_sprite: activeSpriteAttached
+              ? { description: activeSpriteDescription, assetType: activeSpriteAssetType }
+              : null,
+            instruction: baseInstruction + spriteInstruction,
           };
         } else {
           response = {
@@ -391,8 +449,35 @@ export async function dispatchToolCalls(
         try {
           const { getSpriteGenerator } = await import('./sprite-generator');
           const { pushSpriteTexture, pushFlipbookConfig } = await import('../td-bridge');
+          const { waitForSpriteLoad } = await import('../td-bridge/metrics');
+          const { readFileSync } = await import('fs');
           const generator = getSpriteGenerator();
           const isFlipbook = animation || (frameCount && frameCount > 1);
+
+          // Helper: read the sprite PNG and attach it to the function
+          // response as a multimodal part so Gemini has visual ground
+          // truth for what its sprite looks like (vs. a stale leftover
+          // from a previous spell). The accompanying caption goes in
+          // the response JSON's `message` field — Gemini reads both
+          // together, so it knows what the inline image represents.
+          const attachSpritePreview = (
+            assetId: string,
+            texturePath: string
+          ): boolean => {
+            try {
+              const png = readFileSync(texturePath);
+              extraImages.push({
+                mimeType: 'image/png',
+                base64: png.toString('base64'),
+                callId: call.id,
+              });
+              return true;
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              console.warn(`[TurnRunner] Couldn't attach sprite preview ${assetId}: ${errMsg}`);
+              return false;
+            }
+          };
 
           if (isFlipbook) {
             const validFrameCount = (frameCount ?? 16) as 4 | 8 | 9 | 12 | 16 | 25;
@@ -413,12 +498,37 @@ export async function dispatchToolCalls(
                   recordFlipbookConfigPush(r.flipbookConfig);
                 }
               }
+              // Block until TD confirms the new texture is on the GPU.
+              // Without this, a follow-up request_visual_feedback can
+              // race ahead and screenshot the previous spell's sprite.
+              const ack = await waitForSpriteLoad(r.asset.assetId, 5000);
+              if (!ack.success) {
+                response = {
+                  success: false,
+                  error: ack.timedOut
+                    ? `Sprite generated but TD did not ACK load within 5s for asset ${r.asset.assetId}`
+                    : `Sprite generated but TD load failed: ${ack.error ?? 'unknown error'}`,
+                };
+                break;
+              }
+              // Record so request_visual_feedback can re-show this sprite
+              // alongside future screenshots.
+              const { recordSpriteTexturePush } = await import('./td-state-mirror');
+              recordSpriteTexturePush({
+                assetId: r.asset.assetId,
+                texturePath: r.asset.texturePath,
+                description,
+                assetType: 'flipbook',
+              });
+              const previewAttached = attachSpritePreview(r.asset.assetId, r.asset.texturePath);
               response = {
                 success: true,
                 assetId: r.asset.assetId,
                 assetType: 'flipbook',
                 frameCount: r.asset.frameCount,
-                message: `Generated ${r.asset.frameCount}-frame flipbook sprite: "${description}"`,
+                message: previewAttached
+                  ? `Generated ${r.asset.frameCount}-frame flipbook sprite for "${description}". The atlas (${r.asset.frameCount} frames in a grid) is attached as an inline image — this is the texture now active on every particle. Each particle samples one frame at a time per the flipbook config. Use this image as ground truth when you later view a screenshot: if the screenshot's particles don't show this texture, the load failed or a shader is hiding it.`
+                  : `Generated ${r.asset.frameCount}-frame flipbook sprite for "${description}".`,
               };
             } else {
               response = {
@@ -440,11 +550,33 @@ export async function dispatchToolCalls(
                 const { recordFlipbookConfigPush } = await import('./td-state-mirror');
                 recordFlipbookConfigPush(BASELINE_FLIPBOOK);
               }
+              // Block until TD confirms the new texture is on the GPU
+              // (see flipbook branch comment above).
+              const ack = await waitForSpriteLoad(r.asset.assetId, 5000);
+              if (!ack.success) {
+                response = {
+                  success: false,
+                  error: ack.timedOut
+                    ? `Sprite generated but TD did not ACK load within 5s for asset ${r.asset.assetId}`
+                    : `Sprite generated but TD load failed: ${ack.error ?? 'unknown error'}`,
+                };
+                break;
+              }
+              const { recordSpriteTexturePush } = await import('./td-state-mirror');
+              recordSpriteTexturePush({
+                assetId: r.asset.assetId,
+                texturePath: r.asset.texturePath,
+                description,
+                assetType: 'single',
+              });
+              const previewAttached = attachSpritePreview(r.asset.assetId, r.asset.texturePath);
               response = {
                 success: true,
                 assetId: r.asset.assetId,
                 assetType: 'single',
-                message: `Generated sprite: "${description}"`,
+                message: previewAttached
+                  ? `Generated single-frame sprite for "${description}". The sprite is attached as an inline image — this is the texture now active on every particle. Use this image as ground truth when you later view a screenshot.`
+                  : `Generated single-frame sprite for "${description}".`,
               };
             } else {
               response = {

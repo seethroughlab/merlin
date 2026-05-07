@@ -95,7 +95,7 @@ export type TDInboundMessage =
   | { type: 'td_ready'; capabilities: TDCapabilities }
   | { type: 'compile_result'; zone: string; success: boolean; error?: string }
   | { type: 'metrics'; fps: number; particle_count: number; coverage: number }
-  | { type: 'visibility'; visible_particles: number; culled_particles: number; avg_brightness: number }
+  | { type: 'visibility'; visible_particles: number; culled_particles: number; avg_brightness: number; render_vs_webcam_diff?: number }
   | { type: 'screenshot_result'; base64: string; width: number; height: number }
   | { type: 'sprite_loaded'; assetId: string; success: boolean; error?: string }
   | { type: 'sprite_reset'; success: boolean }

@@ -30,6 +30,16 @@ vi.mock('../td-bridge', () => ({
   pushFlipbookConfig: mockPushFlipbookConfig,
 }));
 
+// Sprite-loaded ACK — resolved immediately in tests so waitForSpriteLoad
+// in test-sprite.ts doesn't time out.
+const { mockWaitForSpriteLoad } = vi.hoisted(() => ({
+  mockWaitForSpriteLoad: vi.fn(async () => ({ success: true })),
+}));
+
+vi.mock('../td-bridge/metrics', () => ({
+  waitForSpriteLoad: mockWaitForSpriteLoad,
+}));
+
 const { mockReadFileSync } = vi.hoisted(() => ({
   mockReadFileSync: vi.fn(() => Buffer.from('fake-png-bytes')),
 }));
@@ -135,7 +145,7 @@ describe('generateSpriteDirect', () => {
     });
     expect(result.success).toBe(true);
     expect(result.assetType).toBe('single');
-    expect(result.pushed).toEqual({ texture: true, flipbook: true });
+    expect(result.pushed).toEqual({ texture: true, flipbook: true, confirmed: true });
     expect(result.previewPng).toBe(Buffer.from('fake-png-bytes').toString('base64'));
   });
 
@@ -168,7 +178,7 @@ describe('generateSpriteDirect', () => {
     expect(mockPushSpriteTexture).toHaveBeenCalledWith('fake-id', '/fake/path/atlas.png');
     expect(mockPushFlipbookConfig).toHaveBeenCalledWith(makeFlipbookConfig());
     expect(result.assetType).toBe('flipbook');
-    expect(result.pushed).toEqual({ texture: true, flipbook: true });
+    expect(result.pushed).toEqual({ texture: true, flipbook: true, confirmed: true });
   });
 
   it('routes to flipbook path when frameCount > 1 even without animation', async () => {

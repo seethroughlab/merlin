@@ -704,9 +704,88 @@ def handle_request_metrics(dat):
     dat.sendText(json.dumps(metrics))
 
 
+def _emit_visibility_message(dat):
+    """Emit a visibility message alongside a screenshot.
+
+    Gives the JS side fresh quantitative ground-truth (visible particle
+    count, average particle brightness, particle-render vs webcam diff)
+    so Gemini can cross-reference its visual eval with hard numbers.
+    Sent as a separate WS message just before the screenshot_result so
+    metrics.ts updateVisibility() runs first.
+    """
+    import numpy as np
+
+    visible_particles = 0
+    # particlePOP / nullPOP expose numPoints() as a method (not property);
+    # particles_out is the "after spawn-shader" canonical count of live
+    # particles. Older logic looked for /project1/popnet1 which doesn't
+    # exist in this project.
+    pop_count = op('/project1/particles_out') or op('/project1/particle1')
+    if pop_count:
+        try:
+            visible_particles = int(pop_count.numPoints())
+        except Exception:
+            pass
+
+    avg_brightness = 0.0
+    pr = op('/project1/particle_render_out')
+    if pr:
+        try:
+            arr = pr.numpyArray(delayed=False)
+            # mean over rgb channels (skip alpha)
+            avg_brightness = float(arr[:, :, :3].mean())
+        except Exception:
+            pass
+
+    render_vs_webcam_diff = 0.0
+    # Compare what the user actually sees (out_final) to the raw webcam
+    # (syphonspoutin1). Near-zero diff means the spell isn't visibly
+    # contributing pixels to the final composite. The compositeTOP
+    # "difference" operand turned out to be a photoshop-style blend
+    # (centered at midgray), not a raw abs-diff — so do the math in
+    # numpy directly. ~3 ms on 720p frames; only runs when Gemini
+    # requests visual feedback, so the cost is negligible.
+    of = op('/project1/out_final')
+    ss = op('/project1/syphonspoutin1')
+    if of and ss:
+        try:
+            of_arr = of.numpyArray(delayed=False)
+            ss_arr = ss.numpyArray(delayed=False)
+            # If shapes don't match (e.g. webcam not yet streaming at
+            # full res), skip — return 0.0 rather than crash.
+            if of_arr.shape == ss_arr.shape:
+                render_vs_webcam_diff = float(
+                    np.abs(of_arr[:, :, :3] - ss_arr[:, :, :3]).mean()
+                )
+        except Exception:
+            pass
+
+    msg = {
+        'type': 'visibility',
+        'visible_particles': visible_particles,
+        'culled_particles': 0,
+        'avg_brightness': avg_brightness,
+        'render_vs_webcam_diff': render_vs_webcam_diff,
+    }
+    dat.sendText(json.dumps(msg))
+
+
 def handle_request_screenshot(dat):
-    """Handle request_screenshot message - capture render and send as base64."""
+    """Handle request_screenshot message - capture render and send as base64.
+
+    Also emits a visibility message first so the JS side has fresh
+    metrics (visible particles / avg brightness / render-vs-webcam diff)
+    when it processes the upcoming screenshot.
+    """
     import base64
+
+    # Emit visibility metrics before the screenshot. JS side processes
+    # messages in order, so updateVisibility runs before the screenshot
+    # response handler reads getLatestVisibility().
+    try:
+        _emit_visibility_message(dat)
+    except Exception as e:
+        print(f"[WS] visibility-emit error (non-fatal): {e}")
 
     # Prefer out_final — that's the post-comp output the live experience
     # actually shows. Fall back to earlier render stages if it's missing.

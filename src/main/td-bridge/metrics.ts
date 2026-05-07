@@ -34,6 +34,17 @@ export interface VisibilityMetrics {
   visibleParticles: number;
   culledParticles: number;
   avgBrightness: number;
+  /**
+   * Average per-pixel difference between the particle render output
+   * (`particle_render_out`) and the raw webcam (`syphonspoutin1`).
+   * Near 0 = the final composite is essentially the webcam (particles
+   * not contributing visibly). Above ~0.01 = particles are altering
+   * the final image.
+   *
+   * Optional — TD may not always emit this field (older TD projects).
+   * When absent, treat as "unknown" rather than 0.
+   */
+  renderVsWebcamDiff?: number;
   timestamp: number;
 }
 
@@ -47,6 +58,28 @@ let latestVisibility: VisibilityMetrics | null = null;
 // Pending screenshot request
 let screenshotResolve: ((screenshot: TDScreenshot | null) => void) | null = null;
 let screenshotTimeout: NodeJS.Timeout | null = null;
+
+/**
+ * One in-flight sprite load: resolved by `handleSpriteLoaded` when the
+ * matching `sprite_loaded` WS message arrives from TD. Keyed by assetId
+ * so concurrent loads (rare) don't collide and so `waitForSpriteLoad`
+ * is robust if called slightly late (the resolver still has its key).
+ */
+interface PendingSpriteLoad {
+  resolve: (r: SpriteLoadResult) => void;
+  timeoutId: NodeJS.Timeout;
+}
+const pendingSpriteLoads = new Map<string, PendingSpriteLoad>();
+
+/**
+ * Outcome of a `waitForSpriteLoad` call.
+ */
+export interface SpriteLoadResult {
+  success: boolean;
+  error?: string;
+  /** True if no `sprite_loaded` message arrived within timeoutMs. */
+  timedOut?: boolean;
+}
 
 /**
  * Update metrics from TD
@@ -75,11 +108,15 @@ export function updateVisibility(visibility: {
   visible_particles: number;
   culled_particles: number;
   avg_brightness: number;
+  render_vs_webcam_diff?: number;
 }): void {
   latestVisibility = {
     visibleParticles: visibility.visible_particles,
     culledParticles: visibility.culled_particles,
     avgBrightness: visibility.avg_brightness,
+    ...(typeof visibility.render_vs_webcam_diff === 'number'
+      ? { renderVsWebcamDiff: visibility.render_vs_webcam_diff }
+      : {}),
     timestamp: Date.now(),
   };
 }
@@ -153,6 +190,62 @@ export function requestScreenshot(
 }
 
 /**
+ * Wait for TD's `sprite_loaded` ACK for a specific assetId.
+ *
+ * `pushSpriteTexture` is fire-and-forget — TD takes a moment to load
+ * the file and update its movieFileIn TOP. Without awaiting the ACK,
+ * a screenshot taken immediately afterward would render the *previous*
+ * sprite still on the GPU. Call this after `pushSpriteTexture` to
+ * block until the new texture is actually live.
+ *
+ * Resolves with `{success, error?}` when the matching ACK arrives,
+ * or `{success: false, timedOut: true}` after `timeoutMs`.
+ */
+export function waitForSpriteLoad(
+  assetId: string,
+  timeoutMs: number = 5000
+): Promise<SpriteLoadResult> {
+  return new Promise((resolve) => {
+    // Cancel any previous wait for this assetId — only one consumer
+    // should be waiting per asset.
+    const existing = pendingSpriteLoads.get(assetId);
+    if (existing) {
+      clearTimeout(existing.timeoutId);
+      existing.resolve({ success: false, error: 'superseded by newer wait' });
+    }
+
+    const timeoutId = setTimeout(() => {
+      const pending = pendingSpriteLoads.get(assetId);
+      if (pending) {
+        pendingSpriteLoads.delete(assetId);
+        console.warn(`[TDMetrics ${ts()}] sprite_loaded ACK timed out for ${assetId}`);
+        pending.resolve({ success: false, timedOut: true });
+      }
+    }, timeoutMs);
+
+    pendingSpriteLoads.set(assetId, { resolve, timeoutId });
+  });
+}
+
+/**
+ * Resolve any pending `waitForSpriteLoad(assetId)` with the ACK from
+ * TD. Called by `protocol.ts` when a `sprite_loaded` message arrives.
+ * No-op if nobody was waiting on this assetId (also fine — the
+ * pre-existing onSpriteLoaded callback path still fires in protocol.ts).
+ */
+export function handleSpriteLoaded(result: {
+  assetId: string;
+  success: boolean;
+  error?: string;
+}): void {
+  const pending = pendingSpriteLoads.get(result.assetId);
+  if (!pending) return;
+  clearTimeout(pending.timeoutId);
+  pendingSpriteLoads.delete(result.assetId);
+  pending.resolve({ success: result.success, error: result.error });
+}
+
+/**
  * Get latest metrics
  */
 export function getLatestMetrics(): TDMetrics | null {
@@ -214,6 +307,14 @@ export function clearMetrics(): void {
   if (screenshotTimeout) {
     clearTimeout(screenshotTimeout);
     screenshotTimeout = null;
+  }
+
+  // Resolve any in-flight sprite-load waits with a disconnect failure
+  // so the awaiting generate_sprite handler doesn't hang forever.
+  for (const [assetId, pending] of pendingSpriteLoads) {
+    clearTimeout(pending.timeoutId);
+    pending.resolve({ success: false, error: 'TD disconnected' });
+    pendingSpriteLoads.delete(assetId);
   }
 }
 

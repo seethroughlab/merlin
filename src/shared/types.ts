@@ -407,7 +407,16 @@ export interface SpriteTestResult {
   flipbookConfig?: SpriteFlipbookConfig;
   /** Args Gemini chose, only set in Gemini-interpretation mode. */
   geminiArgs?: SpriteTestSpec;
-  pushed: { texture: boolean; flipbook: boolean };
+  pushed: {
+    texture: boolean;
+    flipbook: boolean;
+    /**
+     * Whether TD ACK'd the sprite_loaded message — `true` only after
+     * TD confirmed the new texture is on the GPU. Optional because
+     * older callers / tests may not surface it.
+     */
+    confirmed?: boolean;
+  };
 }
 
 // ============ TEST FLIPBOOK TYPES ============

@@ -20,6 +20,7 @@ import { GENERATE_SPRITE_TOOL } from './prompts';
 import { getSpriteGenerator } from './sprite-generator';
 import { getFlipbookConfig } from './asset-manager';
 import { pushSpriteTexture, pushFlipbookConfig } from '../td-bridge';
+import { waitForSpriteLoad } from '../td-bridge/metrics';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import { BASELINE_FLIPBOOK } from './reset-td';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
@@ -121,12 +122,20 @@ export async function generateSpriteDirect(
     const flipbookPushed = pushFlipbookConfig(flipbook);
     if (flipbookPushed) recordFlipbookConfigPush(flipbook);
 
+    // Wait for TD's sprite_loaded ACK so the texture is verified on
+    // the GPU before the test result returns. Skip the wait if the
+    // push itself failed (TD not connected — there's nothing to ACK).
+    const ack = texturePushed
+      ? await waitForSpriteLoad(asset.assetId, 5000)
+      : { success: false, error: 'texture push skipped (TD not connected)' };
+
     emitGeminiTurn({
       id: turnId,
       source: 'test_sprite',
       pushResults: [
         { label: `sprite_texture (${asset.assetId})`, success: texturePushed, error: texturePushed ? undefined : 'TD not connected' },
         { label: 'flipbook_config', success: flipbookPushed, error: flipbookPushed ? undefined : 'TD not connected' },
+        { label: 'sprite_loaded ACK', success: ack.success, error: ack.success ? undefined : (ack.error ?? 'ACK timeout') },
       ],
       final: emitOwnTurn,
     });
@@ -138,7 +147,7 @@ export async function generateSpriteDirect(
       texturePath: asset.texturePath,
       previewPng: readPngAsBase64(asset.texturePath),
       flipbookConfig: flipbook,
-      pushed: { texture: texturePushed, flipbook: flipbookPushed },
+      pushed: { texture: texturePushed, flipbook: flipbookPushed, confirmed: ack.success },
     };
   }
 
@@ -166,12 +175,19 @@ export async function generateSpriteDirect(
   const flipbookPushed = pushFlipbookConfig(BASELINE_FLIPBOOK);
   if (flipbookPushed) recordFlipbookConfigPush(BASELINE_FLIPBOOK);
 
+  // Wait for TD's sprite_loaded ACK so the texture is verified on
+  // the GPU before the test result returns.
+  const ack = texturePushed
+    ? await waitForSpriteLoad(asset.assetId, 5000)
+    : { success: false, error: 'texture push skipped (TD not connected)' };
+
   emitGeminiTurn({
     id: turnId,
     source: 'test_sprite',
     pushResults: [
       { label: `sprite_texture (${asset.assetId})`, success: texturePushed, error: texturePushed ? undefined : 'TD not connected' },
       { label: 'flipbook_config (reset 1×1)', success: flipbookPushed, error: flipbookPushed ? undefined : 'TD not connected' },
+      { label: 'sprite_loaded ACK', success: ack.success, error: ack.success ? undefined : (ack.error ?? 'ACK timeout') },
     ],
     final: emitOwnTurn,
   });
@@ -182,7 +198,7 @@ export async function generateSpriteDirect(
     assetType: 'single',
     texturePath: asset.texturePath,
     previewPng: readPngAsBase64(asset.texturePath),
-    pushed: { texture: texturePushed, flipbook: flipbookPushed },
+    pushed: { texture: texturePushed, flipbook: flipbookPushed, confirmed: ack.success },
   };
 }
 

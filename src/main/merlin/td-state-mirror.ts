@@ -31,6 +31,24 @@ export const DEFAULT_MIRROR: MirroredTDState = {
 
 let state: MirroredTDState = cloneDefault();
 
+/**
+ * Local-only record of the most-recently-pushed sprite. Read by
+ * request_visual_feedback so Gemini can be shown the active sprite
+ * alongside the screenshot ("compare these two — does the texture
+ * match?"). Not part of MirroredTDState because the Flipbook tab
+ * doesn't need it — it's a turn-runner concern.
+ */
+interface SpritePushRecord {
+  assetId: string;
+  texturePath: string;
+  description?: string;
+  /** 'flipbook' (atlas) or 'single'. */
+  assetType: 'flipbook' | 'single';
+  pushedAt: number;
+}
+
+let lastSpritePush: SpritePushRecord | null = null;
+
 function cloneDefault(): MirroredTDState {
   return {
     flipbook: { ...DEFAULT_MIRROR.flipbook },
@@ -54,7 +72,23 @@ export function recordFlipbookConfigPush(config: SpriteFlipbookConfig): void {
   state.lastSource = 'flipbook_config';
 }
 
+/** Record that a sprite was just pushed to TD (texture path on disk + metadata). */
+export function recordSpriteTexturePush(record: {
+  assetId: string;
+  texturePath: string;
+  description?: string;
+  assetType: 'flipbook' | 'single';
+}): void {
+  lastSpritePush = { ...record, pushedAt: Date.now() };
+}
+
+/** Latest sprite push, or null if no sprite has been pushed this session. */
+export function getLastSpritePush(): SpritePushRecord | null {
+  return lastSpritePush ? { ...lastSpritePush } : null;
+}
+
 /** Test-only reset between vitest cases. */
 export function resetMirror(): void {
   state = cloneDefault();
+  lastSpritePush = null;
 }

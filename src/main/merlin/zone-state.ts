@@ -22,6 +22,16 @@ interface ZoneState {
   status: ZoneStatus;
   error: string | null;
   previousCode: string | null;
+  /**
+   * Outcome of the most recent compile attempt:
+   *  - null  : never attempted
+   *  - true  : last compile succeeded
+   *  - false : last compile failed (stays false through rollback —
+   *            does NOT reset to null when status drops back to
+   *            'default'). Lets the screenshot guard distinguish
+   *            "untouched zone" from "recently failed zone".
+   */
+  lastCompileSuccess: boolean | null;
 }
 
 /**
@@ -48,6 +58,7 @@ class ZoneStateManager {
         status: 'default',
         error: null,
         previousCode: null,
+        lastCompileSuccess: null,
       });
     }
   }
@@ -121,10 +132,12 @@ class ZoneStateManager {
     if (success) {
       state.status = 'active';
       state.error = null;
+      state.lastCompileSuccess = true;
       console.log(`[ZoneState] Zone '${zoneName}' compiled successfully`);
     } else {
       state.status = 'error';
       state.error = error || 'Compilation failed';
+      state.lastCompileSuccess = false;
       console.log(`[ZoneState] Zone '${zoneName}' compile failed: ${state.error}`);
     }
 
@@ -172,6 +185,23 @@ class ZoneStateManager {
   }
 
   /**
+   * Outcome of the most recent compile attempt for this zone.
+   *  - null  : never attempted
+   *  - true  : last attempt succeeded (regardless of any later
+   *            updateZone() that put it back into 'pending')
+   *  - false : last attempt failed (stays false through rollback;
+   *            only flips back to true after a successful compile)
+   *
+   * Used by the screenshot guard so a screenshot can be refused
+   * even after a failed zone has been silently rolled back to its
+   * default code (status='default' but lastCompileSuccess=false).
+   */
+  getLastCompileSuccess(zoneName: string): boolean | null {
+    const state = this.zones.get(zoneName);
+    return state?.lastCompileSuccess ?? null;
+  }
+
+  /**
    * Get zone error message
    */
   getZoneError(zoneName: string): string | null {
@@ -215,6 +245,7 @@ class ZoneStateManager {
         status: 'default',
         error: null,
         previousCode: null,
+        lastCompileSuccess: null,
       });
     }
 

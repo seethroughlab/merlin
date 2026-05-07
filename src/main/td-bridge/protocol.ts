@@ -6,7 +6,7 @@
 
 import type { TDInboundMessage, TDBridgeState, TDBridgeCallbacks } from './types';
 import { zoneStateManager } from '../merlin/zone-state';
-import { updateMetrics, updateVisibility, handleScreenshotResponse } from './metrics';
+import { updateMetrics, updateVisibility, handleScreenshotResponse, handleSpriteLoaded } from './metrics';
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
@@ -63,6 +63,9 @@ export function handleInbound(
         visible_particles: message.visible_particles,
         culled_particles: message.culled_particles,
         avg_brightness: message.avg_brightness,
+        ...(typeof message.render_vs_webcam_diff === 'number'
+          ? { render_vs_webcam_diff: message.render_vs_webcam_diff }
+          : {}),
       });
       break;
 
@@ -85,15 +88,21 @@ export function handleInbound(
       break;
 
     case 'sprite_loaded':
-      // TD confirms a sprite_texture push was received and applied. No
-      // direct UI surface for this today; logging at debug level keeps
-      // it from spamming the console.
+      // TD confirms a sprite_texture push was received and applied
+      // (texture cooked, sprite_switch flipped). Resolve any waiter
+      // (so generate_sprite doesn't return until the GPU has the new
+      // texture), and call the UI callback.
       if (!message.success) {
         console.warn(
           `[TDBridge ${ts()}] sprite_loaded reported failure for asset ${message.assetId}:`,
           message.error
         );
       }
+      handleSpriteLoaded({
+        assetId: message.assetId,
+        success: message.success,
+        error: message.error,
+      });
       callbacks.onSpriteLoaded?.({
         assetId: message.assetId,
         success: message.success,
