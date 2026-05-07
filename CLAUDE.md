@@ -8,7 +8,7 @@ Interactive AR experience combining Electron, MediaPipe tracking, and TouchDesig
 - **TouchDesigner** (`td/demo.toe`): Real-time particle systems, shaders, compositing
 - **Bridge**: WebSocket on port 8001 for Electron↔TD communication
 
-Gemini SDK: **`@google/genai` v1+** (the new SDK; supports Gemini 3 multimodal function responses). Default model is `gemini-3-flash-preview`. The legacy `@google/generative-ai` SDK is still in `package.json` but only used by `tts.ts`, `sprite-generator.ts`, `gemini.ts` (one-shot generateContent paths that don't need nested-parts function responses).
+Gemini SDK: **`@google/genai` v1+** (the new SDK; supports Gemini 3 multimodal function responses). Default model is `gemini-3-flash-preview`. The legacy `@google/generative-ai` SDK is still in `package.json` but only used by `gemini.ts` (one-shot generateContent paths for expression/body analysis and voice commands). `tts.ts` and `sprite-generator.ts` both use the new `@google/genai` SDK.
 
 ## Key Modules
 
