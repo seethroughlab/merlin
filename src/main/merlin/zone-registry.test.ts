@@ -176,6 +176,30 @@ color.rgb += bloom * uBloomIntensity;`;
       const postFxCode = `color.rgb += blurred.rgb * uBloomIntensity * uSpellEnergy;`;
       expect(() => validateZoneCode('post_fx', postFxCode)).not.toThrow();
     });
+
+    it('should pass color_over_life zone code that uses the sprite palette', () => {
+      // Verifies the sprite palette uniforms are exposed via the contract:
+      // uSpriteColor1/uSpriteColor2 are vec3 uniforms wired from extracted sprite colors.
+      const code = `color.rgb = mix(uSpriteColor2, uSpriteColor1, life);`;
+      expect(() => validateZoneCode('color_over_life', code)).not.toThrow();
+    });
+  });
+
+  describe('palette uniforms', () => {
+    it('should list uSpriteColor1/uSpriteColor2 in color_over_life uniforms', () => {
+      expect(ZONE_CONTRACTS.color_over_life.uniforms).toContain('uSpriteColor1');
+      expect(ZONE_CONTRACTS.color_over_life.uniforms).toContain('uSpriteColor2');
+    });
+
+    it('should list uSpriteColor1/uSpriteColor2 in size_over_life uniforms', () => {
+      expect(ZONE_CONTRACTS.size_over_life.uniforms).toContain('uSpriteColor1');
+      expect(ZONE_CONTRACTS.size_over_life.uniforms).toContain('uSpriteColor2');
+    });
+
+    it('should list uSpriteColor1/uSpriteColor2 in billboard_pixel uniforms', () => {
+      expect(ZONE_CONTRACTS.billboard_pixel.uniforms).toContain('uSpriteColor1');
+      expect(ZONE_CONTRACTS.billboard_pixel.uniforms).toContain('uSpriteColor2');
+    });
   });
 
   describe('ZoneValidationError', () => {

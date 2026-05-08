@@ -47,18 +47,18 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     maxLines: 25,
   },
   color_over_life: {
-    description: 'Set particle color',
+    description: 'Set particle color. Sprite-derived palette uniforms uSpriteColor1 (primary) and uSpriteColor2 (accent) are available — use them so per-particle colors match the sprite Imagen produced. Example: color.rgb = mix(uSpriteColor2, uSpriteColor1, life);',
     modifies: 'color',
     availableVars: ['pos', 'vel', 'age', 'lifeSpan', 'life', 'color', 'id', 'idx'],
-    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uSpriteColor1', 'uSpriteColor2'],
     maxLines: 20,
     bannedKeywords: ['discard'],
   },
   size_over_life: {
-    description: 'Set particle size',
+    description: 'Set particle size. Sprite-derived palette uniforms uSpriteColor1/uSpriteColor2 are available if size should respond to color (e.g. brighter accent particles spawn larger).',
     modifies: 'size',
     availableVars: ['age', 'lifeSpan', 'life', 'size', 'id', 'idx'],
-    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uSpriteColor1', 'uSpriteColor2'],
     maxLines: 15,
   },
   spawn_behavior: {
@@ -96,10 +96,10 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     maxLines: 20,
   },
   billboard_pixel: {
-    description: 'Billboard particle pixel shader with flipbook animation',
+    description: 'Billboard particle pixel shader with flipbook animation. Sprite-derived palette uniforms uSpriteColor1/uSpriteColor2 are available for tinting the sampled sprite with its own extracted colors.',
     modifies: ['brightness', 'saturation', 'hueShift'],
     availableVars: ['albedo', 'alpha', 'vel', 'age', 'life', 'id', 'energy', 'mode', 'brightness', 'saturation', 'hueShift'],
-    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uFlipbook1', 'uFlipbook2', 'sSpriteMap'],
+    uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uFlipbook1', 'uFlipbook2', 'sSpriteMap', 'uSpriteColor1', 'uSpriteColor2'],
     maxLines: 25,
   },
 };

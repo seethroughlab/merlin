@@ -511,6 +511,12 @@ export async function dispatchToolCalls(
                 };
                 break;
               }
+              // Push the extracted palette to TD as uSpriteColor1/2 uniforms
+              // and record it for request_visual_feedback diagnostics.
+              if (r.palette) {
+                const { pushSpriteColors } = await import('../td-bridge');
+                pushSpriteColors(r.palette[0], r.palette[1]);
+              }
               // Record so request_visual_feedback can re-show this sprite
               // alongside future screenshots.
               const { recordSpriteTexturePush } = await import('./td-state-mirror');
@@ -519,6 +525,7 @@ export async function dispatchToolCalls(
                 texturePath: r.asset.texturePath,
                 description,
                 assetType: 'flipbook',
+                palette: r.palette,
               });
               const previewAttached = attachSpritePreview(r.asset.assetId, r.asset.texturePath);
               response = {
@@ -526,6 +533,7 @@ export async function dispatchToolCalls(
                 assetId: r.asset.assetId,
                 assetType: 'flipbook',
                 frameCount: r.asset.frameCount,
+                palette: r.palette,
                 message: previewAttached
                   ? `Generated ${r.asset.frameCount}-frame flipbook sprite for "${description}". The atlas (${r.asset.frameCount} frames in a grid) is attached as an inline image — this is the texture now active on every particle. Each particle samples one frame at a time per the flipbook config. Use this image as ground truth when you later view a screenshot: if the screenshot's particles don't show this texture, the load failed or a shader is hiding it.`
                   : `Generated ${r.asset.frameCount}-frame flipbook sprite for "${description}".`,
@@ -562,18 +570,26 @@ export async function dispatchToolCalls(
                 };
                 break;
               }
+              // Push the extracted palette to TD as uSpriteColor1/2 uniforms
+              // and record it for request_visual_feedback diagnostics.
+              if (r.palette) {
+                const { pushSpriteColors } = await import('../td-bridge');
+                pushSpriteColors(r.palette[0], r.palette[1]);
+              }
               const { recordSpriteTexturePush } = await import('./td-state-mirror');
               recordSpriteTexturePush({
                 assetId: r.asset.assetId,
                 texturePath: r.asset.texturePath,
                 description,
                 assetType: 'single',
+                palette: r.palette,
               });
               const previewAttached = attachSpritePreview(r.asset.assetId, r.asset.texturePath);
               response = {
                 success: true,
                 assetId: r.asset.assetId,
                 assetType: 'single',
+                palette: r.palette,
                 message: previewAttached
                   ? `Generated single-frame sprite for "${description}". The sprite is attached as an inline image — this is the texture now active on every particle. Use this image as ground truth when you later view a screenshot.`
                   : `Generated single-frame sprite for "${description}".`,

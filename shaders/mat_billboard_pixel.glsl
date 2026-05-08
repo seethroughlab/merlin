@@ -20,6 +20,13 @@ uniform float uTime;
 uniform vec4 uFlipbook1;
 uniform vec4 uFlipbook2;
 
+// Sprite-derived palette (extracted by Node-side palette.ts after each
+// generate_sprite call; pushed via the sprite_colors WS message and
+// bound on this MAT's Vectors page). Default white before the first
+// generate_sprite call. See improvement-05-palette-sync.md.
+uniform vec3 uSpriteColor1;
+uniform vec3 uSpriteColor2;
+
 out vec4 oFragColor;
 
 // Flipbook frame index calculation

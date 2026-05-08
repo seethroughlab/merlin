@@ -59,6 +59,14 @@ export interface GenerationResult {
   success: boolean;
   asset?: SpriteAsset;
   flipbookConfig?: FlipbookConfig;
+  /**
+   * Two dominant colors extracted from the saved sprite (luminance-
+   * weighted hue split). Pushed to TD as uSpriteColor1/2 uniforms and
+   * surfaced in the generate_sprite tool response so zone shaders can
+   * match the sprite palette. White fallback if extraction fails or
+   * the sprite is mostly black.
+   */
+  palette?: import('./palette').Palette;
   error?: string;
 }
 
@@ -545,9 +553,15 @@ export class SpriteGenerator {
 
       console.log(`[SpriteGen ${ts()}] Saved sprite: ${asset.assetId}`);
 
+      // Extract palette from the saved file. Decoded via Electron's
+      // nativeImage so PNG/JPEG/WebP all work without a new dep.
+      const { extractPaletteFromFile } = await import('./palette');
+      const palette = extractPaletteFromFile(asset.texturePath);
+
       return {
         success: true,
         asset,
+        palette,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -636,10 +650,18 @@ export class SpriteGenerator {
 
       console.log(`[SpriteGen ${ts()}] Saved flipbook: ${asset.assetId} (${frameCount} frames)`);
 
+      // Extract palette from the middle frame so the colors represent the
+      // animation's "peak" state rather than a frame-0 startup state that
+      // may not be visually representative (e.g. fire that fades in).
+      const { extractPaletteFromFile, middleFrameRect } = await import('./palette');
+      const region = middleFrameRect(asset.width, asset.height, cols, rows, frameCount);
+      const palette = extractPaletteFromFile(asset.texturePath, region);
+
       return {
         success: true,
         asset,
         flipbookConfig,
+        palette,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

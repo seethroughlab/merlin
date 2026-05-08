@@ -159,18 +159,29 @@ cast_state = {
 
 
 def _seed_spell_state_defaults():
-    """Ensure tween_rise_ms / tween_fall_ms / peak_energy exist in
-    spell_state so the energy LagCHOP / MathCHOP have valid lag-time and
-    peak expressions before the first set_cast_params arrives.
+    """Ensure tween / peak / sprite-color rows exist in spell_state so the
+    expressions wired by _wire_spell_state_uniforms have valid values to
+    read on first cook.
 
     Only writes rows that are missing — preserves any values already set
-    by a prior set_cast_params call. Idempotent; safe to call on every
-    connect.
+    by a prior set_cast_params / sprite_colors call. Idempotent; safe to
+    call on every connect.
+
+    sprite_color1/2 default to white (1.0, 1.0, 1.0) so zone code that
+    references uSpriteColor1/uSpriteColor2 before generate_sprite has been
+    called gets a neutral color rather than black.
     """
     table = op('/project1/spell_state')
     if table is None:
         return
-    defaults = {'tween_rise_ms': '600', 'tween_fall_ms': '800', 'peak_energy': '1.0'}
+    defaults = {
+        'tween_rise_ms': '600',
+        'tween_fall_ms': '800',
+        'peak_energy': '1.0',
+        # Sprite palette (white baseline; overwritten by handle_sprite_colors)
+        'sprite_color1_r': '1.0', 'sprite_color1_g': '1.0', 'sprite_color1_b': '1.0',
+        'sprite_color2_r': '1.0', 'sprite_color2_g': '1.0', 'sprite_color2_b': '1.0',
+    }
     for key, val in defaults.items():
         if table.findCell(key, cols=[0]) is None:
             update_table_kv(table, key, val)
@@ -196,6 +207,15 @@ def _wire_spell_state_uniforms():
     energy_expr = "op('/project1/spell_energy_remap')['chan1'] if op('/project1/spell_energy_remap') is not None else 0.5"
     mode_expr = "float(op('/project1/spell_state')['mode_float', 1]) if op('/project1/spell_state').numRows > 1 else 0"
 
+    # uSpriteColor1 / uSpriteColor2 are vec3 uniforms — three component
+    # expressions each, one per channel reading the seeded spell_state rows.
+    # See improvement-05-palette-sync.md.
+    def _color_expr(row):
+        return (
+            f"float(op('/project1/spell_state')['{row}', 1]) "
+            f"if op('/project1/spell_state').findCell('{row}', cols=[0]) is not None else 1.0"
+        )
+
     # Probe a known-good parameter to discover the EXPRESSION / CONSTANT
     # mode enums without an explicit import (TD versions vary).
     probe = op('/project1/glsl_postfx')
@@ -205,7 +225,22 @@ def _wire_spell_state_uniforms():
     expression_mode = par_mode.EXPRESSION
     constant_mode = par_mode.CONSTANT
 
-    UNIFORMS = {'uSpellEnergy': energy_expr, 'uSpellMode': mode_expr}
+    # UNIFORMS maps name -> dict of component expressions. Float uniforms
+    # set only 'x'; vec3 uniforms set 'x', 'y', 'z'.
+    UNIFORMS = {
+        'uSpellEnergy': {'x': energy_expr},
+        'uSpellMode':   {'x': mode_expr},
+        'uSpriteColor1': {
+            'x': _color_expr('sprite_color1_r'),
+            'y': _color_expr('sprite_color1_g'),
+            'z': _color_expr('sprite_color1_b'),
+        },
+        'uSpriteColor2': {
+            'x': _color_expr('sprite_color2_r'),
+            'y': _color_expr('sprite_color2_g'),
+            'z': _color_expr('sprite_color2_b'),
+        },
+    }
 
     def wire_op(node, slots=8):
         # Pass 1: clear any Constants-page entries we may have stamped
@@ -237,7 +272,7 @@ def _wire_spell_state_uniforms():
             else:
                 free_slots.append(i)
 
-        for uniform_name, expr in UNIFORMS.items():
+        for uniform_name, components in UNIFORMS.items():
             if uniform_name in existing:
                 slot = existing[uniform_name]
             elif free_slots:
@@ -247,10 +282,11 @@ def _wire_spell_state_uniforms():
                 # No room — node has all 8 vec slots claimed by other
                 # uniforms. Skip; warning will surface in TD.
                 continue
-            valpar = getattr(node.par, f'vec{slot}valuex', None)
-            if valpar is not None:
-                valpar.expr = expr
-                valpar.mode = expression_mode
+            for comp, expr in components.items():
+                valpar = getattr(node.par, f'vec{slot}value{comp}', None)
+                if valpar is not None:
+                    valpar.expr = expr
+                    valpar.mode = expression_mode
 
     targets = [
         '/project1/glsl_force',
@@ -388,6 +424,8 @@ def onReceiveText(dat, rowIndex, message):
             handle_set_cast_params(msg)
         elif msg_type == 'set_particle_params':
             handle_particle_params(msg)
+        elif msg_type == 'sprite_colors':
+            handle_sprite_colors(msg)
 
     except Exception as e:
         print(f"[WS] Error: {e}")
@@ -730,6 +768,38 @@ def handle_set_cast_params(msg):
     print(
         f"[WS] Cast params: rise={msg.get('riseMs', '-')}ms "
         f"fall={msg.get('fallMs', '-')}ms peak={msg.get('peakEnergy', '-')}"
+    )
+
+
+def handle_sprite_colors(msg):
+    """Handle sprite_colors message - update uSpriteColor1/2 vec3 uniforms.
+
+    Writes 6 normalized RGB values into spell_state rows
+    sprite_color{1,2}_{r,g,b}. The expressions wired by
+    _wire_spell_state_uniforms read these rows on every cook so the
+    uniforms refresh as soon as the table updates.
+
+    Pushed automatically after every successful generate_sprite call;
+    reset to white at baseline via BASELINE_PALETTE.
+    """
+    table = op('/project1/spell_state')
+    if not table:
+        return
+
+    c1 = msg.get('color1') or {}
+    c2 = msg.get('color2') or {}
+    if 'r' in c1: update_table_kv(table, 'sprite_color1_r', str(c1['r']))
+    if 'g' in c1: update_table_kv(table, 'sprite_color1_g', str(c1['g']))
+    if 'b' in c1: update_table_kv(table, 'sprite_color1_b', str(c1['b']))
+    if 'r' in c2: update_table_kv(table, 'sprite_color2_r', str(c2['r']))
+    if 'g' in c2: update_table_kv(table, 'sprite_color2_g', str(c2['g']))
+    if 'b' in c2: update_table_kv(table, 'sprite_color2_b', str(c2['b']))
+
+    def _fmt(v):
+        return f"{v:.2f}" if isinstance(v, (int, float)) else "-"
+    print(
+        f"[WS] Sprite colors: primary=({_fmt(c1.get('r'))},{_fmt(c1.get('g'))},{_fmt(c1.get('b'))}) "
+        f"accent=({_fmt(c2.get('r'))},{_fmt(c2.get('g'))},{_fmt(c2.get('b'))})"
     )
 
 

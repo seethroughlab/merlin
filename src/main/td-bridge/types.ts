@@ -45,6 +45,16 @@ export interface CastParams {
 }
 
 /**
+ * Single normalized RGB color in [0, 1] per channel. Used for
+ * sprite-derived palette colors pushed to TD as uSpriteColor1/2.
+ */
+export interface PaletteColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
  * Particle simulation parameters. Configured per-spell via the
  * `set_particle_params` tool — Gemini matches density / lifespan /
  * blend mode to the spell's character (sparse candle flame vs dense
@@ -72,6 +82,7 @@ export type TDOutboundMessage =
   | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope }
   | ({ type: 'set_cast_params' } & CastParams)
   | ({ type: 'set_particle_params' } & ParticleParams)
+  | { type: 'sprite_colors'; color1: PaletteColor; color2: PaletteColor }
   | { type: 'ping' }
   | { type: 'request_screenshot' }
   // Sprite system messages

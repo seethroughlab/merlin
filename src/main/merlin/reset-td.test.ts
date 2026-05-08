@@ -8,6 +8,7 @@ const {
   mockPushResetSprite,
   mockPushCastParams,
   mockPushParticleParams,
+  mockPushSpriteColors,
 } = vi.hoisted(() => ({
   mockPushZoneUpdateWithValidation: vi.fn<(zone: string, code: string) => Promise<{ success: boolean; error?: string }>>(() =>
     Promise.resolve({ success: true })
@@ -16,6 +17,7 @@ const {
   mockPushResetSprite: vi.fn(() => true),
   mockPushCastParams: vi.fn(() => true),
   mockPushParticleParams: vi.fn(() => true),
+  mockPushSpriteColors: vi.fn(() => true),
 }));
 
 vi.mock('../td-bridge', () => ({
@@ -24,6 +26,7 @@ vi.mock('../td-bridge', () => ({
   pushResetSprite: mockPushResetSprite,
   pushCastParams: mockPushCastParams,
   pushParticleParams: mockPushParticleParams,
+  pushSpriteColors: mockPushSpriteColors,
 }));
 
 const ALL_ZONES = [
@@ -56,15 +59,16 @@ beforeEach(() => {
   mockPushResetSprite.mockReturnValue(true);
   mockPushCastParams.mockReturnValue(true);
   mockPushParticleParams.mockReturnValue(true);
+  mockPushSpriteColors.mockReturnValue(true);
 });
 
 describe('resetTDBaseline', () => {
-  it('happy path: pushes 8 zones, sprite, flipbook, cast_params, particle_params', async () => {
+  it('happy path: pushes 8 zones, sprite, flipbook, cast_params, particle_params, sprite_colors', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    expect(result.steps).toHaveLength(12); // 8 zones + sprite + flipbook + cast_params + particle_params
+    expect(result.steps).toHaveLength(13); // 8 zones + sprite + flipbook + cast_params + particle_params + sprite_colors
     expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
     // Each marker-bearing zone got a push
@@ -84,6 +88,10 @@ describe('resetTDBaseline', () => {
     expect(mockPushParticleParams).toHaveBeenCalledWith({
       maxCount: 500, lifespan: 4.0, emitRate: 120, spawnRadius: 0.2, blendMode: 'additive',
     });
+    expect(mockPushSpriteColors).toHaveBeenCalledWith(
+      { r: 1, g: 1, b: 1 },
+      { r: 1, g: 1, b: 1 },
+    );
   });
 
   it('records cast_params failure when TD disconnected', async () => {
@@ -106,6 +114,18 @@ describe('resetTDBaseline', () => {
 
     expect(result.success).toBe(false);
     const step = result.steps.find(s => s.label === 'particle_params');
+    expect(step?.status).toBe('error');
+    expect(step?.error).toMatch(/not connected/i);
+  });
+
+  it('records sprite_colors failure when TD disconnected', async () => {
+    mockPushSpriteColors.mockReturnValue(false);
+
+    const { resetTDBaseline } = await import('./reset-td');
+    const result = await resetTDBaseline();
+
+    expect(result.success).toBe(false);
+    const step = result.steps.find(s => s.label === 'sprite_colors');
     expect(step?.status).toBe('error');
     expect(step?.error).toMatch(/not connected/i);
   });

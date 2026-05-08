@@ -26,8 +26,9 @@ import {
   pushResetSprite,
   pushCastParams,
   pushParticleParams,
+  pushSpriteColors,
 } from '../td-bridge';
-import type { CastParams, ParticleParams } from '../td-bridge';
+import type { CastParams, ParticleParams, PaletteColor } from '../td-bridge';
 import { getMarkerBearingZones } from './test-shader';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
@@ -80,6 +81,18 @@ export const BASELINE_PARTICLE_PARAMS: ParticleParams = {
   spawnRadius: 0.2,
   blendMode: 'additive',
 };
+
+/**
+ * Baseline sprite-derived palette pushed during reset. White / white so
+ * any zone shader that reads uSpriteColor1/uSpriteColor2 before
+ * generate_sprite has produced a real sprite gets a neutral color
+ * (multiplicative identity in `color.rgb *= uSpriteColor1`) rather
+ * than zero (which would render particles black).
+ */
+export const BASELINE_PALETTE: [PaletteColor, PaletteColor] = [
+  { r: 1, g: 1, b: 1 },
+  { r: 1, g: 1, b: 1 },
+];
 
 /**
  * "TD doesn't have nodes for this zone" surfaces as an error string
@@ -142,6 +155,13 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   // common spell archetype) — Gemini can switch to 'alpha' per-spell.
   const ppOK = pushParticleParams(BASELINE_PARTICLE_PARAMS);
   record('particle_params', ppOK ? 'ok' : 'error', { error: ppOK ? undefined : 'TD not connected' });
+
+  // 6. Sprite palette baseline so uSpriteColor1/2 uniforms are neutral
+  // white before the next generate_sprite — zone code referencing them
+  // gets a sensible default rather than leaking the previous spell's
+  // palette into a fresh session.
+  const palOK = pushSpriteColors(BASELINE_PALETTE[0], BASELINE_PALETTE[1]);
+  record('sprite_colors', palOK ? 'ok' : 'error', { error: palOK ? undefined : 'TD not connected' });
 
   const errors = steps.filter(s => s.status === 'error').length;
   const skipped = steps.filter(s => s.status === 'skipped').length;

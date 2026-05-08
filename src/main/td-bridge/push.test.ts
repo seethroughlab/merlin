@@ -61,6 +61,7 @@ import {
   pushSpellCast,
   pushCastParams,
   pushParticleParams,
+  pushSpriteColors,
   pushSpriteTexture,
   pushFlipbookConfig,
 } from './push';
@@ -337,6 +338,27 @@ describe('push', () => {
       mockIsConnected.mockReturnValue(false);
 
       const result = pushCastParams({ riseMs: 600 });
+
+      expect(result).toBe(false);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pushSpriteColors', () => {
+    it('should send sprite_colors with both colors', () => {
+      pushSpriteColors({ r: 0.95, g: 0.4, b: 0.1 }, { r: 0.2, g: 0.6, b: 0.9 });
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'sprite_colors',
+        color1: { r: 0.95, g: 0.4, b: 0.1 },
+        color2: { r: 0.2, g: 0.6, b: 0.9 },
+      });
+    });
+
+    it('should return false when disconnected', () => {
+      mockIsConnected.mockReturnValue(false);
+
+      const result = pushSpriteColors({ r: 1, g: 1, b: 1 }, { r: 1, g: 1, b: 1 });
 
       expect(result).toBe(false);
       expect(mockSend).not.toHaveBeenCalled();

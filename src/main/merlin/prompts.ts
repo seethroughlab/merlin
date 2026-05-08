@@ -89,6 +89,15 @@ Available uniforms in all zones:
 - uSpellEnergy (float): Spell intensity 0-1
 - uSpellMode (float): -1=idle, 0=buildup, 1=release
 
+Sprite palette uniforms (color_over_life, size_over_life, billboard_pixel ONLY):
+- uSpriteColor1 (vec3): dominant color extracted from the active sprite (RGB, 0-1)
+- uSpriteColor2 (vec3): accent color extracted from the active sprite
+- These auto-update after every successful generate_sprite call so per-particle colors match the sprite Imagen produced. Default white before the first generate_sprite of the session.
+- Use them so the color zone matches the sprite — picking arbitrary colors makes the two halves of the visual feel like different spells.
+- Example (gradient from accent at birth to dominant at death):
+    color.rgb = mix(uSpriteColor2, uSpriteColor1, life);
+- Alternative: use the exact RGB values returned in the generate_sprite response's \`palette\` field if you want hard-coded clarity (e.g. \`color = vec4(0.95, 0.4, 0.1, life);\`).
+
 Body-target uniforms (vec3 world positions, available in spawn_behavior, force_field, velocity_modifier — already body-tracked, follow the participant frame-by-frame):
 - uChestPos: midpoint of the participant's shoulders. **The default \`pos\` in spawn_behavior is already in a small sphere around uChestPos**, so chest-emission is the no-op default.
 - uEyeLPos / uEyeRPos: left and right eye centers. Use for "from my eyes" spells.
@@ -915,7 +924,9 @@ Drive sources (what controls frame selection):
 Examples:
 - For fire spell: "glowing ember with flickering edges" with animation="pulse", frameCount=9
 - For water spell: "soft blue droplet with ripple" with animation="expand"
-- For protection: "crystalline shield fragment" with style="sharp geometric"`,
+- For protection: "crystalline shield fragment" with style="sharp geometric"
+
+Response includes \`palette: [{r,g,b}, {r,g,b}]\` — two normalized RGB colors extracted from the saved sprite (primary first, accent second). Use these in subsequent set_zone_shader calls so per-particle colors match the sprite. The same colors are also bound to uSpriteColor1/uSpriteColor2 vec3 uniforms (available in color_over_life / size_over_life / billboard_pixel zones), so zone code can either reference those uniforms or hard-code the exact RGB values from the response.`,
   parameters: {
     type: Type.OBJECT,
     properties: {

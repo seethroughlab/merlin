@@ -15,6 +15,7 @@
  */
 
 import type { MirroredTDState, SpriteFlipbookConfig } from '../../shared/types';
+import type { Palette } from './palette';
 
 export const DEFAULT_MIRROR: MirroredTDState = {
   flipbook: {
@@ -44,6 +45,8 @@ interface SpritePushRecord {
   description?: string;
   /** 'flipbook' (atlas) or 'single'. */
   assetType: 'flipbook' | 'single';
+  /** Two dominant colors extracted from the sprite (primary + accent). */
+  palette?: Palette;
   pushedAt: number;
 }
 
@@ -78,6 +81,7 @@ export function recordSpriteTexturePush(record: {
   texturePath: string;
   description?: string;
   assetType: 'flipbook' | 'single';
+  palette?: Palette;
 }): void {
   lastSpritePush = { ...record, pushedAt: Date.now() };
 }

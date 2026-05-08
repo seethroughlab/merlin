@@ -5,7 +5,7 @@
  */
 
 import { send, isConnected } from './connection';
-import type { ZoneName, FlipbookConfigMessage, CastParams, ParticleParams } from './types';
+import type { ZoneName, FlipbookConfigMessage, CastParams, ParticleParams, PaletteColor } from './types';
 import type { TrackingFrame, CastingOrigin } from '../../shared/types';
 import type { CastEnvelope } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
@@ -237,6 +237,29 @@ export function pushCastParams(params: CastParams): boolean {
   return guardedSend(
     { type: 'set_cast_params', ...params },
     'push cast params'
+  );
+}
+
+/**
+ * Push the two dominant colors extracted from the active sprite. TD
+ * writes them into spell_state rows; the existing
+ * _wire_spell_state_uniforms binds them to uSpriteColor1/uSpriteColor2
+ * vec3 uniforms on glsl_color, glsl_size, and glsl_billboard. Zone
+ * code in those zones can mix them with `life` etc. so per-particle
+ * colors match the sprite's palette.
+ *
+ * Set automatically after every successful generate_sprite call;
+ * reset to white at baseline.
+ */
+export function pushSpriteColors(color1: PaletteColor, color2: PaletteColor): boolean {
+  const fmt = (c: PaletteColor) =>
+    `(${c.r.toFixed(2)},${c.g.toFixed(2)},${c.b.toFixed(2)})`;
+  console.log(
+    `[TDBridge ${ts()}] Pushing sprite colors: primary=${fmt(color1)} accent=${fmt(color2)}`
+  );
+  return guardedSend(
+    { type: 'sprite_colors', color1, color2 },
+    'push sprite colors'
   );
 }
 
