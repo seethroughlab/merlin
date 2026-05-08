@@ -480,7 +480,7 @@ export async function dispatchToolCalls(
           };
 
           if (isFlipbook) {
-            const validFrameCount = (frameCount ?? 16) as 4 | 8 | 9 | 12 | 16 | 25;
+            const validFrameCount = (frameCount ?? 16) as 4 | 8 | 9 | 12 | 16;
             const r = await generator.generateFlipbookSync(description, {
               frameCount: validFrameCount,
               style,

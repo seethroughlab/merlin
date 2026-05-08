@@ -867,9 +867,12 @@ For animated flipbooks: Generates a sprite sheet atlas with multiple frames
 
 Frame counts and their grid layouts:
 - 4 frames: 2x2 atlas
+- 8 frames: 4x2 atlas
 - 9 frames: 3x3 atlas
+- 12 frames: 4x3 atlas
 - 16 frames: 4x4 atlas (default for animations)
-- 25 frames: 5x5 atlas
+
+Frame count vs detail trade-off: the shader smoothly interpolates between adjacent frames at runtime, so fewer frames at higher per-frame detail is now usually preferable to more frames with less detail. Choose 4-8 frames for slow morphs and pulses, 9-12 for medium-tempo motion, 16 only when the animation has many distinct stages.
 
 Playback modes:
 - loop: Continuously repeat the animation
@@ -905,7 +908,7 @@ Examples:
       },
       frameCount: {
         type: Type.NUMBER,
-        description: 'Number of animation frames: 4, 9, 16, or 25 (default 16 for animations)',
+        description: 'Number of animation frames: 4, 8, 9, 12, or 16 (default 16). Fewer frames means more detail per frame; the shader interpolates between frames so smoothness is preserved.',
       },
       playbackMode: {
         type: Type.STRING,

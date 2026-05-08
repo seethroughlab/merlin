@@ -36,7 +36,7 @@ import type {
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
-const VALID_FRAME_COUNTS: readonly SpriteFrameCount[] = [4, 8, 9, 12, 16, 25];
+const VALID_FRAME_COUNTS: readonly SpriteFrameCount[] = [4, 8, 9, 12, 16];
 const VALID_PLAYBACK_MODES: readonly SpritePlaybackMode[] = ['loop', 'once', 'pingpong', 'random'];
 const VALID_DRIVE_SOURCES: readonly SpriteDriveSource[] = ['age', 'life', 'velocity', 'id', 'time'];
 

@@ -65,7 +65,6 @@ export const FLIPBOOK_LAYOUTS: Record<number, [number, number]> = {
   9: [3, 3],
   12: [4, 3],
   16: [4, 4],
-  25: [5, 5],
 };
 
 // ============ ASSET MANAGER ============

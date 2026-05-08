@@ -28,16 +28,16 @@ describe('sprite-generator', () => {
       expect(prompt).toContain('sharp crystalline');
     });
 
-    it('should include default size (256x256)', () => {
+    it('should include default size (512x512)', () => {
       const prompt = buildSpritePrompt('particle');
 
-      expect(prompt).toContain('256x256');
+      expect(prompt).toContain('512x512');
     });
 
     it('should include custom size when provided', () => {
-      const prompt = buildSpritePrompt('particle', undefined, 512);
+      const prompt = buildSpritePrompt('particle', undefined, 1024);
 
-      expect(prompt).toContain('512x512');
+      expect(prompt).toContain('1024x1024');
     });
 
     it('should mention black background requirement', () => {
@@ -94,16 +94,16 @@ describe('sprite-generator', () => {
     });
 
     it('should calculate total dimensions', () => {
-      // 4x4 grid with 128px cells = 512x512
+      // 4x4 grid with 256px cells = 1024x1024
       const prompt = buildFlipbookPrompt('spark', 'soft', 16, 4, 4);
 
-      expect(prompt).toContain('512x512 pixels total');
+      expect(prompt).toContain('1024x1024 pixels total');
     });
 
     it('should mention cell size', () => {
       const prompt = buildFlipbookPrompt('orb', 'soft', 9, 3, 3);
 
-      expect(prompt).toContain('128x128 pixels');
+      expect(prompt).toContain('256x256 pixels');
     });
 
     it('should include custom style', () => {
@@ -372,8 +372,8 @@ describe('sprite-generator', () => {
       expect(validateFlipbookAtlas(validPng, 2, 2).isValid).toBe(true);
       // 3x3 grid (9 frames)
       expect(validateFlipbookAtlas(validPng, 3, 3).isValid).toBe(true);
-      // 5x5 grid (25 frames)
-      expect(validateFlipbookAtlas(validPng, 5, 5).isValid).toBe(true);
+      // 4x4 grid (16 frames)
+      expect(validateFlipbookAtlas(validPng, 4, 4).isValid).toBe(true);
     });
   });
 

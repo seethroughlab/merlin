@@ -84,8 +84,8 @@ describe('asset-manager', () => {
       expect(FLIPBOOK_LAYOUTS[16]).toEqual([4, 4]);
     });
 
-    it('should have correct layout for 25 frames', () => {
-      expect(FLIPBOOK_LAYOUTS[25]).toEqual([5, 5]);
+    it('should not include 25-frame layout (dropped: 5x5 at 256px cells exceeds Imagen 1024px cap)', () => {
+      expect(FLIPBOOK_LAYOUTS[25]).toBeUndefined();
     });
   });
 

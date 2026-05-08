@@ -259,7 +259,7 @@ describe('coerceSpriteArgs', () => {
 
     const spec = coerceSpriteArgs({
       description: 'shield',
-      frameCount: 7, // not in {4,8,9,12,16,25}
+      frameCount: 7, // not in {4,8,9,12,16}
       playbackMode: 'forever', // unknown
       driveSource: 'gravity', // unknown
     });

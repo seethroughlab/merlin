@@ -22,11 +22,11 @@ const ts = () => new Date().toISOString().slice(11, 23);
 
 // ============ CONFIGURATION ============
 
-const SPRITE_SIZE = 256;
+const SPRITE_SIZE = 512;
 const SPRITE_MIN_SIZE = 64;
 const SPRITE_MAX_SIZE = 1024;
 
-const FLIPBOOK_FRAME_SIZE = 128;
+const FLIPBOOK_FRAME_SIZE = 256;
 
 // Validation thresholds
 const CENTER_BRIGHTNESS_MIN = 0.15;
@@ -42,7 +42,7 @@ export interface SpriteOptions {
 }
 
 export interface FlipbookOptions extends SpriteOptions {
-  frameCount: 4 | 8 | 9 | 12 | 16 | 25;
+  frameCount: 4 | 8 | 9 | 12 | 16;
   animation?: string;
   playbackMode?: PlaybackMode;
   frameDuration?: number;
@@ -125,7 +125,8 @@ Requirements:
 Animation progression:
 - Frame 1 (top-left): Animation START state
 - Frame ${frameCount} (bottom-right): Animation END/loop point
-- Frames should progress smoothly and continuously between states
+- Each consecutive frame should differ from the previous by a small, incremental amount — like a slow morph or gentle pulse. Avoid large jumps between frames. The animation should look fluid when played at 8-15 frames per second.
+- For loopable animations, the last frame must connect smoothly back to the first frame (no visible jump on loop wrap)
 
 Technical:
 - PNG format
@@ -415,7 +416,7 @@ export class SpriteGenerator {
     // Get layout for frame count
     const layout = FLIPBOOK_LAYOUTS[frameCount];
     if (!layout) {
-      throw new SpriteGenerationError(`Unsupported frame count: ${frameCount}. Use 4, 8, 9, 12, 16, or 25.`);
+      throw new SpriteGenerationError(`Unsupported frame count: ${frameCount}. Use 4, 8, 9, 12, or 16.`);
     }
     const [cols, rows] = layout;
 

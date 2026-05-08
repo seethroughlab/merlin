@@ -1256,7 +1256,7 @@ function createTestShaderPanel(): HTMLElement {
     .join('');
 
   // Sprite dropdowns
-  const frameCountOptions = [4, 8, 9, 12, 16, 25]
+  const frameCountOptions = [4, 8, 9, 12, 16]
     .map(n => `<option value="${n}"${n === 16 ? ' selected' : ''}>${n}</option>`)
     .join('');
   const playbackOptions = ['loop', 'once', 'pingpong', 'random']

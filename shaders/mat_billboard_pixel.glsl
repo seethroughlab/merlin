@@ -25,24 +25,34 @@ out vec4 oFragColor;
 // Flipbook frame index calculation
 // Playback modes: 0=loop, 1=once, 2=pingpong, 3=random
 // Drive sources: 0=age, 1=life, 2=velocity, 3=id, 4=time
+//
+// Returns continuous float frame position so the caller can blend between
+// adjacent frames using fract(). Random mode is handled separately by the
+// caller (interpolating between two random frames produces a nonsense blend).
 
-int computeFrameIndex(float driveValue, int frameCount, int playbackMode, float frameDuration, float particleId) {
-    if (frameCount <= 1) return 0;
+float computeFrameFloat(float driveValue, int frameCount, int playbackMode, float frameDuration) {
+    if (frameCount <= 1) return 0.0;
+    float fc = float(frameCount);
 
-    int frame;
-    if (playbackMode == 0) {  // loop
-        frame = int(mod(driveValue / frameDuration, float(frameCount)));
-    } else if (playbackMode == 1) {  // once
-        frame = min(int(driveValue / frameDuration), frameCount - 1);
-    } else if (playbackMode == 2) {  // pingpong
-        int totalFrames = 2 * frameCount - 2;
-        if (totalFrames <= 0) return 0;
-        int cycle = int(mod(driveValue / frameDuration, float(totalFrames)));
-        frame = cycle < frameCount ? cycle : totalFrames - cycle;
-    } else {  // random (using particle id as seed)
-        frame = int(mod(particleId * 7919.0, float(frameCount)));
+    if (playbackMode == 0) {              // loop
+        return mod(driveValue / frameDuration, fc);
+    } else if (playbackMode == 1) {       // once - clamp at last frame; fract collapses to 0 there
+        return clamp(driveValue / frameDuration, 0.0, fc - 1.0);
+    } else {                              // pingpong (mode 2): tent wave 0 -> N-1 -> 0
+        float period = 2.0 * (fc - 1.0);
+        if (period <= 0.0) return 0.0;
+        float t = mod(driveValue / frameDuration, period);
+        return (fc - 1.0) - abs(t - (fc - 1.0));
     }
-    return clamp(frame, 0, frameCount - 1);
+}
+
+vec2 atlasUVForFrame(int frame, int cols, int rows, vec2 baseUV) {
+    float cellW = 1.0 / float(cols);
+    float cellH = 1.0 / float(rows);
+    int col = frame % cols;
+    int row = frame / cols;
+    return vec2(baseUV.x * cellW + float(col) * cellW,
+                baseUV.y * cellH + float(row) * cellH);
 }
 
 void main()
@@ -63,24 +73,25 @@ void main()
     else if (driveSource == 3) driveValue = vId;
     else driveValue = uTime;
 
-    // Calculate frame index (per-particle)
-    int frameIndex = computeFrameIndex(driveValue, frameCount, playbackMode, frameDuration, vId);
-
-    // Atlas UV calculation
-    vec2 atlasUV = vUV;
-    if (atlasCols > 1 || atlasRows > 1) {
-        float cellW = 1.0 / float(atlasCols);
-        float cellH = 1.0 / float(atlasRows);
-        int col = frameIndex % atlasCols;
-        int row = frameIndex / atlasCols;
-        atlasUV = vec2(
-            vUV.x * cellW + float(col) * cellW,
-            vUV.y * cellH + float(row) * cellH
-        );
+    // Sample sprite - interpolated between adjacent frames unless random mode.
+    // Luminance is linear in RGB, so applying the alpha derivation below to the
+    // pre-mixed sprite is equivalent to per-frame alpha blended together.
+    vec4 sprite;
+    if (playbackMode == 3) {
+        // Random mode: discrete per-particle frame, no blending
+        int frame = int(mod(vId * 7919.0, float(frameCount)));
+        frame = clamp(frame, 0, frameCount - 1);
+        vec2 uv = atlasUVForFrame(frame, atlasCols, atlasRows, vUV);
+        sprite = texture(sSpriteMap, uv);
+    } else {
+        float frameFloat = computeFrameFloat(driveValue, frameCount, playbackMode, frameDuration);
+        int frame0 = int(frameFloat) % frameCount;
+        int frame1 = (frame0 + 1) % frameCount;
+        float blend = fract(frameFloat);
+        vec2 uv0 = atlasUVForFrame(frame0, atlasCols, atlasRows, vUV);
+        vec2 uv1 = atlasUVForFrame(frame1, atlasCols, atlasRows, vUV);
+        sprite = mix(texture(sSpriteMap, uv0), texture(sSpriteMap, uv1), blend);
     }
-
-    // Sample sprite texture with atlas UV
-    vec4 sprite = texture(sSpriteMap, atlasUV);
 
     // Base color from particle color * sprite
     vec3 albedo = vColor.rgb * sprite.rgb;

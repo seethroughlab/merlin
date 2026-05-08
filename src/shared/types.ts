@@ -345,7 +345,7 @@ export type PlaybackMode = 'loop' | 'once' | 'pingpong' | 'random';
 export type DriveSource = 'age' | 'life' | 'velocity' | 'id' | 'time';
 
 /** Atlas frame counts the sprite generator supports. */
-export type SpriteFrameCount = 4 | 8 | 9 | 12 | 16 | 25;
+export type SpriteFrameCount = 4 | 8 | 9 | 12 | 16;
 
 /** Backward-compat aliases — prefer the unprefixed names above. */
 export type SpritePlaybackMode = PlaybackMode;
