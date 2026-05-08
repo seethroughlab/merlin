@@ -924,6 +924,49 @@ Examples:
 };
 
 /**
+ * Tool: Configure the energy tween envelope for the current spell.
+ *
+ * The shader uniform `uSpellEnergy` is driven by a TD-side LagCHOP
+ * smoothing the mode signal (-1 idle, 0 buildup, +1 release). This
+ * tool tunes that lag's rise/fall speed and the peak value at release,
+ * so the energy envelope matches the spell's character.
+ *
+ * Set-and-forget per spell — call once when the spell's character is
+ * established; no need to repeat each turn.
+ */
+export const SET_CAST_PARAMS_TOOL: FunctionDeclaration = {
+  name: 'set_cast_params',
+  description: `Configure the energy tween envelope for this spell. Affects how uSpellEnergy rises and falls in TD over time, which in turn modulates any shader code that reads it (force scale, color brightness, particle size, etc).
+
+The energy signal in TD is a smoothed lag of the mode (-1 idle, 0 buildup, +1 release). This tool tunes that lag's timing and peak value to match the spell's character.
+
+Examples:
+- Gentle drift / meditation spell: { riseMs: 2000, fallMs: 3000 } — slow, contemplative envelope
+- Explosive lightning / striking spell: { riseMs: 150, fallMs: 600, peakEnergy: 1.0 } — snap to peak, decay fast
+- Breathing / pulsing aura: { riseMs: 800, fallMs: 800, peakEnergy: 0.5 } — subtle oscillation, low ceiling
+- Fire flicker: { riseMs: 300, fallMs: 1500 } — quick ignition, lingering afterglow
+
+Defaults: riseMs=600, fallMs=800, peakEnergy=1.0. Call once per spell after you've decided its tone; don't tweak every turn.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      riseMs: {
+        type: Type.NUMBER,
+        description: 'Idle → peak energy lag duration in milliseconds. Smaller = sharper attack. Default 600.',
+      },
+      fallMs: {
+        type: Type.NUMBER,
+        description: 'Peak → idle decay duration in milliseconds. Smaller = faster decay; larger = lingering afterglow. Default 800.',
+      },
+      peakEnergy: {
+        type: Type.NUMBER,
+        description: 'Maximum energy at release (0–1). Lower values produce a gentler, less-intense spell. Default 1.0.',
+      },
+    },
+  },
+};
+
+/**
  * All tools (for initial chat setup)
  */
 export const MERLIN_TOOLS: FunctionDeclaration[] = [
@@ -934,6 +977,7 @@ export const MERLIN_TOOLS: FunctionDeclaration[] = [
   SET_ZONE_SHADER_TOOL,
   REQUEST_VISUAL_FEEDBACK_TOOL,
   GENERATE_SPRITE_TOOL,
+  SET_CAST_PARAMS_TOOL,
 ];
 
 /**
@@ -950,6 +994,7 @@ export const MERLIN_VISUAL_AUTHOR_TOOLS: FunctionDeclaration[] = [
   SET_ZONE_SHADER_TOOL,
   REQUEST_VISUAL_FEEDBACK_TOOL,
   GENERATE_SPRITE_TOOL,
+  SET_CAST_PARAMS_TOOL,
 ];
 
 // ============ HELPER PROMPTS ============

@@ -34,6 +34,7 @@ export {
   pushMerlinState,
   // Spell cast push methods
   pushSpellCast,
+  pushCastParams,
   // Sprite system push methods
   pushSpriteTexture,
   pushFlipbookConfig,

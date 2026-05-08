@@ -30,12 +30,27 @@ export interface TDCapabilities {
 
 // ===== Outbound Messages (Merlin → TD) =====
 
+/**
+ * Tween parameters for the TD-side energy CHOP. Configured per-spell
+ * via the `set_cast_params` tool — Gemini matches the envelope to the
+ * spell's character (slow drift vs explosive snap).
+ */
+export interface CastParams {
+  /** Idle → peak lag in milliseconds. */
+  riseMs?: number;
+  /** Peak → idle lag in milliseconds. */
+  fallMs?: number;
+  /** Maximum energy at release (0–1). */
+  peakEnergy?: number;
+}
+
 export type TDOutboundMessage =
   | { type: 'zone_update'; zone: ZoneName; glsl_code: string }
   | { type: 'orientation_update'; portrait: boolean; width: number; height: number }
   | { type: 'tracking_frame'; timestamp: number; fps: number; frame: FrameInfo; pose: PoseData; face: FaceData }
   | { type: 'merlin_state'; active: boolean; phase?: string; spell?: MerlinSpellState }
   | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope }
+  | ({ type: 'set_cast_params' } & CastParams)
   | { type: 'ping' }
   | { type: 'request_screenshot' }
   // Sprite system messages

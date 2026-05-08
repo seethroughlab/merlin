@@ -59,6 +59,7 @@ import {
   pushOrientationUpdate,
   pushMerlinState,
   pushSpellCast,
+  pushCastParams,
   pushSpriteTexture,
   pushFlipbookConfig,
 } from './push';
@@ -307,6 +308,37 @@ describe('push', () => {
         durationMs: 4500,
         envelope,
       });
+    });
+  });
+
+  describe('pushCastParams', () => {
+    it('should send set_cast_params with all fields', () => {
+      pushCastParams({ riseMs: 150, fallMs: 2000, peakEnergy: 0.7 });
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'set_cast_params',
+        riseMs: 150,
+        fallMs: 2000,
+        peakEnergy: 0.7,
+      });
+    });
+
+    it('should send set_cast_params with partial fields', () => {
+      pushCastParams({ riseMs: 800 });
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'set_cast_params',
+        riseMs: 800,
+      });
+    });
+
+    it('should return false when disconnected', () => {
+      mockIsConnected.mockReturnValue(false);
+
+      const result = pushCastParams({ riseMs: 600 });
+
+      expect(result).toBe(false);
+      expect(mockSend).not.toHaveBeenCalled();
     });
   });
 

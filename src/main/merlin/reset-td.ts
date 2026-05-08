@@ -19,7 +19,9 @@ import {
   pushZoneUpdateWithValidation,
   pushFlipbookConfig,
   pushResetSprite,
+  pushCastParams,
 } from '../td-bridge';
+import type { CastParams } from '../td-bridge';
 import { getMarkerBearingZones } from './test-shader';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
@@ -49,6 +51,17 @@ export const BASELINE_FLIPBOOK: FlipbookConfig = {
   playbackMode: 'loop',
   frameDuration: 0.1,
   driveSource: 'age',
+};
+
+/**
+ * Baseline cast tween envelope pushed during reset. Fast rise/fall for
+ * snappy iteration in the test panel; live sessions can override per
+ * spell via the `set_cast_params` tool.
+ */
+export const BASELINE_CAST_PARAMS: CastParams = {
+  riseMs: 600,
+  fallMs: 800,
+  peakEnergy: 1.0,
 };
 
 /**
@@ -102,6 +115,11 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   const fbOK = pushFlipbookConfig(BASELINE_FLIPBOOK);
   if (fbOK) recordFlipbookConfigPush(BASELINE_FLIPBOOK);
   record('flipbook', fbOK ? 'ok' : 'error', { error: fbOK ? undefined : 'TD not connected' });
+
+  // 4. Cast tween baseline so each Live Spell run starts from the same
+  // fast rise/fall envelope regardless of what the previous run set.
+  const castOK = pushCastParams(BASELINE_CAST_PARAMS);
+  record('cast_params', castOK ? 'ok' : 'error', { error: castOK ? undefined : 'TD not connected' });
 
   const errors = steps.filter(s => s.status === 'error').length;
   const skipped = steps.filter(s => s.status === 'skipped').length;

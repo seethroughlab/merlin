@@ -593,6 +593,16 @@ export async function dispatchToolCalls(
         break;
       }
 
+      case 'set_cast_params': {
+        const args = call.args as { riseMs?: number; fallMs?: number; peakEnergy?: number };
+        const { pushCastParams } = await import('../td-bridge');
+        const pushed = pushCastParams(args);
+        response = pushed
+          ? { success: true, params: args }
+          : { success: false, error: 'TD not connected' };
+        break;
+      }
+
       default:
         response = { error: `Unknown tool: ${call.name}` };
     }

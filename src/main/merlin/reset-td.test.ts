@@ -6,18 +6,21 @@ const {
   mockPushZoneUpdateWithValidation,
   mockPushFlipbookConfig,
   mockPushResetSprite,
+  mockPushCastParams,
 } = vi.hoisted(() => ({
   mockPushZoneUpdateWithValidation: vi.fn<(zone: string, code: string) => Promise<{ success: boolean; error?: string }>>(() =>
     Promise.resolve({ success: true })
   ),
   mockPushFlipbookConfig: vi.fn(() => true),
   mockPushResetSprite: vi.fn(() => true),
+  mockPushCastParams: vi.fn(() => true),
 }));
 
 vi.mock('../td-bridge', () => ({
   pushZoneUpdateWithValidation: mockPushZoneUpdateWithValidation,
   pushFlipbookConfig: mockPushFlipbookConfig,
   pushResetSprite: mockPushResetSprite,
+  pushCastParams: mockPushCastParams,
 }));
 
 const ALL_ZONES = [
@@ -48,15 +51,16 @@ beforeEach(() => {
   mockPushZoneUpdateWithValidation.mockResolvedValue({ success: true });
   mockPushFlipbookConfig.mockReturnValue(true);
   mockPushResetSprite.mockReturnValue(true);
+  mockPushCastParams.mockReturnValue(true);
 });
 
 describe('resetTDBaseline', () => {
-  it('happy path: pushes 8 zones, sprite, flipbook', async () => {
+  it('happy path: pushes 8 zones, sprite, flipbook, cast_params', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    expect(result.steps).toHaveLength(10); // 8 zones + sprite + flipbook
+    expect(result.steps).toHaveLength(11); // 8 zones + sprite + flipbook + cast_params
     expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
     // Each marker-bearing zone got a push
@@ -70,6 +74,21 @@ describe('resetTDBaseline', () => {
       atlasCols: 1, atlasRows: 1, frameCount: 1,
       playbackMode: 'loop', frameDuration: 0.1, driveSource: 'age',
     });
+    expect(mockPushCastParams).toHaveBeenCalledWith({
+      riseMs: 600, fallMs: 800, peakEnergy: 1.0,
+    });
+  });
+
+  it('records cast_params failure when TD disconnected', async () => {
+    mockPushCastParams.mockReturnValue(false);
+
+    const { resetTDBaseline } = await import('./reset-td');
+    const result = await resetTDBaseline();
+
+    expect(result.success).toBe(false);
+    const step = result.steps.find(s => s.label === 'cast_params');
+    expect(step?.status).toBe('error');
+    expect(step?.error).toMatch(/not connected/i);
   });
 
   it('classifies "zone not found" as skipped, not failure', async () => {

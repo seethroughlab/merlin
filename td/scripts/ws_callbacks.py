@@ -356,6 +356,8 @@ def onReceiveText(dat, rowIndex, message):
             handle_flipbook_config(dat, msg)
         elif msg_type == 'reset_sprite':
             handle_reset_sprite(dat, msg)
+        elif msg_type == 'set_cast_params':
+            handle_set_cast_params(msg)
 
     except Exception as e:
         print(f"[WS] Error: {e}")
@@ -667,12 +669,38 @@ def handle_spell_cast(msg):
         update_table_kv(table, 'afterglow_ms', str(cast_state['afterglow_ms']))
         update_table_kv(table, 'peak_intensity', str(cast_state['peak_intensity']))
         update_table_kv(table, 'duration_ms', str(cast_state['duration_ms']))
-        # Energy spike to peak for the release envelope.
-        update_table_kv(table, 'energy', '1.0')
+        # Energy is no longer written directly here — uSpellEnergy is now
+        # driven by a TD-side LagCHOP that reads mode_float and smooths it
+        # using tween_rise_ms / tween_fall_ms / peak_energy. See
+        # docs/improvement-02-energy-tweens.md.
 
     o = msg.get('origin', 'unknown')
     d = cast_state['duration_ms']
     print(f"[WS] SPELL CAST! origin={o} duration={d}ms")
+
+
+def handle_set_cast_params(msg):
+    """Handle set_cast_params message - configure the energy tween envelope.
+
+    Writes tween_rise_ms / tween_fall_ms / peak_energy to spell_state so the
+    TD-side LagCHOP + MathCHOP read fresh values on the next cook. All
+    fields are optional; absent fields keep the existing table value.
+    """
+    table = op('/project1/spell_state')
+    if not table:
+        return
+
+    if 'riseMs' in msg:
+        update_table_kv(table, 'tween_rise_ms', str(msg['riseMs']))
+    if 'fallMs' in msg:
+        update_table_kv(table, 'tween_fall_ms', str(msg['fallMs']))
+    if 'peakEnergy' in msg:
+        update_table_kv(table, 'peak_energy', str(msg['peakEnergy']))
+
+    print(
+        f"[WS] Cast params: rise={msg.get('riseMs', '-')}ms "
+        f"fall={msg.get('fallMs', '-')}ms peak={msg.get('peakEnergy', '-')}"
+    )
 
 
 def handle_request_metrics(dat):

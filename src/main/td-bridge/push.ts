@@ -5,7 +5,7 @@
  */
 
 import { send, isConnected } from './connection';
-import type { ZoneName, FlipbookConfigMessage } from './types';
+import type { ZoneName, FlipbookConfigMessage, CastParams } from './types';
 import type { TrackingFrame, CastingOrigin } from '../../shared/types';
 import type { CastEnvelope } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
@@ -220,6 +220,23 @@ export function pushSpellCast(
   return guardedSend(
     { type: 'spell_cast', origin, intensity, durationMs, envelope },
     'push spell cast'
+  );
+}
+
+/**
+ * Push tween parameters for the TD-side energy CHOP. Sets the rise/fall
+ * lag times and peak energy on the spell_state table; the LagCHOP +
+ * MathCHOP read these to shape the smoothed `uSpellEnergy` signal.
+ * Set-and-forget per spell — does not need to be called every turn.
+ */
+export function pushCastParams(params: CastParams): boolean {
+  console.log(
+    `[TDBridge ${ts()}] Pushing cast params: rise=${params.riseMs ?? '-'}ms ` +
+    `fall=${params.fallMs ?? '-'}ms peak=${params.peakEnergy ?? '-'}`
+  );
+  return guardedSend(
+    { type: 'set_cast_params', ...params },
+    'push cast params'
   );
 }
 
