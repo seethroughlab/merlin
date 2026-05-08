@@ -2243,7 +2243,42 @@ function appendGeminiTurn(turn: Partial<GeminiTurn> & { id: string; source: Gemi
     body.appendChild(resultsDiv);
   }
 
-  // Screenshot — what Gemini saw via request_visual_feedback.
+  // Multi-frame temporal capture — what Gemini saw across the energy
+  // envelope (idle / peak / afterglow). Stacked vertically with labels.
+  if (turn.screenshots && turn.screenshots.length > 0) {
+    const stripDiv = document.createElement('div');
+    stripDiv.className = 'gemini-screenshot gemini-screenshot-strip';
+    const role = document.createElement('div');
+    role.className = 'gemini-role';
+    role.textContent = `Visual feedback (${turn.screenshots.length} frames)`;
+    stripDiv.appendChild(role);
+    if (turn.screenshots[0]?.caption) {
+      const cap = document.createElement('div');
+      cap.className = 'gemini-screenshot-caption';
+      cap.textContent = turn.screenshots[0].caption;
+      stripDiv.appendChild(cap);
+    }
+    for (const shot of turn.screenshots) {
+      const frameDiv = document.createElement('div');
+      frameDiv.className = 'gemini-screenshot-frame';
+      if (shot.label) {
+        const lbl = document.createElement('div');
+        lbl.className = 'gemini-screenshot-label';
+        lbl.textContent = shot.label;
+        frameDiv.appendChild(lbl);
+      }
+      const img = document.createElement('img');
+      img.className = 'gemini-screenshot-img';
+      img.src = `data:image/png;base64,${shot.base64}`;
+      img.width = shot.width;
+      img.height = shot.height;
+      frameDiv.appendChild(img);
+      stripDiv.appendChild(frameDiv);
+    }
+    body.appendChild(stripDiv);
+  }
+
+  // Single screenshot — legacy / non-temporal paths.
   if (turn.screenshot) {
     const shotDiv = document.createElement('div');
     shotDiv.className = 'gemini-screenshot';

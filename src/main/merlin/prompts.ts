@@ -872,17 +872,30 @@ Write expressive GLSL that matches the spell's intent and element. Call on each 
  */
 const REQUEST_VISUAL_FEEDBACK_TOOL: FunctionDeclaration = {
   name: 'request_visual_feedback',
-  description: `Capture a live screenshot of the particle system and receive it as an image you can analyze. CALL THIS after you've written a coherent batch of zone shaders (typically 2+ writes for the current spell direction) to verify the visual matches your intent. Shaders compiling cleanly is NOT proof they look right — particles can be invisible, the wrong color, the wrong shape, or stuck at the spawn point even when the GLSL compiles.
+  description: `Capture THREE screenshots across an energy envelope (idle / peak / afterglow) so you can evaluate the spell at multiple states, not just one frozen moment. CALL THIS after you've written a coherent batch of zone shaders (typically 2+ writes for the current spell direction) to verify the visual matches your intent. Shaders compiling cleanly is NOT proof they look right — particles can be invisible, the wrong color, the wrong shape, or stuck at the spawn point even when the GLSL compiles.
 
-Treat the screenshot as ground truth. Compare what you see to what the participant asked for and iterate via set_zone_shader if needed. Don't call this after every single shader write (wastes a turn) — call it once per coherent batch.
+The system internally:
+1. Captures FRAME A (idle) — baseline before cast, low energy.
+2. Forces a fast test cast envelope and triggers spell_cast.
+3. Waits ~600ms for the energy tween to converge near peak.
+4. Captures FRAME B (peak) — mid-cast, maximum energy.
+5. Restores idle and waits ~400ms for partial decay.
+6. Captures FRAME C (afterglow) — energy mid-fade.
 
-Adds ~1s of latency.`,
+Treat all three frames as ground truth. Per-frame evaluation criteria:
+- IDLE must show particles present and positioned correctly. If empty, your spawn_behavior or particle_params is broken — even a quiet spell should have visible particles at rest.
+- PEAK must meet visible_particles >= 50, avg_brightness >= 0.02, render_vs_webcam_diff >= 0.01 AND show meaningful change from idle. If peak looks identical to idle, energy modulation isn't reaching the visuals — check whether your zone code reads uSpellEnergy.
+- AFTERGLOW must show graceful fade, not an abrupt cutoff. Particles should still be visible but dimmer/sparser than peak. If afterglow is identical to peak, the cast isn't releasing; if identical to idle, the fall is too fast (rare).
+
+Metrics in the response reflect post-peak / early-afterglow state — use them as quantitative ground truth alongside the visual comparison. The cast envelope used here is fixed (riseMs=600, fallMs=800) so timing is predictable regardless of any set_cast_params you configured for live performance feel.
+
+Don't call this after every single shader write (wastes ~1.5s per call) — call it once per coherent batch. Adds ~1.5s of latency.`,
   parameters: {
     type: Type.OBJECT,
     properties: {
       intent: {
         type: Type.STRING,
-        description: 'What visual effect you expect to see in the screenshot (e.g., "fire rising in spirals", "gentle blue waves")',
+        description: 'What visual effect you expect to see across the three frames (e.g., "fire rising in spirals at peak, embers drifting at idle and afterglow")',
       },
     },
     required: ['intent'],

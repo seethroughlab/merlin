@@ -149,6 +149,95 @@ export interface DispatchResult {
 }
 
 /**
+ * One frame of a multi-frame temporal capture, plus the label that
+ * tells Gemini which envelope phase produced it.
+ */
+export interface TemporalFrame {
+  base64: string;
+  width: number;
+  height: number;
+  /** 'idle' | 'peak' | 'afterglow' — see captureTemporalFrames. */
+  label: 'idle' | 'peak' | 'afterglow';
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Capture three screenshots across an energy envelope so Gemini can
+ * evaluate the spell at idle, peak, and during afterglow rather than
+ * judging it from a single low-energy frame.
+ *
+ * Sequence:
+ *   1. Frame A (idle) — capture the resting state immediately.
+ *   2. pushCastParams(BASELINE_CAST_PARAMS) — force the test envelope
+ *      so timing matches our wait values regardless of any prior
+ *      set_cast_params Gemini chose for the spell's live performance.
+ *   3. pushSpellCast — handle_spell_cast writes mode_float=1.0; the
+ *      energy LagCHOP starts ramping uSpellEnergy toward peak.
+ *   4. sleep(riseMs + 50ms buffer) — wait for the lag to converge.
+ *   5. Frame B (peak) — capture mid-cast with energy near peak_energy.
+ *   6. pushMerlinState({phase: 'idle'}) — handle_merlin_state writes
+ *      mode_float=-1.0; energy starts falling.
+ *   7. sleep(fallMs / 2) — catch the partial decay, not full idle.
+ *   8. Frame C (afterglow) — capture mid-fade.
+ *
+ * Total latency: ~1.5s (riseMs=600 + fallMs/2=400 + 3 screenshot
+ * round-trips ≈ 500ms). Caller is responsible for the compile guard
+ * (refusing capture when any zone failed compile) — this helper assumes
+ * the visuals are valid to capture.
+ */
+export async function captureTemporalFrames(): Promise<{
+  frames: TemporalFrame[];
+  partialFailures: string[];
+}> {
+  const { send } = await import('../td-bridge/connection');
+  const { requestScreenshot } = await import('../td-bridge/metrics');
+  const { pushCastParams, pushSpellCast, pushMerlinState } = await import('../td-bridge');
+  const { BASELINE_CAST_PARAMS } = await import('./reset-td');
+
+  const frames: TemporalFrame[] = [];
+  const partialFailures: string[] = [];
+
+  // Frame A: idle baseline.
+  const idle = await requestScreenshot(send, 5000);
+  if (idle) {
+    frames.push({ base64: idle.base64, width: idle.width, height: idle.height, label: 'idle' });
+  } else {
+    partialFailures.push('idle');
+  }
+
+  // Force the snappy test envelope and trigger the cast.
+  pushCastParams(BASELINE_CAST_PARAMS);
+  pushSpellCast('whole_body', 1.0, 4500, {
+    ignitionMs: 400,
+    projectionMs: 1200,
+    afterglowMs: 2900,
+    peakIntensity: 1.0,
+  });
+
+  // Frame B: peak. 50ms buffer covers cook-rate jitter at 60fps.
+  await sleep((BASELINE_CAST_PARAMS.riseMs ?? 600) + 50);
+  const peak = await requestScreenshot(send, 5000);
+  if (peak) {
+    frames.push({ base64: peak.base64, width: peak.width, height: peak.height, label: 'peak' });
+  } else {
+    partialFailures.push('peak');
+  }
+
+  // Restore idle BEFORE the wait so the lag falls during the sleep.
+  pushMerlinState({ active: true, phase: 'idle' });
+  await sleep((BASELINE_CAST_PARAMS.fallMs ?? 800) / 2);
+  const afterglow = await requestScreenshot(send, 5000);
+  if (afterglow) {
+    frames.push({ base64: afterglow.base64, width: afterglow.width, height: afterglow.height, label: 'afterglow' });
+  } else {
+    partialFailures.push('afterglow');
+  }
+
+  return { frames, partialFailures };
+}
+
+/**
  * Run the dispatch switch for a batch of tool calls. Exported so the
  * session intro flow (which also needs to dispatch tool calls outside
  * a full runMerlinTurn turn) can reuse the same logic.
@@ -330,102 +419,121 @@ export async function dispatchToolCalls(
           break;
         }
 
-        const { send } = await import('../td-bridge/connection');
-        const { requestScreenshot, getLatestMetrics, getLatestVisibility } = await import('../td-bridge/metrics');
-        const screenshot = await requestScreenshot(send, 5000);
-        if (screenshot) {
-          // Gemini 3: attach the screenshot as a multimodal part on
-          // this function response. callId pairs it with the matching
-          // tool result so Gemini knows the image is the answer to
-          // *this specific* request_visual_feedback call.
-          extraImages.push({
-            mimeType: 'image/png',
-            base64: screenshot.base64,
-            callId: call.id,
-          });
-          // Surface the screenshot in the sidebar transcript so the
-          // operator can see what Gemini saw.
-          emitGeminiTurn({
-            id: turnId,
-            source,
-            screenshot: {
-              base64: screenshot.base64,
-              width: screenshot.width,
-              height: screenshot.height,
-              caption: intent,
-            },
-          });
-          // Also attach the most-recently-pushed sprite (if any) as a
-          // SECOND inline image so Gemini can A/B compare: "is the
-          // texture in the screenshot the same as the sprite I just
-          // generated?" Without this, Gemini has no visual reference
-          // for what the active sprite should look like and can miss
-          // sprite-load failures even when the screenshot clearly
-          // shows the wrong texture.
-          let activeSpriteAttached = false;
-          let activeSpriteDescription: string | null = null;
-          let activeSpriteAssetType: 'flipbook' | 'single' | null = null;
-          try {
-            const { getLastSpritePush } = await import('./td-state-mirror');
-            const lastSprite = getLastSpritePush();
-            if (lastSprite) {
-              const { readFileSync } = await import('fs');
-              const png = readFileSync(lastSprite.texturePath);
-              extraImages.push({
-                mimeType: 'image/png',
-                base64: png.toString('base64'),
-                callId: call.id,
-              });
-              activeSpriteAttached = true;
-              activeSpriteDescription = lastSprite.description ?? null;
-              activeSpriteAssetType = lastSprite.assetType;
-            }
-          } catch (e) {
-            console.warn(
-              `[TurnRunner] Couldn't attach active sprite preview: ${e instanceof Error ? e.message : String(e)}`
-            );
-          }
+        const { getLatestMetrics, getLatestVisibility } = await import('../td-bridge/metrics');
 
-          // Quantitative ground truth alongside the screenshot. If
-          // visible_particles is 0 or render_vs_webcam_diff is near 0,
-          // particles aren't visible regardless of what the screenshot
-          // suggests. Gemini is instructed (in the system prompt) to
-          // check these before declaring the spell complete.
-          const m = getLatestMetrics();
-          const v = getLatestVisibility();
-          const baseInstruction =
-            'The screenshot is attached as the FIRST inline image on this function response. ' +
-            'Cross-reference it with the metrics: visible_particles tells you how many particles cleared culling; ' +
-            'avg_brightness near 0 means particles render dim/invisible; render_vs_webcam_diff near 0 means the ' +
-            'final composite is essentially the webcam (your particles are not contributing). ' +
-            'Refine via set_zone_shader if the visuals do not match the intent.';
-          const spriteInstruction = activeSpriteAttached
-            ? ` A SECOND inline image is also attached: the ${activeSpriteAssetType ?? ''} sprite that should currently be on every particle (described as "${activeSpriteDescription ?? '(no description)'}"). Compare its texture to what you see in the screenshot — if the screenshot's particles don't show this sprite's texture, the sprite load failed or a shader is masking it; investigate before iterating on visual style.`
-            : '';
-          response = {
-            success: true,
-            intent,
-            width: screenshot.width,
-            height: screenshot.height,
-            metrics: {
-              fps: m?.fps ?? null,
-              particle_count: m?.particleCount ?? null,
-              coverage: m?.coverage ?? null,
-              visible_particles: v?.visibleParticles ?? null,
-              avg_brightness: v?.avgBrightness ?? null,
-              render_vs_webcam_diff: v?.renderVsWebcamDiff ?? null,
-            },
-            active_sprite: activeSpriteAttached
-              ? { description: activeSpriteDescription, assetType: activeSpriteAssetType }
-              : null,
-            instruction: baseInstruction + spriteInstruction,
-          };
-        } else {
+        // Capture 3 frames across the energy envelope (idle / peak /
+        // afterglow). The helper drives the cast tween via spell_cast
+        // and restores idle via merlin_state — total ~1.5s.
+        const { frames, partialFailures } = await captureTemporalFrames();
+
+        if (frames.length === 0) {
           response = {
             success: false,
-            error: 'Failed to capture screenshot from TouchDesigner',
+            error: `Failed to capture any frames from TouchDesigner (all 3 timed out: ${partialFailures.join(', ')})`,
           };
+          break;
         }
+
+        // Gemini 3: attach each frame as a separate multimodal part.
+        // Order matches the response.frames array iteration (idle, peak,
+        // afterglow), so Gemini can correlate by position. callId pairs
+        // them all with this specific request_visual_feedback call.
+        for (const f of frames) {
+          extraImages.push({
+            mimeType: 'image/png',
+            base64: f.base64,
+            callId: call.id,
+          });
+        }
+
+        // Surface the frames in the sidebar transcript as a labelled
+        // strip so the operator can see what Gemini saw at each phase.
+        emitGeminiTurn({
+          id: turnId,
+          source,
+          screenshots: frames.map((f) => ({
+            base64: f.base64,
+            width: f.width,
+            height: f.height,
+            caption: intent,
+            label: f.label,
+          })),
+        });
+
+        // Also attach the most-recently-pushed sprite (if any) as a
+        // FOURTH inline image so Gemini can A/B compare: "is the
+        // texture in the screenshots the same as the sprite I just
+        // generated?" Without this, Gemini has no visual reference
+        // for what the active sprite should look like and can miss
+        // sprite-load failures even when the screenshots clearly
+        // show the wrong texture.
+        let activeSpriteAttached = false;
+        let activeSpriteDescription: string | null = null;
+        let activeSpriteAssetType: 'flipbook' | 'single' | null = null;
+        try {
+          const { getLastSpritePush } = await import('./td-state-mirror');
+          const lastSprite = getLastSpritePush();
+          if (lastSprite) {
+            const { readFileSync } = await import('fs');
+            const png = readFileSync(lastSprite.texturePath);
+            extraImages.push({
+              mimeType: 'image/png',
+              base64: png.toString('base64'),
+              callId: call.id,
+            });
+            activeSpriteAttached = true;
+            activeSpriteDescription = lastSprite.description ?? null;
+            activeSpriteAssetType = lastSprite.assetType;
+          }
+        } catch (e) {
+          console.warn(
+            `[TurnRunner] Couldn't attach active sprite preview: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+
+        // Metrics sampled after captureTemporalFrames returns — that's
+        // post-peak / early-afterglow, close enough to peak for
+        // threshold evaluation. visibility values come from TD's most
+        // recent visibility message which arrives every screenshot, so
+        // these reflect the afterglow frame's state.
+        const m = getLatestMetrics();
+        const v = getLatestVisibility();
+
+        const partialNote = partialFailures.length > 0
+          ? ` Note: ${partialFailures.length} frame(s) failed to capture (${partialFailures.join(', ')}); evaluate from what's available.`
+          : '';
+        const baseInstruction =
+          `Three frames are attached as inline images in order: idle, peak, afterglow. ` +
+          `Idle = baseline before cast (particles must be present and positioned correctly). ` +
+          `Peak = mid-cast at maximum energy (must meet visible_particles >= 50, avg_brightness >= 0.02, render_vs_webcam_diff >= 0.01, and show meaningful change from idle). ` +
+          `Afterglow = decaying energy mid-fade (must show graceful fade — not identical to peak, not collapsed back to idle). ` +
+          `Metrics reflect post-peak state. If visible_particles is 0 or render_vs_webcam_diff is near 0, particles aren't rendering regardless of what the frames suggest. ` +
+          `Refine via set_zone_shader if the visuals do not match the intent.` +
+          partialNote;
+        const spriteInstruction = activeSpriteAttached
+          ? ` A FOURTH inline image is also attached: the ${activeSpriteAssetType ?? ''} sprite that should currently be on every particle (described as "${activeSpriteDescription ?? '(no description)'}"). Compare its texture to what you see in the frames — if the particles don't show this sprite's texture, the sprite load failed or a shader is masking it; investigate before iterating on visual style.`
+          : '';
+
+        response = {
+          success: true,
+          intent,
+          frames: frames.reduce((acc, f) => {
+            acc[f.label] = { width: f.width, height: f.height };
+            return acc;
+          }, {} as Record<string, { width: number; height: number }>),
+          metrics: {
+            fps: m?.fps ?? null,
+            particle_count: m?.particleCount ?? null,
+            coverage: m?.coverage ?? null,
+            visible_particles: v?.visibleParticles ?? null,
+            avg_brightness: v?.avgBrightness ?? null,
+            render_vs_webcam_diff: v?.renderVsWebcamDiff ?? null,
+          },
+          active_sprite: activeSpriteAttached
+            ? { description: activeSpriteDescription, assetType: activeSpriteAssetType }
+            : null,
+          instruction: baseInstruction + spriteInstruction,
+        };
         break;
       }
 

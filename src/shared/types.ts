@@ -536,6 +536,12 @@ export interface GeminiScreenshot {
   height: number;
   /** The `intent` Gemini passed to request_visual_feedback. */
   caption?: string;
+  /**
+   * Frame label for multi-frame temporal captures from
+   * request_visual_feedback ('idle' | 'peak' | 'afterglow'). Absent
+   * for single-screenshot legacy paths.
+   */
+  label?: 'idle' | 'peak' | 'afterglow';
 }
 
 export interface GeminiTurn {
@@ -551,8 +557,14 @@ export interface GeminiTurn {
   toolCalls?: GeminiToolCall[];
   pushResults?: GeminiPushResult[];
   retry?: GeminiRetryMarker;
-  /** Screenshot delivered to Gemini via request_visual_feedback. */
+  /** Single screenshot delivered to Gemini (legacy / non-temporal paths). */
   screenshot?: GeminiScreenshot;
+  /**
+   * Multi-frame temporal capture from request_visual_feedback. Each
+   * entry has a `label` of 'idle' | 'peak' | 'afterglow'. The renderer
+   * shows them as a labelled strip alongside the turn card.
+   */
+  screenshots?: GeminiScreenshot[];
   /** True on the final emission; lets the renderer mark the card done. */
   final?: boolean;
 }

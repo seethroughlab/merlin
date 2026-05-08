@@ -671,20 +671,37 @@ def handle_tracking_frame(msg):
 
 
 def handle_merlin_state(msg):
-    """Handle merlin_state message - session activation and phase."""
+    """Handle merlin_state message - session activation, phase, and the
+    phase-driven mode for the energy tween.
+
+    Phase implies the resting mode for the energy CHOP: 'idle' means the
+    spell isn't casting, so mode_float=-1.0 lets the LagCHOP fall back to
+    the idle floor (~0.2 after remap). This is what request_visual_feedback's
+    captureTemporalFrames uses to restore baseline after the peak shot.
+    Other phases leave mode/mode_float untouched — handle_spell_cast is
+    still the only writer for the +1.0 release pulse.
+    """
     global merlin_state
 
     merlin_state['active'] = msg.get('active', False)
     if 'phase' in msg:
         merlin_state['phase'] = msg['phase']
+        if msg['phase'] == 'idle':
+            merlin_state['mode'] = 'idle'
+            merlin_state['mode_float'] = -1.0
 
     # Update spell_state tableDAT
     table = op('/project1/spell_state')
     if table:
         update_table_kv(table, 'active', '1' if merlin_state['active'] else '0')
         update_table_kv(table, 'phase', merlin_state['phase'])
+        # Mirror mode/mode_float when phase forced them (keeps the energy
+        # CHOP expression consistent with what handle_spell_cast writes).
+        if msg.get('phase') == 'idle':
+            update_table_kv(table, 'mode', merlin_state['mode'])
+            update_table_kv(table, 'mode_float', str(merlin_state['mode_float']))
 
-    print(f"[WS] Merlin: active={merlin_state['active']} phase={merlin_state['phase']}")
+    print(f"[WS] Merlin: active={merlin_state['active']} phase={merlin_state['phase']} mode={merlin_state['mode']}")
 
 
 def handle_spell_charge(msg):
