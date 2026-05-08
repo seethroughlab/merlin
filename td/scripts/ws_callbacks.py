@@ -158,6 +158,24 @@ cast_state = {
 }
 
 
+def _seed_spell_state_defaults():
+    """Ensure tween_rise_ms / tween_fall_ms / peak_energy exist in
+    spell_state so the energy LagCHOP / MathCHOP have valid lag-time and
+    peak expressions before the first set_cast_params arrives.
+
+    Only writes rows that are missing — preserves any values already set
+    by a prior set_cast_params call. Idempotent; safe to call on every
+    connect.
+    """
+    table = op('/project1/spell_state')
+    if table is None:
+        return
+    defaults = {'tween_rise_ms': '600', 'tween_fall_ms': '800', 'peak_energy': '1.0'}
+    for key, val in defaults.items():
+        if table.findCell(key, cols=[0]) is None:
+            update_table_kv(table, key, val)
+
+
 def _wire_spell_state_uniforms():
     """Bind uSpellEnergy / uSpellMode on every shader op to live
     expressions reading from /project1/spell_state. Without this the
@@ -173,7 +191,9 @@ def _wire_spell_state_uniforms():
     Constants-page name from older runs gets cleared so we don't end up
     with the same uniform claimed in two slots.
     """
-    energy_expr = "float(op('/project1/spell_state')['energy', 1]) if op('/project1/spell_state').numRows > 1 else 0.5"
+    # uSpellEnergy reads from the smoothed CHOP chain (mode → lag → remap)
+    # so cast transitions ramp instead of snap. See improvement-02-energy-tweens.md.
+    energy_expr = "op('/project1/spell_energy_remap')['chan1'] if op('/project1/spell_energy_remap') is not None else 0.5"
     mode_expr = "float(op('/project1/spell_state')['mode_float', 1]) if op('/project1/spell_state').numRows > 1 else 0"
 
     # Probe a known-good parameter to discover the EXPRESSION / CONSTANT
@@ -284,6 +304,14 @@ def _wire_info_dats():
 
 def onConnect(dat):
     print(f"[WS] Connected to Merlin")
+
+    # Self-heal: seed tween/peak defaults so the energy CHOP network has
+    # valid expressions on first cook (must run BEFORE the uniform wire,
+    # since the expression update depends on spell_energy_remap existing).
+    try:
+        _seed_spell_state_defaults()
+    except Exception as e:
+        print(f"[WS] Failed to seed spell_state defaults: {e}")
 
     # Self-heal: ensure uSpellEnergy / uSpellMode read live from spell_state.
     try:
