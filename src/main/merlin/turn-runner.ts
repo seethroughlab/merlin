@@ -603,6 +603,22 @@ export async function dispatchToolCalls(
         break;
       }
 
+      case 'set_particle_params': {
+        const args = call.args as {
+          maxCount?: number;
+          lifespan?: number;
+          emitRate?: number;
+          spawnRadius?: number;
+          blendMode?: 'additive' | 'alpha';
+        };
+        const { pushParticleParams } = await import('../td-bridge');
+        const pushed = pushParticleParams(args);
+        response = pushed
+          ? { success: true, params: args }
+          : { success: false, error: 'TD not connected' };
+        break;
+      }
+
       default:
         response = { error: `Unknown tool: ${call.name}` };
     }

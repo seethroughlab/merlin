@@ -76,7 +76,8 @@ export interface MerlinToolCall {
     | 'set_zone_shader'
     | 'request_visual_feedback'
     | 'generate_sprite'
-    | 'set_cast_params';
+    | 'set_cast_params'
+    | 'set_particle_params';
   args: Record<string, unknown>;
   /** Gemini-assigned id for this call. Used to pair the function response back to the call (genai SDK populates this when present). */
   id?: string;

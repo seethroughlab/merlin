@@ -35,6 +35,7 @@ export {
   // Spell cast push methods
   pushSpellCast,
   pushCastParams,
+  pushParticleParams,
   // Sprite system push methods
   pushSpriteTexture,
   pushFlipbookConfig,

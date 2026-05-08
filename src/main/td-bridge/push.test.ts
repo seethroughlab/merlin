@@ -60,6 +60,7 @@ import {
   pushMerlinState,
   pushSpellCast,
   pushCastParams,
+  pushParticleParams,
   pushSpriteTexture,
   pushFlipbookConfig,
 } from './push';
@@ -336,6 +337,55 @@ describe('push', () => {
       mockIsConnected.mockReturnValue(false);
 
       const result = pushCastParams({ riseMs: 600 });
+
+      expect(result).toBe(false);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pushParticleParams', () => {
+    it('should send set_particle_params with all fields', () => {
+      pushParticleParams({
+        maxCount: 1500,
+        lifespan: 6.0,
+        emitRate: 250,
+        spawnRadius: 0.35,
+        blendMode: 'alpha',
+      });
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'set_particle_params',
+        maxCount: 1500,
+        lifespan: 6.0,
+        emitRate: 250,
+        spawnRadius: 0.35,
+        blendMode: 'alpha',
+      });
+    });
+
+    it('should send set_particle_params with only blendMode', () => {
+      pushParticleParams({ blendMode: 'alpha' });
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'set_particle_params',
+        blendMode: 'alpha',
+      });
+    });
+
+    it('should send set_particle_params with only count fields', () => {
+      pushParticleParams({ maxCount: 200, emitRate: 60 });
+
+      expect(mockSend).toHaveBeenCalledWith({
+        type: 'set_particle_params',
+        maxCount: 200,
+        emitRate: 60,
+      });
+    });
+
+    it('should return false when disconnected', () => {
+      mockIsConnected.mockReturnValue(false);
+
+      const result = pushParticleParams({ maxCount: 500 });
 
       expect(result).toBe(false);
       expect(mockSend).not.toHaveBeenCalled();

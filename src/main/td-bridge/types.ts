@@ -44,6 +44,26 @@ export interface CastParams {
   peakEnergy?: number;
 }
 
+/**
+ * Particle simulation parameters. Configured per-spell via the
+ * `set_particle_params` tool — Gemini matches density / lifespan /
+ * blend mode to the spell's character (sparse candle flame vs dense
+ * blizzard, emissive light vs physical crystal). Reset to baseline
+ * between spells via BASELINE_PARTICLE_PARAMS in reset-td.ts.
+ */
+export interface ParticleParams {
+  /** Max live particles at once (suggested 100–3000). Maps to particle1.maxparticles. */
+  maxCount?: number;
+  /** Particle lifetime in seconds (suggested 1.0–8.0). Maps to particle1.life. */
+  lifespan?: number;
+  /** Newly-born particles per second (suggested 30–600). Maps to particle1.birthrate. */
+  emitRate?: number;
+  /** Spawn-sphere radius in TD world units (suggested 0.03–0.4). Maps to pointgenerator1.radiusx/y/z. */
+  spawnRadius?: number;
+  /** Particle blend equation. 'additive' for emissive (fire/light/plasma); 'alpha' for physical (crystal/earth/shadow). Maps to glsl_billboard.srcblend/destblend. */
+  blendMode?: 'additive' | 'alpha';
+}
+
 export type TDOutboundMessage =
   | { type: 'zone_update'; zone: ZoneName; glsl_code: string }
   | { type: 'orientation_update'; portrait: boolean; width: number; height: number }
@@ -51,6 +71,7 @@ export type TDOutboundMessage =
   | { type: 'merlin_state'; active: boolean; phase?: string; spell?: MerlinSpellState }
   | { type: 'spell_cast'; origin: CastingOrigin; intensity: number; durationMs: number; envelope: CastEnvelope }
   | ({ type: 'set_cast_params' } & CastParams)
+  | ({ type: 'set_particle_params' } & ParticleParams)
   | { type: 'ping' }
   | { type: 'request_screenshot' }
   // Sprite system messages

@@ -386,6 +386,8 @@ def onReceiveText(dat, rowIndex, message):
             handle_reset_sprite(dat, msg)
         elif msg_type == 'set_cast_params':
             handle_set_cast_params(msg)
+        elif msg_type == 'set_particle_params':
+            handle_particle_params(msg)
 
     except Exception as e:
         print(f"[WS] Error: {e}")
@@ -728,6 +730,55 @@ def handle_set_cast_params(msg):
     print(
         f"[WS] Cast params: rise={msg.get('riseMs', '-')}ms "
         f"fall={msg.get('fallMs', '-')}ms peak={msg.get('peakEnergy', '-')}"
+    )
+
+
+def handle_particle_params(msg):
+    """Handle set_particle_params message - configure the particle sim.
+
+    All fields optional; only the supplied keys mutate node params. Maps
+    the camelCase tool args onto TD's native parameter names:
+      maxCount    -> particle1.maxparticles
+      lifespan    -> particle1.life          (seconds)
+      emitRate    -> particle1.birthrate     (per second)
+      spawnRadius -> pointgenerator1.radius{x,y,z}  (kept isotropic)
+      blendMode   -> glsl_billboard.{srcblend,destblend}
+                     'additive' -> one/one (sums brightness)
+                     'alpha'    -> sa/omsa (occluding alpha blend)
+
+    Missing nodes are skipped silently so dev-time TD state churn (a
+    deleted node from an experiment) doesn't crash the WS handler.
+    """
+    p1 = op('/project1/particle1')
+    if p1 is not None:
+        if 'maxCount' in msg:
+            p1.par.maxparticles = int(msg['maxCount'])
+        if 'lifespan' in msg:
+            p1.par.life = float(msg['lifespan'])
+        if 'emitRate' in msg:
+            p1.par.birthrate = float(msg['emitRate'])
+
+    pg = op('/project1/pointgenerator1')
+    if pg is not None and 'spawnRadius' in msg:
+        r = float(msg['spawnRadius'])
+        pg.par.radiusx = r
+        pg.par.radiusy = r
+        pg.par.radiusz = r
+
+    mat = op('/project1/glsl_billboard')
+    if mat is not None and 'blendMode' in msg:
+        bm = msg['blendMode']
+        if bm == 'additive':
+            mat.par.srcblend = 'one'
+            mat.par.destblend = 'one'
+        elif bm == 'alpha':
+            mat.par.srcblend = 'sa'
+            mat.par.destblend = 'omsa'
+
+    print(
+        f"[WS] Particle params: count={msg.get('maxCount', '-')} "
+        f"life={msg.get('lifespan', '-')}s rate={msg.get('emitRate', '-')}/s "
+        f"radius={msg.get('spawnRadius', '-')} blend={msg.get('blendMode', '-')}"
     )
 
 

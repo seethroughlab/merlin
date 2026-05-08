@@ -5,7 +5,7 @@
  */
 
 import { send, isConnected } from './connection';
-import type { ZoneName, FlipbookConfigMessage, CastParams } from './types';
+import type { ZoneName, FlipbookConfigMessage, CastParams, ParticleParams } from './types';
 import type { TrackingFrame, CastingOrigin } from '../../shared/types';
 import type { CastEnvelope } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
@@ -237,6 +237,27 @@ export function pushCastParams(params: CastParams): boolean {
   return guardedSend(
     { type: 'set_cast_params', ...params },
     'push cast params'
+  );
+}
+
+/**
+ * Push particle simulation parameters. Updates the TD POP network
+ * (particle1 maxparticles/birthrate/life, pointgenerator1 radiusx/y/z)
+ * and billboard MAT blend factors. All fields optional — only the
+ * supplied keys take effect on the TD side. Set per-spell via the
+ * set_particle_params tool; reset to defaults between spells via
+ * BASELINE_PARTICLE_PARAMS.
+ */
+export function pushParticleParams(params: ParticleParams): boolean {
+  console.log(
+    `[TDBridge ${ts()}] Pushing particle params: ` +
+    `count=${params.maxCount ?? '-'} life=${params.lifespan ?? '-'}s ` +
+    `rate=${params.emitRate ?? '-'}/s radius=${params.spawnRadius ?? '-'} ` +
+    `blend=${params.blendMode ?? '-'}`
+  );
+  return guardedSend(
+    { type: 'set_particle_params', ...params },
+    'push particle params'
   );
 }
 

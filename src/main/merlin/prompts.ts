@@ -967,6 +967,64 @@ Defaults: riseMs=600, fallMs=800, peakEnergy=1.0. Call once per spell after you'
 };
 
 /**
+ * Tool: Configure the particle simulation parameters for the current spell.
+ *
+ * Where set_zone_shader shapes per-particle behavior (forces, color, size)
+ * and set_cast_params shapes the energy envelope, this tool controls the
+ * raw simulation: how many particles exist, how long they live, how fast
+ * they're born, how spread they are at birth, and whether they blend
+ * additively (light) or alpha (opaque physical objects).
+ *
+ * Call before or alongside set_zone_shader. All fields optional — only
+ * supplied keys take effect; absent ones keep current values.
+ */
+export const SET_PARTICLE_PARAMS_TOOL: FunctionDeclaration = {
+  name: 'set_particle_params',
+  description: `Configure the particle simulation: density, lifespan, emit rate, spawn spread, and blend mode. Match the numbers to the spell's character — a single candle flame and a blizzard should not look equally dense by default.
+
+Archetype guidance:
+- Dense atmospheric (fog, snow, smoke): high maxCount (1500-3000), moderate emitRate (200-400), longer lifespan (5-8s)
+- Energetic / explosive (fire burst, lightning crackle): high emitRate (300-600), short lifespan (1-2s) for fast churn rather than density buildup
+- Sparse precise (single candle flame, glowing rune): low maxCount (50-200), low emitRate (30-80), short lifespan (1-3s)
+- Ambient drifting (stardust, pollen, embers): low emitRate (30-100), long lifespan (5-8s), wide spawnRadius
+
+Blend mode is the most impactful parameter for non-emissive spells:
+- 'additive' (default): particles sum brightness — correct for fire, light, plasma, energy. Brighter where they overlap.
+- 'alpha': particles occlude each other and read as solid objects — correct for crystal, earth, shadow, flora. Use this when the particles are meant to look like physical fragments rather than emitted light.
+
+spawnRadius controls the initial sphere of scatter around the body-tracked anchor (chest/eyes/hands). Distinct from spawn_behavior zone code which redirects which body part the spawn anchors to — radius controls the spread, zone code controls the location.
+
+Note on maxCount vs emitRate: maxCount is a hard ceiling. If emitRate * lifespan stays under maxCount, the cap never engages — emitRate alone determines the steady-state count. Use maxCount to clamp dense effects; tune emitRate for the perceived rate of churn.
+
+Defaults (BASELINE applied at every spell reset): maxCount=500, lifespan=4.0, emitRate=120, spawnRadius=0.2, blendMode='additive'. Call before set_zone_shader, not after request_visual_feedback.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      maxCount: {
+        type: Type.NUMBER,
+        description: 'Max live particles at once. Suggested 100-3000. Default 500.',
+      },
+      lifespan: {
+        type: Type.NUMBER,
+        description: 'Particle lifetime in seconds. Suggested 1.0-8.0. Default 4.0.',
+      },
+      emitRate: {
+        type: Type.NUMBER,
+        description: 'Newly-born particles per second. Suggested 30-600. Default 120.',
+      },
+      spawnRadius: {
+        type: Type.NUMBER,
+        description: 'Spawn-sphere radius in TD world units around the body anchor. Suggested 0.03-0.4. Default 0.2.',
+      },
+      blendMode: {
+        type: Type.STRING,
+        description: '"additive" for emissive spells (fire, light, plasma) — sums brightness; "alpha" for physical spells (crystal, earth, shadow) — particles occlude each other.',
+      },
+    },
+  },
+};
+
+/**
  * All tools (for initial chat setup)
  */
 export const MERLIN_TOOLS: FunctionDeclaration[] = [
@@ -978,6 +1036,7 @@ export const MERLIN_TOOLS: FunctionDeclaration[] = [
   REQUEST_VISUAL_FEEDBACK_TOOL,
   GENERATE_SPRITE_TOOL,
   SET_CAST_PARAMS_TOOL,
+  SET_PARTICLE_PARAMS_TOOL,
 ];
 
 /**
@@ -995,6 +1054,7 @@ export const MERLIN_VISUAL_AUTHOR_TOOLS: FunctionDeclaration[] = [
   REQUEST_VISUAL_FEEDBACK_TOOL,
   GENERATE_SPRITE_TOOL,
   SET_CAST_PARAMS_TOOL,
+  SET_PARTICLE_PARAMS_TOOL,
 ];
 
 // ============ HELPER PROMPTS ============

@@ -20,8 +20,9 @@ import {
   pushFlipbookConfig,
   pushResetSprite,
   pushCastParams,
+  pushParticleParams,
 } from '../td-bridge';
-import type { CastParams } from '../td-bridge';
+import type { CastParams, ParticleParams } from '../td-bridge';
 import { getMarkerBearingZones } from './test-shader';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
@@ -62,6 +63,23 @@ export const BASELINE_CAST_PARAMS: CastParams = {
   riseMs: 600,
   fallMs: 800,
   peakEnergy: 1.0,
+};
+
+/**
+ * Baseline particle simulation parameters pushed during reset so density,
+ * blend mode, and spawn spread don't leak between spells. Per-spell
+ * overrides come from the `set_particle_params` tool.
+ *
+ * blendMode='additive' is the default because most spell archetypes
+ * (fire/light/plasma/energy) read as emissive. For non-emissive spells
+ * (crystal/earth/shadow), the tool can switch to 'alpha'.
+ */
+export const BASELINE_PARTICLE_PARAMS: ParticleParams = {
+  maxCount: 500,
+  lifespan: 4.0,
+  emitRate: 120,
+  spawnRadius: 0.2,
+  blendMode: 'additive',
 };
 
 /**
@@ -120,6 +138,12 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   // fast rise/fall envelope regardless of what the previous run set.
   const castOK = pushCastParams(BASELINE_CAST_PARAMS);
   record('cast_params', castOK ? 'ok' : 'error', { error: castOK ? undefined : 'TD not connected' });
+
+  // 5. Particle simulation baseline so density / lifespan / blend mode
+  // don't leak between spells. Sets blend back to additive (the most
+  // common spell archetype) — Gemini can switch to 'alpha' per-spell.
+  const ppOK = pushParticleParams(BASELINE_PARTICLE_PARAMS);
+  record('particle_params', ppOK ? 'ok' : 'error', { error: ppOK ? undefined : 'TD not connected' });
 
   const errors = steps.filter(s => s.status === 'error').length;
   const skipped = steps.filter(s => s.status === 'skipped').length;

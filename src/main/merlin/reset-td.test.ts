@@ -7,6 +7,7 @@ const {
   mockPushFlipbookConfig,
   mockPushResetSprite,
   mockPushCastParams,
+  mockPushParticleParams,
 } = vi.hoisted(() => ({
   mockPushZoneUpdateWithValidation: vi.fn<(zone: string, code: string) => Promise<{ success: boolean; error?: string }>>(() =>
     Promise.resolve({ success: true })
@@ -14,6 +15,7 @@ const {
   mockPushFlipbookConfig: vi.fn(() => true),
   mockPushResetSprite: vi.fn(() => true),
   mockPushCastParams: vi.fn(() => true),
+  mockPushParticleParams: vi.fn(() => true),
 }));
 
 vi.mock('../td-bridge', () => ({
@@ -21,6 +23,7 @@ vi.mock('../td-bridge', () => ({
   pushFlipbookConfig: mockPushFlipbookConfig,
   pushResetSprite: mockPushResetSprite,
   pushCastParams: mockPushCastParams,
+  pushParticleParams: mockPushParticleParams,
 }));
 
 const ALL_ZONES = [
@@ -52,15 +55,16 @@ beforeEach(() => {
   mockPushFlipbookConfig.mockReturnValue(true);
   mockPushResetSprite.mockReturnValue(true);
   mockPushCastParams.mockReturnValue(true);
+  mockPushParticleParams.mockReturnValue(true);
 });
 
 describe('resetTDBaseline', () => {
-  it('happy path: pushes 8 zones, sprite, flipbook, cast_params', async () => {
+  it('happy path: pushes 8 zones, sprite, flipbook, cast_params, particle_params', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    expect(result.steps).toHaveLength(11); // 8 zones + sprite + flipbook + cast_params
+    expect(result.steps).toHaveLength(12); // 8 zones + sprite + flipbook + cast_params + particle_params
     expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
     // Each marker-bearing zone got a push
@@ -77,6 +81,9 @@ describe('resetTDBaseline', () => {
     expect(mockPushCastParams).toHaveBeenCalledWith({
       riseMs: 600, fallMs: 800, peakEnergy: 1.0,
     });
+    expect(mockPushParticleParams).toHaveBeenCalledWith({
+      maxCount: 500, lifespan: 4.0, emitRate: 120, spawnRadius: 0.2, blendMode: 'additive',
+    });
   });
 
   it('records cast_params failure when TD disconnected', async () => {
@@ -87,6 +94,18 @@ describe('resetTDBaseline', () => {
 
     expect(result.success).toBe(false);
     const step = result.steps.find(s => s.label === 'cast_params');
+    expect(step?.status).toBe('error');
+    expect(step?.error).toMatch(/not connected/i);
+  });
+
+  it('records particle_params failure when TD disconnected', async () => {
+    mockPushParticleParams.mockReturnValue(false);
+
+    const { resetTDBaseline } = await import('./reset-td');
+    const result = await resetTDBaseline();
+
+    expect(result.success).toBe(false);
+    const step = result.steps.find(s => s.label === 'particle_params');
     expect(step?.status).toBe('error');
     expect(step?.error).toMatch(/not connected/i);
   });
