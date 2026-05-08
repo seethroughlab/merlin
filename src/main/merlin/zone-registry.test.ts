@@ -169,6 +169,13 @@ describe('zone-registry', () => {
 color.rgb += bloom * uBloomIntensity;`;
       expect(() => validateZoneCode('post_fx', postFxCode)).not.toThrow();
     });
+
+    it('should pass post_fx zone code that uses the blurred input', () => {
+      // Verifies the bloom blur input is exposed via the contract:
+      // `blurred` is a template-declared local from sTD2DInputs[1].
+      const postFxCode = `color.rgb += blurred.rgb * uBloomIntensity * uSpellEnergy;`;
+      expect(() => validateZoneCode('post_fx', postFxCode)).not.toThrow();
+    });
   });
 
   describe('ZoneValidationError', () => {

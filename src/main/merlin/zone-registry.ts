@@ -81,9 +81,9 @@ export const ZONE_CONTRACTS: Record<ZoneName, ZoneContract> = {
     maxLines: 20,
   },
   post_fx: {
-    description: 'Post-processing effects (bloom, vignette, color grading)',
+    description: 'Post-processing effects (bloom, vignette, color grading, chromatic aberration). Two textures available: sTD2DInputs[0]=composite scene (particles + webcam), sTD2DInputs[1]=Gaussian-blurred particle render (for bloom compositing). Default bloom is already applied before zone code runs.',
     modifies: 'color',
-    availableVars: ['uv', 'color', 'vignette'],
+    availableVars: ['uv', 'color', 'vignette', 'blurred'],
     uniforms: ['uTime', 'uSpellEnergy', 'uSpellMode', 'uBloomIntensity', 'uVignetteStrength', 'uChromaticAberration'],
     maxLines: 30,
     bannedKeywords: ['discard'],

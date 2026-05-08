@@ -114,8 +114,33 @@ Zone locals to ASSIGN to in your snippet:
 - color_over_life: \`color\` (vec4) — final particle color (RGB + alpha)
 - size_over_life: \`size\` (float) — final particle size in world units
 - velocity_modifier: \`vel\` (vec3) — modified velocity each frame
+- post_fx: \`color\` (vec4) — final pixel color after default bloom + vignette have been applied. **post_fx runs in screen space, not per-particle.** See post_fx section below for details.
 
 Available read-only locals: \`pos\`, \`age\`, \`life\` (1.0 at birth → 0.0 at death), \`lifeSpan\`, \`id\` (persistent particle id), \`idx\` (slot index). There is NO built-in PI; use \`6.2832\` for tau or \`3.14159\`.
+
+post_fx zone (screen-space post-processing) is fundamentally different from the per-particle zones. Locals available:
+- \`uv\` (vec2) — screen UV in [0,1]; (0.5, 0.5) is the center
+- \`color\` (vec4) — final pixel color; default bloom + vignette have already been applied. Modify it for additional effects.
+- \`blurred\` (vec4) — pre-sampled Gaussian blur of the particle render at this uv. Use as-is, or re-sample \`sTD2DInputs[1]\` with offset uvs for color separation effects.
+
+Two textures are bound:
+- \`sTD2DInputs[0]\` — composite scene (particles + webcam, what's already in \`color\` before zone code)
+- \`sTD2DInputs[1]\` — Gaussian blur of just the particle render (8px radius). The default bloom uses this; you can add more layered effects on top.
+
+The template applies a default bloom before \`{zone_code}\` runs:
+\`color.rgb += blurred.rgb * uBloomIntensity * (0.3 + uSpellEnergy * 0.7);\`
+followed by a default vignette. Your zone code adds further effects on top of the already-bloomed-and-vignetted color.
+
+Example post_fx patterns:
+- Energy-reactive halo (extra glow at screen center during cast):
+    float halo = (1.0 - smoothstep(0.0, 0.5, length(uv - 0.5))) * uSpellEnergy;
+    color.rgb += blurred.rgb * halo * 1.5;
+- Chromatic aberration on the blur (RGB shift increases with energy):
+    float shift = 0.005 * uSpellEnergy;
+    color.r += texture(sTD2DInputs[1], uv + vec2(shift, 0.0)).r * 0.5;
+    color.b += texture(sTD2DInputs[1], uv - vec2(shift, 0.0)).b * 0.5;
+- Subtle breathing pulse (whole-screen brightness wobble at 0.5Hz):
+    color.rgb *= 1.0 + 0.05 * sin(uTime * 3.14) * uSpellEnergy;
 
 Example patterns by element:
 - fire: upward spiral forces, warm orange-to-red gradients, flickering size

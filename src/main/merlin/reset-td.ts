@@ -2,15 +2,20 @@
  * Reset TD to Baseline
  *
  * Pushes a known-good clean state to TouchDesigner: empty zone code so
- * each shader template runs its default behavior, an explicit pass-
- * through for post_fx (the template's vignette would otherwise still
- * apply), the default sprite, and a 1x1 single-frame flipbook config.
+ * each shader template runs its default behavior, the default sprite,
+ * a 1x1 single-frame flipbook config, default cast tween envelope, and
+ * default particle simulation params.
  *
  * Mesh-mode rendering and its render_mode reset step have been pruned;
  * see docs/mesh-mode-pipeline.md if we ever bring it back. Archetype /
  * spell-program pushes have also been pruned — visuals come entirely
  * from Gemini's set_zone_shader calls during a session, and "baseline"
  * means "no zone code, just template defaults."
+ *
+ * post_fx note: the template includes default bloom + vignette before
+ * {zone_code}, so "no zone code" at baseline now means subtle bloom +
+ * vignette are visible. This matches the design intent of improvement-04
+ * — particles should glow as light sources by default.
  *
  * Used by the sidebar "Reset to Baseline" button.
  */
@@ -29,12 +34,6 @@ import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
-/**
- * post_fx template applies a vignette before the {zone_code} marker.
- * To get true "no post-processing" we re-sample the input and overwrite
- * `color`, bypassing any earlier modifications.
- */
-const POSTFX_PASSTHROUGH = '// reset baseline: bypass any earlier modifications\n    color = texture(sTD2DInputs[0], uv);';
 
 /**
  * Baseline flipbook config pushed during reset: a 1x1 single-frame
@@ -110,13 +109,12 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   // 1. Reset all marker-bearing zones. The validator rejects literally
   // empty strings, so use a comment as the no-op snippet — the template
   // injects it at {zone_code} where it has no effect, leaving the
-  // template's default behavior in place. post_fx is the exception:
-  // its template applies a vignette before {zone_code}, so we pass an
-  // explicit pass-through that overwrites color.
+  // template's default behavior in place. For post_fx that means the
+  // default bloom + vignette in top_postfx.glsl run normally — i.e.
+  // "baseline" includes a subtle particle glow.
   const NOOP = '// reset to defaults';
   for (const zone of getMarkerBearingZones()) {
-    const code = zone === 'post_fx' ? POSTFX_PASSTHROUGH : NOOP;
-    const r = await pushZoneUpdateWithValidation(zone, code);
+    const r = await pushZoneUpdateWithValidation(zone, NOOP);
     if (r.success) {
       record(`zone:${zone}`, 'ok');
     } else {

@@ -128,7 +128,12 @@ describe('resetTDBaseline', () => {
     expect(result.steps.filter(s => s.status === 'error')).toHaveLength(0);
   });
 
-  it('post_fx gets the explicit pass-through, others get a no-op comment', async () => {
+  it('every zone (including post_fx) gets the same no-op comment so template defaults run', async () => {
+    // Previously post_fx was special-cased with a pass-through that
+    // re-sampled sTD2DInputs[0] to defeat the template's vignette. With
+    // improvement-04's default bloom we WANT the template defaults to
+    // run at baseline (subtle particle glow), so post_fx now uses the
+    // same comment-only NOOP as every other zone.
     const { resetTDBaseline } = await import('./reset-td');
     await resetTDBaseline();
 
@@ -136,7 +141,8 @@ describe('resetTDBaseline', () => {
     const forceFieldCall = mockPushZoneUpdateWithValidation.mock.calls.find(([z]) => z === 'force_field');
 
     expect(postFxCall).toBeDefined();
-    expect(postFxCall![1]).toContain('texture(sTD2DInputs[0]');
+    expect(postFxCall![1]).toMatch(/^\/\/\s/);
+    expect(postFxCall![1]).not.toContain('texture(');
     expect(forceFieldCall).toBeDefined();
     expect(forceFieldCall![1]).toMatch(/^\/\/\s/);
     expect(forceFieldCall![1].trim().length).toBeGreaterThan(0);
