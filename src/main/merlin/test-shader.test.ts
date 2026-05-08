@@ -99,7 +99,7 @@ describe('testShaderGeneration', () => {
     mockSendMessage.mockResolvedValueOnce(geminiCallsForZones(expected));
 
     const { testShaderGeneration } = await import('./test-shader');
-    const result = await testShaderGeneration({ intent: 'calm', element: 'air', energy: 0.5 });
+    const result = await testShaderGeneration({ prompt: 'a calm air spell with medium energy' });
 
     expect(result.success).toBe(true);
     expect(result.zones).toHaveLength(8);
@@ -120,9 +120,7 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
-      intent: 'wonder',
-      element: 'cosmic',
-      energy: 0.5,
+      prompt: 'a wonder-filled cosmic spell with medium energy',
       zones: subset,
     });
 
@@ -143,8 +141,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field', 'billboard_vertex'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field', 'billboard_vertex'],
     });
 
     const createArgs = mockChatsCreate.mock.calls[0][0];
@@ -157,8 +155,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field', 'post_fx'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field', 'post_fx'],
     });
 
     expect(mockLoadTemplate).toHaveBeenCalledWith('force_field');
@@ -172,8 +170,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field'],
     });
 
     expect(result.zones).toHaveLength(1);
@@ -189,8 +187,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field'],
     });
 
     expect(result.zones[0].status).toBe('error');
@@ -209,8 +207,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field'],
     });
 
     expect(result.zones[0].status).toBe('active');
@@ -225,8 +223,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field', 'post_fx'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field', 'post_fx'],
     });
 
     expect(result.success).toBe(false);
@@ -246,8 +244,8 @@ describe('testShaderGeneration', () => {
 
     const { testShaderGeneration } = await import('./test-shader');
     const result = await testShaderGeneration({
-      intent: 'calm', element: 'air', energy: 0.3,
-      zones: ['force_field'],
+      prompt: 'a calm air spell with mid-low energy',
+      zones:['force_field'],
     });
 
     // Zone is recorded as errored with the thrown message, function does

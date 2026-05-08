@@ -58,7 +58,6 @@ import {
   pushZoneUpdateWithValidation,
   pushOrientationUpdate,
   pushMerlinState,
-  pushSpellCharge,
   pushSpellCast,
   pushSpriteTexture,
   pushFlipbookConfig,
@@ -291,19 +290,6 @@ describe('push', () => {
       expect(mockSend).toHaveBeenCalledWith({
         type: 'merlin_state',
         active: false,
-      });
-    });
-  });
-
-  describe('pushSpellCharge', () => {
-    it('should send spell charge message', () => {
-      pushSpellCharge('hands', 0.75, [15, 16, 17]);
-
-      expect(mockSend).toHaveBeenCalledWith({
-        type: 'spell_charge',
-        origin: 'hands',
-        intensity: 0.75,
-        castingLandmarks: [15, 16, 17],
       });
     });
   });

@@ -647,7 +647,7 @@ ipcMain.handle('merlin-test-shader', async (_event, config: TestShaderConfig) =>
     throw new Error('Gemini not available - check GEMINI_API_KEY');
   }
 
-  console.log(`[Merlin ${ts()}] Test shader: intent=${config.intent} element=${config.element} energy=${config.energy}`);
+  console.log(`[Merlin ${ts()}] Test shader: prompt="${config.prompt.slice(0, 60)}${config.prompt.length > 60 ? '…' : ''}" zones=${config.zones?.join(',') ?? 'all'}`);
   const startTime = Date.now();
 
   try {
