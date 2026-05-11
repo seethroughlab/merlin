@@ -12,9 +12,13 @@ let genAI: GoogleGenerativeAI | null = null;
 let model: any = null;
 
 const BODY_LANGUAGE_PROMPT = `You are an expert in body language and nonverbal communication.
-Analyze this filmstrip showing a person's skeleton/pose over approximately 5 seconds.
+Analyze this filmstrip showing a person over approximately 5 seconds.
 
-The skeleton frames are arranged left-to-right chronologically. Analyze:
+Each frame is a real photo of the person (cropped to their body) with a
+semi-transparent cyan skeleton overlay showing MediaPipe pose landmarks.
+Read BOTH the photo (clothing, hand shape, facial cues, environment) AND
+the skeleton (precise joint positions). Frames are arranged left-to-right
+chronologically. Analyze:
 
 POSTURE:
 - Spine alignment (straight, hunched, leaning forward/back)
@@ -25,9 +29,12 @@ GESTURES:
 - Hand/arm movements (expansive, restrained, fidgeting)
 - Self-touching behaviors (face, arms, neck)
 - Barrier gestures (crossed arms, protective)
+- Hand shape (open, clenched, pointing, holding something) — visible in
+  the photo even though the skeleton only has wrist landmarks
 
 MOVEMENT PATTERNS:
-- Overall stillness vs. activity level
+- Overall stillness vs. activity level (compare landmark positions
+  between successive frames)
 - Rhythmic movements (nodding, swaying)
 - Sudden changes or reactions
 
