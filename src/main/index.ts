@@ -15,6 +15,7 @@ import { testLiveSpell } from './merlin/test-live-spell';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
 import { resetTDBaseline } from './merlin/reset-td';
 import { saveSessionState, loadSessionState, applySessionState, listSavedSessions, deleteSession } from './merlin/state-persistence';
+import { pushFaceEvent, clearFaceEventBuffer } from './merlin/face-event-buffer';
 import {
   initTDBridge,
   closeTDBridge,
@@ -180,6 +181,26 @@ function createMerlinSession(): MerlinSession {
         mainWindow.webContents.send('merlin-auto-end');
       }
     },
+    onSpeakChunk: (text: string) => {
+      // Parallel TTS: forward the chunk to the renderer so LiveTTS starts
+      // playing while the tool-dispatch loop (often a 25s Imagen call)
+      // continues running in main. The turn-runner has already excluded
+      // this text from the final response, so the renderer won't
+      // double-speak it when processUserSpeech eventually resolves.
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('merlin-speak-chunk', text);
+      }
+    },
+    onCastArmed: (payload) => {
+      // The moment prepare_casting fires, ship the magic word + end word
+      // to the renderer so its background cast listener can match the
+      // participant's speech directly — no Gemini round-trip needed when
+      // they say the word.
+      console.log(`[Merlin ${ts()}] Cast armed: magicWord="${payload.magicWord}" endWord="${payload.endWord}"`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('merlin-cast-armed', payload);
+      }
+    },
   });
 }
 
@@ -195,10 +216,18 @@ function createMainWindow(): void {
     width: bounds.width,
     height: bounds.height,
     title: 'Merlin - Preview',
+    // Wizard icon for taskbar / alt-tab / window chrome during dev. In
+    // packaged builds electron-builder substitutes build/icon.ico into
+    // the executable; this path is for the dev runtime. __dirname here
+    // resolves to dist/main, so two levels up is the project root.
+    icon: join(__dirname, '..', '..', 'build', 'icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      // Tracking loop is rAF-driven; without this Chromium clamps it to
+      // ~1 Hz whenever the window loses focus and tracking_frame stops.
+      backgroundThrottling: false,
     },
   });
 
@@ -355,6 +384,19 @@ ipcMain.on('tracking-frame', (event, data: TrackingFrame) => {
   }
 });
 
+// Face-gesture trigger events (mouth_open, smile, brow_raise, eye_closed).
+// Renderer-only signal — not pushed to TD yet. For now we just log so
+// the pipeline can be verified end-to-end. Future hookups: route to
+// spell-effect triggers, expose to Gemini via tool, etc.
+ipcMain.on('face-gesture', (event, evt: { kind: string; edge: 'start' | 'end'; score: number; timestamp: number }) => {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return;
+  console.log(`[FaceGesture ${ts()}] ${evt.kind} ${evt.edge} score=${evt.score.toFixed(2)}`);
+  // Buffer the event so Gemini can query recent activity via the
+  // `get_face_events` tool, and so buildSessionContext can inject a
+  // brief summary into the per-turn context.
+  pushFaceEvent(evt.kind, evt.edge, evt.score);
+});
+
 // IPC handler for face strip analysis (micro-expressions)
 ipcMain.handle('analyze-face-strip', async (_event, imageDataUrl: string) => {
   if (!isGeminiAvailable()) {
@@ -505,6 +547,9 @@ ipcMain.handle('merlin-start', async () => {
   }
 
   console.log(`[Merlin ${ts()}] Starting session...`);
+  // Drop any stale face events from a previous participant before the
+  // new session starts emitting its own.
+  clearFaceEventBuffer();
   merlinSession = createMerlinSession();
 
   try {
@@ -576,6 +621,55 @@ ipcMain.handle('merlin-process-speech', async (_event, transcript: string) => {
     console.error(`[Merlin ${ts()}] Failed to process speech:`, error);
     throw error;
   }
+});
+
+// Background cast trigger — fired by the renderer when its independent
+// listener matches the magic word in a transcript. Bypasses the
+// Gemini conversation pipeline entirely; just fires the visual cast
+// and advances phase. The renderer arms this listener via
+// `merlin-cast-armed` when prepare_casting dispatches.
+ipcMain.handle('merlin-trigger-cast', async () => {
+  if (!merlinSession || !merlinSession.isActive()) {
+    return { ok: false, reason: 'session not active' };
+  }
+  console.log(`[Merlin ${ts()}] Background cast trigger fired`);
+  merlinSession.triggerCast();
+  const spell = merlinSession.getSpell();
+  const state = merlinSession.getState();
+  // Mirror what processUserSpeech would have broadcast — keeps the
+  // sidebar / TD bridge in sync without going through the Gemini turn.
+  if (isTDConnected()) {
+    pushMerlinState({ active: true, phase: state.phase, spell });
+  }
+  broadcastMerlinUpdate({
+    phase: state.phase,
+    turnCount: state.turnCount,
+    spell,
+    isListening: false,
+    isProcessing: false,
+  });
+  return { ok: true, phase: state.phase };
+});
+
+// Background play-end trigger — fired by the renderer when its
+// independent listener matches the end-word in a transcript during
+// play phase. Closes play, advances to outro. The renderer is
+// responsible for any final TTS narration (or skipping it).
+ipcMain.handle('merlin-trigger-end', async () => {
+  if (!merlinSession || !merlinSession.isActive()) {
+    return { ok: false, reason: 'session not active' };
+  }
+  console.log(`[Merlin ${ts()}] Background end-word trigger fired`);
+  merlinSession.closePlay('end-word');
+  const state = merlinSession.getState();
+  broadcastMerlinUpdate({
+    phase: state.phase,
+    turnCount: state.turnCount,
+    spell: merlinSession.getSpell(),
+    isListening: false,
+    isProcessing: false,
+  });
+  return { ok: true, phase: state.phase };
 });
 
 // End Merlin session

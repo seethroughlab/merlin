@@ -30,6 +30,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('tracking-frame', frame);
   },
 
+  // Send face-gesture trigger events (mouth_open, smile, brow_raise,
+  // eye_closed) from the renderer's FaceLandmarker blendshape analysis.
+  // Edge-triggered: fires once on start, once on end of each gesture.
+  // Renderer-only signal; not pushed to TD currently. Main routes these
+  // to future consumers (Gemini tool, spell-effect router, etc.).
+  sendFaceGesture: (evt: { kind: string; edge: 'start' | 'end'; score: number; timestamp: number }) => {
+    ipcRenderer.send('face-gesture', evt);
+  },
+
   // Analyze face strip with Gemini (micro-expressions)
   analyzeFaceStrip: (imageDataUrl: string): Promise<MicroExpressionAnalysis> => {
     return ipcRenderer.invoke('analyze-face-strip', imageDataUrl);
@@ -131,6 +140,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('merlin-auto-end', () => {
       callback();
     });
+  },
+
+  // Early-speech chunk pushed by main when Gemini emits text BEFORE the
+  // tool-dispatch loop finishes. Lets the renderer start TTS in parallel
+  // with slow tool calls (Imagen sprite generation, etc.) so the
+  // participant hears Merlin sooner.
+  onMerlinSpeakChunk: (callback: (text: string) => void) => {
+    ipcRenderer.on('merlin-speak-chunk', (_event, text: string) => {
+      callback(text);
+    });
+  },
+
+  // Background cast listener support. Main pushes `merlin-cast-armed`
+  // the moment prepare_casting fires, carrying the magic word + end
+  // word. The renderer arms a local matcher that watches every
+  // transcript and fires `merlin-trigger-cast` / `merlin-trigger-end`
+  // the instant a match lands — bypassing the Gemini conversation
+  // pipeline entirely so the cast is responsive even before the
+  // post-speech `merlin-process-speech` round-trip would have started.
+  onMerlinCastArmed: (
+    callback: (payload: { magicWord: string; endWord: string; gestureHint?: string }) => void,
+  ) => {
+    ipcRenderer.on(
+      'merlin-cast-armed',
+      (_event, payload: { magicWord: string; endWord: string; gestureHint?: string }) => {
+        callback(payload);
+      },
+    );
+  },
+  merlinTriggerCast: (): Promise<{ ok: boolean; phase?: string; reason?: string }> => {
+    return ipcRenderer.invoke('merlin-trigger-cast');
+  },
+  merlinTriggerEnd: (): Promise<{ ok: boolean; phase?: string; reason?: string }> => {
+    return ipcRenderer.invoke('merlin-trigger-end');
   },
 
   // Test shader generation (Shift+T debug mode)
@@ -248,6 +291,7 @@ declare global {
   interface Window {
     electronAPI: {
       sendTrackingFrame: (frame: TrackingFrame) => void;
+      sendFaceGesture: (evt: { kind: string; edge: 'start' | 'end'; score: number; timestamp: number }) => void;
       analyzeFaceStrip: (imageDataUrl: string) => Promise<MicroExpressionAnalysis>;
       analyzeSkeletonStrip: (imageDataUrl: string) => Promise<BodyLanguageAnalysis>;
       interpretVoiceCommand: (transcript: string) => Promise<VoiceCommandResult>;
@@ -271,6 +315,12 @@ declare global {
       }) => void;
       onMerlinUpdate: (callback: (update: MerlinUIUpdate) => void) => void;
       onMerlinAutoEnd: (callback: () => void) => void;
+      onMerlinSpeakChunk: (callback: (text: string) => void) => void;
+      onMerlinCastArmed: (
+        callback: (payload: { magicWord: string; endWord: string; gestureHint?: string }) => void,
+      ) => void;
+      merlinTriggerCast: () => Promise<{ ok: boolean; phase?: string; reason?: string }>;
+      merlinTriggerEnd: () => Promise<{ ok: boolean; phase?: string; reason?: string }>;
       merlinTestShader: (config: TestShaderConfig) => Promise<TestShaderResult>;
       merlinTestSpriteDirect: (spec: SpriteTestSpec) => Promise<SpriteTestResult>;
       merlinTestSpriteGemini: (prompt: string) => Promise<SpriteTestResult>;

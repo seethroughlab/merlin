@@ -14,6 +14,13 @@ import {
   segmentImage,
   drawSegmentationOverlay,
   segmentToMask,
+  detectFaceLandmarks,
+  drawFaceLandmarks,
+  getFaceBlendshapes,
+  setFaceGestureCallback,
+  resetFaceGestureState,
+  updateFaceGestures,
+  type FaceGestureEvent,
 } from './mediapipe';
 import { captureFaceStrip } from './faceStrip';
 import { captureSkeletonStrip } from './skeletonStrip';
@@ -81,6 +88,7 @@ import type {
 } from '../shared/types';
 import { SHADER_TEST_PRESETS } from '../shared/test-shader-presets';
 import { LIVE_SPELL_PRESETS } from '../shared/live-spell-presets';
+import { transcriptContains } from '../shared/transcript-match';
 
 // DOM Elements
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -110,6 +118,7 @@ let detectSegmentEnabled = true;
 // Drawing toggles (whether to render overlays)
 let drawPoseEnabled = true;
 let drawFaceEnabled = true;
+let drawMeshEnabled = true;
 let drawSegmentEnabled = true;
 
 // Latest analysis results
@@ -139,6 +148,13 @@ let ttsReady = false;
 let merlinModeActive = false;
 let merlinIsListening = false;
 let merlinIsProcessing = false;
+
+// Background cast listener state. Armed by main via `merlin-cast-armed`
+// the moment prepare_casting dispatches. When the participant says the
+// magic word the renderer fires `merlin-trigger-cast` directly to main,
+// bypassing the slow merlin-process-speech / Gemini round-trip.
+let armedMagicWord: string | null = null;
+let armedEndWord: string | null = null;
 
 // Pending analysis capture (started when user begins speaking)
 let pendingAnalysisCapture: Promise<{
@@ -407,6 +423,18 @@ function renderLoop(): void {
           };
         }
       }
+
+      // Face landmarks + blendshapes for expression-driven trigger
+      // events (mouth_open, smile, brow_raise, eye_closed). Renderer-only;
+      // not sent to TD. The gesture detector handles edge-detection and
+      // dispatches FaceGestureEvent through the callback set below.
+      const faceLm = detectFaceLandmarks(frameSource as HTMLVideoElement, timestamp);
+      updateFaceGestures(getFaceBlendshapes());
+
+      // Mesh wireframe overlay — toggleable via the "Mesh" checkbox.
+      if (drawMeshEnabled && faceLm && faceLm.faceLandmarks.length > 0) {
+        drawFaceLandmarks(overlayCtx, faceLm);
+      }
     }
 
     // Send tracking data via IPC
@@ -654,6 +682,7 @@ async function loadSettings(): Promise<void> {
     detectSegmentEnabled = settings.detectSegment as boolean ?? true;
     drawPoseEnabled = settings.drawPose as boolean ?? true;
     drawFaceEnabled = settings.drawFace as boolean ?? true;
+    drawMeshEnabled = settings.drawMesh as boolean ?? true;
     drawSegmentEnabled = settings.drawSegment as boolean ?? true;
     isPortraitMode = settings.isPortraitMode as boolean ?? false;
 
@@ -663,6 +692,7 @@ async function loadSettings(): Promise<void> {
     const detectSegmentCheckbox = document.getElementById('detect-segment') as HTMLInputElement;
     const drawPoseCheckbox = document.getElementById('draw-pose') as HTMLInputElement;
     const drawFaceCheckbox = document.getElementById('draw-face') as HTMLInputElement;
+    const drawMeshCheckbox = document.getElementById('draw-mesh') as HTMLInputElement;
     const drawSegmentCheckbox = document.getElementById('draw-segment') as HTMLInputElement;
     const landscapeBtn = document.getElementById('orientation-landscape');
     const portraitBtn = document.getElementById('orientation-portrait');
@@ -678,6 +708,12 @@ async function loadSettings(): Promise<void> {
     if (drawFaceCheckbox) {
       drawFaceCheckbox.checked = drawFaceEnabled;
       drawFaceCheckbox.disabled = !detectFaceEnabled;
+    }
+    if (drawMeshCheckbox) {
+      drawMeshCheckbox.checked = drawMeshEnabled;
+      // Mesh draw is gated on face detection too (FaceLandmarker only
+      // runs when detectFaceEnabled is on).
+      drawMeshCheckbox.disabled = !detectFaceEnabled;
     }
     if (drawSegmentCheckbox) {
       drawSegmentCheckbox.checked = drawSegmentEnabled;
@@ -720,6 +756,7 @@ function setupSidebar(): void {
   // Drawing toggles
   const drawPoseCheckbox = document.getElementById('draw-pose') as HTMLInputElement;
   const drawFaceCheckbox = document.getElementById('draw-face') as HTMLInputElement;
+  const drawMeshCheckbox = document.getElementById('draw-mesh') as HTMLInputElement;
   const drawSegmentCheckbox = document.getElementById('draw-segment') as HTMLInputElement;
 
   // Spout name inputs
@@ -747,9 +784,16 @@ function setupSidebar(): void {
   detectFaceCheckbox?.addEventListener('change', () => {
     detectFaceEnabled = detectFaceCheckbox.checked;
     updateDrawCheckbox(detectFaceCheckbox, drawFaceCheckbox);
-    if (!detectFaceEnabled) drawFaceEnabled = false;
+    updateDrawCheckbox(detectFaceCheckbox, drawMeshCheckbox);
+    if (!detectFaceEnabled) {
+      drawFaceEnabled = false;
+      drawMeshEnabled = false;
+    }
     saveSetting('detectFace', detectFaceEnabled);
-    if (!detectFaceEnabled) saveSetting('drawFace', false);
+    if (!detectFaceEnabled) {
+      saveSetting('drawFace', false);
+      saveSetting('drawMesh', false);
+    }
   });
   detectSegmentCheckbox?.addEventListener('change', () => {
     detectSegmentEnabled = detectSegmentCheckbox.checked;
@@ -767,6 +811,10 @@ function setupSidebar(): void {
   drawFaceCheckbox?.addEventListener('change', () => {
     drawFaceEnabled = drawFaceCheckbox.checked;
     saveSetting('drawFace', drawFaceEnabled);
+  });
+  drawMeshCheckbox?.addEventListener('change', () => {
+    drawMeshEnabled = drawMeshCheckbox.checked;
+    saveSetting('drawMesh', drawMeshEnabled);
   });
   drawSegmentCheckbox?.addEventListener('change', () => {
     drawSegmentEnabled = drawSegmentCheckbox.checked;
@@ -1088,6 +1136,34 @@ function updateVoiceStatusDisplay(status: VoiceStatus): void {
  */
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Map internal MerlinPhase to participant-facing label for the sidebar.
+ * Internal names stay unchanged to keep tests + persistence stable; only
+ * the display label collapses the multi-turn arc into the
+ * Attract / Interaction / Cast / Play / Outro vocabulary the client
+ * uses.
+ */
+function displayPhaseLabel(phase: string): string {
+  switch (phase) {
+    case 'idle':
+    case 'wake':
+      return 'Attract';
+    case 'intro':
+    case 'discovery':
+    case 'formation':
+    case 'ready_to_cast':
+      return 'Interaction';
+    case 'casting':
+      return 'Cast';
+    case 'play':
+      return 'Play';
+    case 'outro':
+      return 'Outro';
+    default:
+      return capitalize(phase);
+  }
 }
 
 /**
@@ -1953,9 +2029,10 @@ async function initMediaPipe(): Promise<void> {
     const loaded = [];
     if (results.pose) loaded.push('Pose');
     if (results.face) loaded.push('Face');
+    if (results.faceLandmarks) loaded.push('FaceLandmarks');
     if (results.segmentation) loaded.push('Segmentation');
 
-    if (loaded.length === 3) {
+    if (loaded.length === 4) {
       if (statusDisplay) statusDisplay.textContent = `MediaPipe: All models loaded`;
     } else if (loaded.length > 0) {
       if (statusDisplay) statusDisplay.textContent = `MediaPipe: ${loaded.join(', ')} loaded`;
@@ -1964,6 +2041,17 @@ async function initMediaPipe(): Promise<void> {
     }
 
     mediapipeReady = loaded.length > 0;
+
+    // Wire face-gesture events. Renderer-only signals — log to console
+    // and forward to main via IPC so future consumers (Gemini tool,
+    // spell-effect router, etc.) can hook in without renderer changes.
+    setFaceGestureCallback((evt: FaceGestureEvent) => {
+      const ts = new Date(performance.timeOrigin + evt.timestamp).toISOString().slice(11, 23);
+      console.log(`[FaceGesture ${ts}] ${evt.kind} ${evt.edge} (score=${evt.score.toFixed(2)})`);
+      if (window.electronAPI?.sendFaceGesture) {
+        window.electronAPI.sendFaceGesture(evt);
+      }
+    });
   } catch (error) {
     console.error('MediaPipe init error:', error);
     if (statusDisplay) statusDisplay.textContent = `MediaPipe error: ${error}`;
@@ -2053,7 +2141,7 @@ function updateMerlinUI(update: MerlinUIUpdate): void {
   if (!sidebar || !panel) return;
 
   // Update phase and turn
-  if (phaseSpan) phaseSpan.textContent = capitalize(update.phase);
+  if (phaseSpan) phaseSpan.textContent = displayPhaseLabel(update.phase);
   if (turnSpan) turnSpan.textContent = update.turnCount.toString();
 
   // Update spell state display
@@ -2199,14 +2287,9 @@ function appendGeminiTurn(turn: Partial<GeminiTurn> & { id: string; source: Gemi
     body.appendChild(det);
   }
 
-  // User prompt — only on first sight.
-  if (turn.userPrompt && !card.querySelector('.gemini-user-prompt')) {
-    const userDiv = document.createElement('div');
-    userDiv.className = 'gemini-user-prompt';
-    userDiv.innerHTML = `<div class="gemini-role">You</div><div class="gemini-text"></div>`;
-    userDiv.querySelector('.gemini-text')!.textContent = turn.userPrompt;
-    body.appendChild(userDiv);
-  }
+  // User prompt block intentionally not rendered here — the chat-history
+  // bubble above the LIVE card already shows the participant's words.
+  // GeminiTurn.userPrompt is still emitted in case other surfaces need it.
 
   // Response text and tool calls — each emission produces a new section so
   // retry-followup responses appear below their pushResults.
@@ -2430,11 +2513,14 @@ async function startMerlinMode(): Promise<void> {
 
     // Update phase display
     const phaseSpan = document.getElementById('merlin-phase');
-    if (phaseSpan) phaseSpan.textContent = capitalize(response.phase);
+    if (phaseSpan) phaseSpan.textContent = displayPhaseLabel(response.phase);
 
-    // Speak the intro aloud (streaming for lower latency)
-    if (ttsReady && response.text) {
-      await speakWithStreaming(response.text, 'wizard');
+    // Speak the un-streamed intro remainder. If the chunk path already
+    // streamed the greeting during tool dispatch, spokenText is the
+    // post-tool portion (often empty). When no chunk fired, spokenText
+    // equals the full intro.
+    if (ttsReady && response.spokenText) {
+      await speakWithStreaming(response.spokenText, 'wizard');
     }
 
     // Start continuous listening (after TTS finishes)
@@ -2473,6 +2559,13 @@ async function stopMerlinMode(): Promise<void> {
   setSpeechStartCallback(null);
   pendingAnalysisCapture = null;
   merlinIsListening = false;
+  // Disarm the background cast listener — next session re-arms via
+  // merlin-cast-armed when prepare_casting fires.
+  armedMagicWord = null;
+  armedEndWord = null;
+  // Reset face-gesture edge-detector so stale ON-states from a previous
+  // session don't suppress 'start' events on the next session.
+  resetFaceGestureState();
 
   // End session
   if (window.electronAPI) {
@@ -2483,9 +2576,11 @@ async function stopMerlinMode(): Promise<void> {
       // Add finale message
       addMerlinMessage('assistant', response.text);
 
-      // Speak the finale aloud with wizard voice
-      if (ttsReady && response.text) {
-        await speakWithStreaming(response.text, 'wizard');
+      // Speak the finale aloud with wizard voice. endSession returns
+      // spokenText explicitly so this matches the merlin-process-speech
+      // pattern; empty means nothing to say (cast-already-fired path).
+      if (ttsReady && response.spokenText) {
+        await speakWithStreaming(response.spokenText, 'wizard');
       }
     } catch (error) {
       console.error('[Merlin] Error ending session:', error);
@@ -2521,6 +2616,31 @@ let isProcessingMerlinTranscript = false;
  */
 async function handleMerlinTranscript(transcript: string): Promise<void> {
   if (!merlinModeActive || !window.electronAPI) return;
+
+  // Background cast listener — runs BEFORE the busy guard and BEFORE
+  // any Gemini round-trip. When prepare_casting fires, main arms
+  // `armedMagicWord` (and `armedEndWord` for play phase). If the
+  // participant speaks either, we fire a direct IPC to trigger the
+  // cast (or end the play phase) without going through
+  // merlinProcessSpeech at all. The Gemini side keeps running for
+  // pre-cast conversation; once armed, the cast trigger is decoupled
+  // from it entirely.
+  const tsBg = () => new Date().toISOString().slice(11, 23);
+  if (!isSpeaking()) {
+    if (armedMagicWord && transcriptContains(transcript, armedMagicWord)) {
+      console.log(`[Merlin ${tsBg()}] Background trigger: magic word "${armedMagicWord}" matched — firing cast`);
+      // Don't clear armedMagicWord — triggerCast is idempotent (it only
+      // advances phase once via markCastCompleted) and the participant
+      // is allowed to re-cast visually during play. Same for endWord.
+      void window.electronAPI.merlinTriggerCast();
+      return;
+    }
+    if (armedEndWord && transcriptContains(transcript, armedEndWord)) {
+      console.log(`[Merlin ${tsBg()}] Background trigger: end word "${armedEndWord}" matched — closing play`);
+      void window.electronAPI.merlinTriggerEnd();
+      return;
+    }
+  }
 
   // Prevent concurrent processing - drop if already processing
   if (isProcessingMerlinTranscript) {
@@ -2580,6 +2700,16 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     const response = await window.electronAPI.merlinProcessSpeech(transcript);
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Response:`, response.text);
 
+    // After the cast has fired, processUserSpeech short-circuits and
+    // returns empty text — Merlin's interaction is over but the
+    // participant can still re-cast visually. Skip the chat-history /
+    // UI update / TTS for empty responses so we don't render blank
+    // bubbles or play silence.
+    if (!response.text) {
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Empty response (post-cast) — skipping UI + TTS`);
+      return;
+    }
+
     // Add response to conversation
     addMerlinMessage('assistant', response.text);
 
@@ -2589,23 +2719,29 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     // Update phase in UI
     const phaseSpan = document.getElementById('merlin-phase');
     const header = document.getElementById('merlin-header');
-    if (phaseSpan) phaseSpan.textContent = capitalize(response.phase);
+    if (phaseSpan) phaseSpan.textContent = displayPhaseLabel(response.phase);
     if (header && response.spell.element) {
       header.className = `merlin-header element-${response.spell.element}`;
     }
 
-    // Speak the response aloud (pause listening during TTS)
-    if (ttsReady && response.text) {
+    // Speak the un-streamed REMAINDER (post-tool text). When the chunk
+    // path streamed the initial response during tool dispatch, the
+    // remainder is whatever Gemini emitted AFTER tools ran (sentences 3+
+    // of the response, etc.). When no chunk fired, spokenText equals the
+    // full response. Empty means everything already spoken — skip.
+    if (ttsReady && response.spokenText) {
       stopContinuousListening();
-      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Paused listening for TTS`);
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Speaking remainder (${response.spokenText.length} chars)`);
 
-      await speakWithStreaming(response.text, 'wizard');
+      await speakWithStreaming(response.spokenText, 'wizard');
 
       // Resume listening after TTS finishes
       if (merlinModeActive) {
         console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after TTS`);
         await startContinuousListening(handleMerlinTranscript);
       }
+    } else {
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder text — chunk path already spoke everything`);
     }
 
   } catch (error) {
@@ -2724,6 +2860,34 @@ if (window.electronAPI) {
   window.electronAPI.onMerlinAutoEnd(() => {
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Session complete - auto-ending...`);
     stopMerlinMode();
+  });
+
+  // Parallel TTS: main fires this when Gemini emits text alongside tool
+  // calls so we can start speaking BEFORE the (potentially slow) tool
+  // dispatch loop finishes. Speech runs concurrently with the in-flight
+  // processUserSpeech promise. We pause continuous listening here too,
+  // mirroring the post-response TTS path; it resumes when the
+  // processUserSpeech finally lands and the response-side TTS finishes
+  // (or is skipped because finalText was already streamed).
+  window.electronAPI.onMerlinSpeakChunk((text: string) => {
+    if (!ttsReady || !text) return;
+    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Parallel-TTS chunk: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
+    stopContinuousListening();
+    // Fire-and-forget; speakWithStreaming queues internally.
+    void speakWithStreaming(text, 'wizard');
+  });
+
+  // Cast armed — main fires this when prepare_casting dispatches. From
+  // this moment on, the renderer matches every transcript against the
+  // declared magic word locally and triggers the cast via direct IPC,
+  // independent of the Gemini conversation pipeline.
+  window.electronAPI.onMerlinCastArmed((payload) => {
+    armedMagicWord = payload.magicWord || null;
+    armedEndWord = payload.endWord || null;
+    console.log(
+      `[Merlin ${new Date().toISOString().slice(11, 23)}] ` +
+      `Cast armed: magicWord="${armedMagicWord}" endWord="${armedEndWord}"`,
+    );
   });
 
   // Listen for zone compile results to update status indicators
