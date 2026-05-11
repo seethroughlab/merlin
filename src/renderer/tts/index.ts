@@ -348,8 +348,18 @@ export async function speakStreaming(text: string, mood: string = 'mysterious'):
     return;
   }
 
-  // Stop any current speech
-  stopStreaming();
+  // IMPORTANT: do NOT call stopStreaming() here. The chunk path (initial
+  // Gemini text during tool dispatch) and the spokenText path (post-tool
+  // remainder) both call this function for the SAME logical turn. If we
+  // stopped on the second call we'd reset nextPlayTime to 0 — already-
+  // scheduled AudioBufferSourceNodes from the chunk keep playing
+  // unconditionally (Web Audio fires once .start() is called), so the
+  // new schedule overlaps the old: two voices on top of each other.
+  // Letting nextPlayTime carry forward makes the remainder's chunks
+  // queue cleanly after the chunk's last buffer.
+  //
+  // Callers that genuinely want to interrupt speech should call
+  // stopStreaming() explicitly first (e.g., closeTTS, stopMerlinMode).
 
   const timestamp = new Date().toISOString().slice(11, 23);
   console.log(`[TTS ${timestamp}] Requesting streaming speech with mood "${mood}": "${text.slice(0, 50)}..."`);
