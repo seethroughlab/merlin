@@ -106,12 +106,17 @@ export async function pushZoneUpdateWithValidation(
     // Get the error from zone state
     const error = zoneStateManager.getZoneError(zone) || 'Compilation failed';
 
-    // Rollback to previous code
+    // Rollback to previous code, or NOOP if this was the first push.
+    // Either way we MUST send something to TD — otherwise the broken
+    // shader stays compiled in the operator and TD shows its error
+    // screen on the affected zone (post_fx is the most visible).
     const previousCode = zoneStateManager.rollbackZone(zone);
+    const rollbackCode = previousCode !== null ? previousCode : '// reset to defaults';
+    send({ type: 'zone_update', zone, zone_code: rollbackCode });
     if (previousCode !== null) {
-      // Re-send the previous working code
-      send({ type: 'zone_update', zone, zone_code: previousCode });
       console.log(`[TDBridge ${ts()}] Zone '${zone}' rolled back to previous code`);
+    } else {
+      console.log(`[TDBridge ${ts()}] Zone '${zone}' rolled back to NOOP (no previous code)`);
     }
 
     return { success: false, error, warnings: syntaxResult.warnings };

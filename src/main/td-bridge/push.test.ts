@@ -215,15 +215,23 @@ describe('push', () => {
       });
     });
 
-    it('should handle rollback with no previous code', async () => {
+    it('should push NOOP when rolling back with no previous code', async () => {
+      // First send: the bad code. Second send: NOOP rollback so TD's
+      // operator clears its error state instead of staying stuck on
+      // the failed shader.
       mockZoneStateManager.waitForCompileResult.mockResolvedValue(false);
       mockZoneStateManager.rollbackZone.mockReturnValue(null);
 
       const result = await pushZoneUpdateWithValidation('force_field', 'bad glsl');
 
       expect(result.success).toBe(false);
-      // Should not attempt to send null code
-      expect(mockSend).toHaveBeenCalledTimes(1);
+      // Two sends: the original (bad) push, then a NOOP fallback.
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockSend).toHaveBeenLastCalledWith({
+        type: 'zone_update',
+        zone: 'force_field',
+        zone_code: '// reset to defaults',
+      });
     });
 
     it('should use custom timeout', async () => {
