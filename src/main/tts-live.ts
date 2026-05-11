@@ -98,7 +98,7 @@ function connect(apiKey: string): void {
           },
         },
         systemInstruction: {
-          parts: [{ text: 'You are a text-to-speech system. Read the EXACT text given to you, word for word. Speak at a natural conversational pace with gravitas and wisdom, like a knowledgeable sage.' }],
+          parts: [{ text: 'You are a text-to-speech system. Read the EXACT text given to you, word for word. Speak quickly and confidently. Do not slow down for emphasis, do not pause between sentences, do not add breathy or contemplative weight to the delivery. Fast, clean, direct.' }],
         },
       },
     };

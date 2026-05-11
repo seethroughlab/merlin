@@ -78,14 +78,47 @@ const GLSL_KEYWORDS = new Set([
 ]);
 
 /**
- * Check if braces are balanced
+ * Strip GLSL comments (// to end of line, /* ... *‍/) from code while
+ * preserving line numbers — replace each comment with the same number
+ * of newlines so error line counts stay accurate. Used by the brace/
+ * paren counters so a comment like `// twirl (3x)` doesn't throw off
+ * the balance check.
+ */
+function stripCommentsPreservingLines(code: string): string {
+  let out = '';
+  let i = 0;
+  while (i < code.length) {
+    const c = code[i];
+    const next = code[i + 1];
+    if (c === '/' && next === '/') {
+      // line comment to end of line (not including the newline)
+      while (i < code.length && code[i] !== '\n') i++;
+    } else if (c === '/' && next === '*') {
+      // block comment; replace each newline inside with a real newline
+      i += 2;
+      while (i < code.length - 1 && !(code[i] === '*' && code[i + 1] === '/')) {
+        if (code[i] === '\n') out += '\n';
+        i++;
+      }
+      i += 2; // skip closing */
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Check if braces are balanced (comment-aware)
  */
 export function checkBalancedBraces(code: string): { valid: boolean; error: string | null } {
+  const stripped = stripCommentsPreservingLines(code);
   let depth = 0;
   let line = 1;
 
-  for (let i = 0; i < code.length; i++) {
-    const char = code[i];
+  for (let i = 0; i < stripped.length; i++) {
+    const char = stripped[i];
     if (char === '\n') {
       line++;
     } else if (char === '{') {
@@ -106,14 +139,15 @@ export function checkBalancedBraces(code: string): { valid: boolean; error: stri
 }
 
 /**
- * Check if parentheses are balanced
+ * Check if parentheses are balanced (comment-aware)
  */
 export function checkBalancedParens(code: string): { valid: boolean; error: string | null } {
+  const stripped = stripCommentsPreservingLines(code);
   let depth = 0;
   let line = 1;
 
-  for (let i = 0; i < code.length; i++) {
-    const char = code[i];
+  for (let i = 0; i < stripped.length; i++) {
+    const char = stripped[i];
     if (char === '\n') {
       line++;
     } else if (char === '(') {
