@@ -9,6 +9,7 @@ const {
   mockPushCastParams,
   mockPushParticleParams,
   mockPushSpriteColors,
+  mockPushMerlinState,
 } = vi.hoisted(() => ({
   mockPushZoneUpdateWithValidation: vi.fn<(zone: string, code: string) => Promise<{ success: boolean; error?: string }>>(() =>
     Promise.resolve({ success: true })
@@ -18,6 +19,7 @@ const {
   mockPushCastParams: vi.fn(() => true),
   mockPushParticleParams: vi.fn(() => true),
   mockPushSpriteColors: vi.fn(() => true),
+  mockPushMerlinState: vi.fn(() => true),
 }));
 
 vi.mock('../td-bridge', () => ({
@@ -27,6 +29,7 @@ vi.mock('../td-bridge', () => ({
   pushCastParams: mockPushCastParams,
   pushParticleParams: mockPushParticleParams,
   pushSpriteColors: mockPushSpriteColors,
+  pushMerlinState: mockPushMerlinState,
 }));
 
 const ALL_ZONES = [
@@ -60,19 +63,22 @@ beforeEach(() => {
   mockPushCastParams.mockReturnValue(true);
   mockPushParticleParams.mockReturnValue(true);
   mockPushSpriteColors.mockReturnValue(true);
+  mockPushMerlinState.mockReturnValue(true);
 });
 
 describe('resetTDBaseline', () => {
-  it('happy path: pushes 8 zones, sprite, flipbook, cast_params, particle_params, sprite_colors', async () => {
+  it('happy path: pushes 8 zones, sprite, flipbook, cast_params, particle_params, sprite_colors, idle_restore', async () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
     expect(result.success).toBe(true);
-    expect(result.steps).toHaveLength(13); // 8 zones + sprite + flipbook + cast_params + particle_params + sprite_colors
+    // 8 zones + sprite + flipbook + cast_params + particle_params + sprite_colors + idle_restore + 1 attract zone
+    expect(result.steps).toHaveLength(15);
     expect(result.steps.every(s => s.status === 'ok')).toBe(true);
 
-    // Each marker-bearing zone got a push
-    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(8);
+    // Each marker-bearing zone got a push, plus one extra attract push
+    // (force_field) at the end.
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
     for (const zone of ALL_ZONES) {
       expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledWith(zone, expect.any(String));
     }
@@ -92,6 +98,7 @@ describe('resetTDBaseline', () => {
       { r: 1, g: 1, b: 1 },
       { r: 1, g: 1, b: 1 },
     );
+    expect(mockPushMerlinState).toHaveBeenCalledWith({ active: true, phase: 'idle' });
   });
 
   it('records cast_params failure when TD disconnected', async () => {
@@ -210,7 +217,8 @@ describe('resetTDBaseline', () => {
     const { resetTDBaseline } = await import('./reset-td');
     const result = await resetTDBaseline();
 
-    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(8);
+    // 8 zone NOOPs + 1 attract push = 9 total
+    expect(mockPushZoneUpdateWithValidation).toHaveBeenCalledTimes(9);
     const failedStep = result.steps.find(s => s.label === 'zone:force_field');
     expect(failedStep?.status).toBe('error');
     expect(failedStep?.error).toBe('compile error');

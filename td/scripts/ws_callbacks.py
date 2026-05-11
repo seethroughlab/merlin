@@ -158,6 +158,28 @@ cast_state = {
 }
 
 
+def on_cast_peak_done():
+    """Called by /project1/cast_peak_timer when its length expires
+    (the peak hold is ~1.2s, configured on the timer node itself).
+
+    Resets spell_state['mode_float'] back to -1.0 (idle); the LagCHOP
+    smoothly decays uSpellEnergy down to the idle floor over fallMs.
+    This replaces a Node-side setTimeout so the cast envelope is fully
+    TD-native and robust to Node disconnects.
+    """
+    table = op('/project1/spell_state')
+    if table is None:
+        return
+    mode_row = table.findCell('mode_float', cols=[0])
+    if mode_row is None:
+        return
+    table[mode_row.row, 1] = '-1.0'
+    m_row = table.findCell('mode', cols=[0])
+    if m_row is not None:
+        table[m_row.row, 1] = 'idle'
+    print('[WS] Cast peak hold expired — mode_float -> -1.0')
+
+
 def _seed_spell_state_defaults():
     """Ensure tween / peak / sprite-color rows exist in spell_state so the
     expressions wired by _wire_spell_state_uniforms have valid values to
@@ -181,6 +203,12 @@ def _seed_spell_state_defaults():
         # Sprite palette (white baseline; overwritten by handle_sprite_colors)
         'sprite_color1_r': '1.0', 'sprite_color1_g': '1.0', 'sprite_color1_b': '1.0',
         'sprite_color2_r': '1.0', 'sprite_color2_g': '1.0', 'sprite_color2_b': '1.0',
+        # Hand gesture derived signals — written every frame by
+        # handle_tracking_frame from wrist landmarks. Defaults safe for
+        # zone code that references them before a body is detected.
+        'hands_distance': '1.0',   # large = hands apart; near-zero = together
+        'hands_vel_mag': '0.0',    # higher = hands moving faster
+        'hands_smooth': '0.5',     # 1.0 = silky smooth, 0.0 = jerky
     }
     for key, val in defaults.items():
         if table.findCell(key, cols=[0]) is None:
@@ -227,6 +255,14 @@ def _wire_spell_state_uniforms():
 
     # UNIFORMS maps name -> dict of component expressions. Float uniforms
     # set only 'x'; vec3 uniforms set 'x', 'y', 'z'.
+    # Hand gesture scalars — written every frame by _update_hand_gestures
+    # from MediaPipe wrist landmarks. Float uniforms (only 'x' set).
+    def _scalar_expr(row, default='0.0'):
+        return (
+            f"float(op('/project1/spell_state')['{row}', 1]) "
+            f"if op('/project1/spell_state').findCell('{row}', cols=[0]) is not None else {default}"
+        )
+
     UNIFORMS = {
         'uSpellEnergy': {'x': energy_expr},
         'uSpellMode':   {'x': mode_expr},
@@ -240,6 +276,9 @@ def _wire_spell_state_uniforms():
             'y': _color_expr('sprite_color2_g'),
             'z': _color_expr('sprite_color2_b'),
         },
+        'uHandsDistance': {'x': _scalar_expr('hands_distance', '1.0')},
+        'uHandsVelMag':   {'x': _scalar_expr('hands_vel_mag', '0.0')},
+        'uHandsSmooth':   {'x': _scalar_expr('hands_smooth', '0.5')},
     }
 
     def wire_op(node, slots=8):
@@ -634,6 +673,90 @@ def handle_orientation_update(msg):
         glsl.par.vec0valuey = h
 
 
+# Ring buffer for hand-gesture derivatives. Module-level so the state
+# survives across frames. Each entry is (timestamp, mid_x, mid_y, mid_z)
+# where mid is the midpoint of the two wrist landmarks.
+_hand_history = []
+_HAND_HISTORY_MAX = 8  # ~8 frames @ MediaPipe ~30fps ≈ 250ms window
+
+# Smoothness mapping: jerk magnitude below LO is "silky" (1.0); above HI
+# is "jerky" (0.0). Tuned for normalized MediaPipe coordinates where
+# wrist positions sit in [0,1].
+_HAND_JERK_LO = 0.02
+_HAND_JERK_HI = 0.12
+
+
+def _update_hand_gestures(landmarks, spell_table):
+    """Compute hands_distance / hands_vel_mag / hands_smooth from the
+    current frame's wrist landmarks (indices 15 = L wrist, 16 = R wrist
+    in MediaPipe Pose) plus a short history. Writes the three scalars
+    back to spell_state for the uniform wiring to pick up.
+
+    Skipped silently if either wrist has visibility < 0.3 — the previous
+    frame's values stay in place. This keeps a brief tracking dropout
+    from snapping uniforms to defaults mid-spell.
+    """
+    if spell_table is None or not landmarks or len(landmarks) < 17:
+        return
+
+    L = landmarks[15]
+    R = landmarks[16]
+    L_vis = L[3] if len(L) > 3 else 1.0
+    R_vis = R[3] if len(R) > 3 else 1.0
+    if L_vis < 0.3 or R_vis < 0.3:
+        return
+
+    Lx, Ly, Lz = L[0], L[1], (L[2] if len(L) > 2 else 0.0)
+    Rx, Ry, Rz = R[0], R[1], (R[2] if len(R) > 2 else 0.0)
+
+    # Current-frame distance and midpoint.
+    dx, dy, dz = Lx - Rx, Ly - Ry, Lz - Rz
+    distance = (dx * dx + dy * dy + dz * dz) ** 0.5
+    mid = (0.5 * (Lx + Rx), 0.5 * (Ly + Ry), 0.5 * (Lz + Rz))
+
+    now = absTime.seconds
+    _hand_history.append((now, mid[0], mid[1], mid[2]))
+    while len(_hand_history) > _HAND_HISTORY_MAX:
+        _hand_history.pop(0)
+
+    # Velocity magnitudes (Δmid / Δt) across consecutive samples.
+    vels = []
+    for i in range(1, len(_hand_history)):
+        t0 = _hand_history[i - 1][0]
+        t1 = _hand_history[i][0]
+        dt = t1 - t0
+        if dt <= 0:
+            continue
+        vx = (_hand_history[i][1] - _hand_history[i - 1][1]) / dt
+        vy = (_hand_history[i][2] - _hand_history[i - 1][2]) / dt
+        vz = (_hand_history[i][3] - _hand_history[i - 1][3]) / dt
+        vels.append((vx, vy, vz, (vx * vx + vy * vy + vz * vz) ** 0.5))
+
+    vel_mag = sum(v[3] for v in vels) / len(vels) if vels else 0.0
+
+    # Jerk = change in velocity vector between consecutive samples.
+    jerk_mags = []
+    for i in range(1, len(vels)):
+        jx = vels[i][0] - vels[i - 1][0]
+        jy = vels[i][1] - vels[i - 1][1]
+        jz = vels[i][2] - vels[i - 1][2]
+        jerk_mags.append((jx * jx + jy * jy + jz * jz) ** 0.5)
+    jerk_mag = sum(jerk_mags) / len(jerk_mags) if jerk_mags else 0.0
+
+    # Smoothness: invert jerk through smoothstep.
+    if jerk_mag <= _HAND_JERK_LO:
+        smooth = 1.0
+    elif jerk_mag >= _HAND_JERK_HI:
+        smooth = 0.0
+    else:
+        t = (jerk_mag - _HAND_JERK_LO) / (_HAND_JERK_HI - _HAND_JERK_LO)
+        smooth = 1.0 - (t * t * (3.0 - 2.0 * t))
+
+    update_table_kv(spell_table, 'hands_distance', f'{distance:.4f}')
+    update_table_kv(spell_table, 'hands_vel_mag', f'{vel_mag:.4f}')
+    update_table_kv(spell_table, 'hands_smooth', f'{smooth:.4f}')
+
+
 def handle_tracking_frame(msg):
     """Write landmarks to tableDAT (most stable for TD)."""
     global tracking_state
@@ -668,6 +791,9 @@ def handle_tracking_frame(msg):
             table[row, 1] = lm[1]
             table[row, 2] = lm[2] if len(lm) > 2 else 0
             table[row, 3] = lm[3] if len(lm) > 3 else 1
+
+    # Update derived hand-gesture signals on spell_state.
+    _update_hand_gestures(landmarks, op('/project1/spell_state'))
 
 
 def handle_merlin_state(msg):
@@ -758,6 +884,16 @@ def handle_spell_cast(msg):
         # driven by a TD-side LagCHOP that reads mode_float and smooths it
         # using tween_rise_ms / tween_fall_ms / peak_energy. See
         # docs/improvement-02-energy-tweens.md.
+
+    # Start the TD-side peak-hold timer. When it expires, the
+    # cast_peak_timer_callbacks DAT calls back to on_cast_peak_done()
+    # which resets mode_float to -1.0 and lets the LagCHOP decay
+    # uSpellEnergy back to idle. Pulsing `start` while the timer is
+    # already running re-triggers it (rapid re-casts hold peak as
+    # long as the participant keeps casting).
+    timer = op('/project1/cast_peak_timer')
+    if timer is not None:
+        timer.par.start.pulse(1)
 
     o = msg.get('origin', 'unknown')
     d = cast_state['duration_ms']

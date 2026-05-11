@@ -27,6 +27,7 @@ import {
   pushCastParams,
   pushParticleParams,
   pushSpriteColors,
+  pushMerlinState,
 } from '../td-bridge';
 import type { CastParams, ParticleParams, PaletteColor } from '../td-bridge';
 import { getMarkerBearingZones } from './test-shader';
@@ -162,6 +163,44 @@ export async function resetTDBaseline(): Promise<ResetTDResult> {
   // palette into a fresh session.
   const palOK = pushSpriteColors(BASELINE_PALETTE[0], BASELINE_PALETTE[1]);
   record('sprite_colors', palOK ? 'ok' : 'error', { error: palOK ? undefined : 'TD not connected' });
+
+  // 7. Idle restore: flip mode_float back to -1.0 so the TD energy CHOP
+  // decays uSpellEnergy out of any lingering "release" peak from a
+  // previous cast. handle_merlin_state on phase='idle' writes mode_float
+  // = -1.0; the LagCHOP's fallMs (~800ms) tweens energy down to the idle
+  // floor (~0.2 after remap). Without this, particles stay at full
+  // intensity after a reset because nothing has told mode_float to
+  // change since the cast set it to +1.0.
+  const idleOK = pushMerlinState({ active: true, phase: 'idle' });
+  record('idle_restore', idleOK ? 'ok' : 'error', { error: idleOK ? undefined : 'TD not connected' });
+
+  // 8. Attract ambient: a slow, alive force-field drift so idle doesn't
+  // look frozen. The template's default purple-with-life-fade color is
+  // fine for ambient — we don't push a second color zone update here
+  // because TD intermittently fails the second push to color_over_life
+  // in a single reset with a misleading TDIn_PartId compile error (the
+  // first NOOP push at step 1 succeeds; the second attract push hits a
+  // cold compile path). Force-only attract is enough motion to read as
+  // alive, and it's reliable.
+  //
+  // ASCII only in the GLSL snippet below. TD's GLSL lexer can choke on
+  // non-ASCII characters (em-dashes, smart quotes) and report misleading
+  // errors at whatever identifier it hits next in the merged template.
+  const ATTRACT_FORCE = `// attract ambient: slow curl drift
+float t = uTime * 0.15;
+vec3 n = pos * 0.5;
+force += vec3(
+  sin(n.y + t),
+  cos(n.z + t * 1.1),
+  sin(n.x + t * 0.9)
+) * 0.04;`;
+  const forceR = await pushZoneUpdateWithValidation('force_field', ATTRACT_FORCE);
+  if (forceR.success) {
+    record('attract:force_field', 'ok');
+  } else {
+    const { status, note, error } = classifyPushError(forceR.error);
+    record('attract:force_field', status, { note, error });
+  }
 
   const errors = steps.filter(s => s.status === 'error').length;
   const skipped = steps.filter(s => s.status === 'skipped').length;
