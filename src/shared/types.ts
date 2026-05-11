@@ -172,6 +172,7 @@ export type MerlinPhase =
   | 'formation'
   | 'ready_to_cast'
   | 'casting'
+  | 'play'
   | 'outro';
 
 /**
@@ -240,9 +241,21 @@ export interface SpellState {
  * Response from the Merlin session
  */
 export interface MerlinResponse {
+  /**
+   * Full text Gemini produced this turn (initial response + any text
+   * emitted between/after tool calls). Used for the chat-history bubble.
+   */
   text: string;
   phase: MerlinPhase;
   spell: SpellState;
+  /**
+   * Text the renderer should speak. When the parallel-TTS chunk path
+   * already streamed the initial response during tool dispatch, this is
+   * just the un-streamed REMAINDER (the post-tool text). When no chunk
+   * fired, this equals `text`. Empty string means everything spoken
+   * already — renderer skips TTS.
+   */
+  spokenText: string;
 }
 
 /**

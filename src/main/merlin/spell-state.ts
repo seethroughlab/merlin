@@ -227,3 +227,12 @@ export function isSpellReady(spell: SpellState): boolean {
   );
 }
 
+// Transcript matchers live in src/shared/transcript-match.ts so the
+// renderer's background cast listener can use the same logic. Re-exported
+// here so the existing main-process imports keep working unchanged.
+export {
+  transcriptContains,
+  transcriptMatchesMagicWord,
+  transcriptMatchesAny,
+} from '../../shared/transcript-match';
+

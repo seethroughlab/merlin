@@ -16,6 +16,7 @@ import type { MerlinChat, ChatTurnResult } from './gemini-chat';
 import { mergeSpellUpdate, defaultOriginForIntent } from './spell-state';
 import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { emitGeminiTurn } from './gemini-events';
+import { ALLOWED_TOOLS_PER_PHASE } from './prompts';
 import type {
   SpellState,
   GeminiToolCall,
@@ -50,11 +51,50 @@ export interface TurnDispatchContext {
   onSpellUpdate?: (spell: SpellState) => void;
   /** If absent, get_posture / get_expression return cached state. */
   onRequestAnalysis?: RequestAnalysisCallback;
+  /**
+   * Notified when Gemini calls register_effect_triggers. The session
+   * stores the trigger set and uses it to locally match participant
+   * speech against effect-trigger words.
+   */
+  onRegisterTriggers?: (triggers: ReadonlyArray<EffectTriggerSpec>) => void;
+  /**
+   * Optional sink for the FIRST text chunk Gemini emits when there
+   * are still tool calls pending after the initial response. Lets the
+   * renderer start TTS in parallel with the (slow) tool dispatch loop
+   * — generate_sprite alone is 24-30s of Imagen latency. The chunk
+   * forwarded here will NOT be included in the final returned text,
+   * so the renderer doesn't re-speak it.
+   */
+  onSpeakChunk?: (text: string) => void;
+  /**
+   * Notified when prepare_casting fires, so the renderer can arm a
+   * background magic-word listener independent of the Gemini turn
+   * pipeline. Receives the magic word Gemini registered. The cast
+   * itself still goes through triggerCast() via IPC when the
+   * participant speaks the word.
+   */
+  onCastArmed?: (payload: { magicWord: string; gestureHint?: string }) => void;
+}
+
+/**
+ * Spec for a single locally-matched effect trigger word. The session
+ * keeps an ordered list of these and tests each user utterance against
+ * them before invoking Gemini.
+ */
+export interface EffectTriggerSpec {
+  word: string;
+  zone: string;
+  glslCode: string;
+  description?: string;
 }
 
 export interface TurnResult {
   /** Free-text response Gemini produced (concatenated across all sub-turns). */
   finalText: string;
+  /** Full accumulated text including any portion that was streamed via onSpeakChunk. */
+  fullText: string;
+  /** True if any portion of the response was already streamed to TTS via onSpeakChunk. */
+  streamedAny: boolean;
   /** Total tool calls Gemini executed across the turn. */
   toolCallCount: number;
 }
@@ -77,8 +117,35 @@ export async function runMerlinTurn(
   let result = await chat.sendMessage(initialMessage);
   emitChatResult(turnId, source, result);
 
-  let accumulatedText = result.text === 'No response generated' ? '' : result.text;
+  const initialText = result.text === 'No response generated' ? '' : result.text;
+  let accumulatedText = initialText;
+  let streamedText = '';
   let toolCallCount = 0;
+
+  // Outro turns: accept the text response and stop here. The system
+  // prompt forbids tool use on the closing turn, but if Gemini ignores
+  // it and emits set_zone_shader/etc., we drop the calls silently —
+  // the spell is already cast and the session is closing, no more
+  // state changes should fire. Belt-and-suspenders against the model
+  // not following the strengthened outro phase rules.
+  if (ctx.state.phase === 'outro') {
+    return {
+      finalText: accumulatedText,
+      fullText: accumulatedText,
+      streamedAny: false,
+      toolCallCount: 0,
+    };
+  }
+
+  // Parallel TTS: if the initial response carries text AND tool calls
+  // are pending, the participant can start hearing Merlin while the
+  // tools (often a 25s Imagen call) run in the background. We forward
+  // the chunk to the renderer through ctx.onSpeakChunk and mark it as
+  // already streamed so the final returned text doesn't double-speak.
+  if (initialText && result.toolCalls.length > 0 && ctx.onSpeakChunk) {
+    ctx.onSpeakChunk(initialText);
+    streamedText = initialText;
+  }
 
   while (result.toolCalls.length > 0) {
     toolCallCount += result.toolCalls.length;
@@ -99,7 +166,20 @@ export async function runMerlinTurn(
     }
   }
 
-  return { finalText: accumulatedText, toolCallCount };
+  // finalText is the un-streamed remainder. The renderer uses
+  // `alreadyStreamed` on MerlinResponse to decide whether to fire a
+  // second speakWithStreaming on response.text — if a chunk was
+  // already streamed, calling speakStreaming again would invoke
+  // stopStreaming() and cut the chunk off mid-playback.
+  const finalText = streamedText
+    ? accumulatedText.slice(streamedText.length)
+    : accumulatedText;
+  return {
+    finalText,
+    fullText: accumulatedText,
+    streamedAny: streamedText.length > 0,
+    toolCallCount,
+  };
 }
 
 function emitChatResult(turnId: string, source: GeminiTurnSource, result: ChatTurnResult): void {
@@ -251,9 +331,33 @@ export async function dispatchToolCalls(
 ): Promise<DispatchResult> {
   const results: Array<{ name: string; response: unknown; callId?: string }> = [];
   const extraImages: DispatchImage[] = [];
+  const allowed = ALLOWED_TOOLS_PER_PHASE[ctx.state.phase];
 
   for (const call of toolCalls) {
     let response: unknown;
+
+    // Phase-gate: drop tool calls forbidden by the current phase.
+    // Returns a synthetic error response so Gemini sees the constraint
+    // as feedback (rather than a silent drop, which would confuse it
+    // into retrying the same tool). The system prompt's per-phase
+    // rules already tell Gemini which tools are available; this is
+    // belt-and-suspenders against the model ignoring those rules.
+    if (allowed && !allowed.has(call.name)) {
+      const allowedList = Array.from(allowed).join(', ') || 'none';
+      console.warn(
+        `[TurnRunner] Tool '${call.name}' not allowed in phase '${ctx.state.phase}' — dropping. ` +
+        `Allowed: ${allowedList}`
+      );
+      results.push({
+        name: call.name,
+        response: {
+          success: false,
+          error: `Tool '${call.name}' is not available in phase '${ctx.state.phase}'. Available tools this phase: ${allowedList}. Move toward the next phase before using this tool.`,
+        },
+        ...(call.id ? { callId: call.id } : {}),
+      });
+      continue;
+    }
 
     switch (call.name) {
       case 'get_posture': {
@@ -283,6 +387,31 @@ export async function dispatchToolCalls(
         } else {
           response = ctx.state.lastExpression ?? { error: 'No expression data available' };
         }
+        break;
+      }
+
+      case 'get_face_events': {
+        // Live face-gesture buffer (mouth_open / smile / brow_raise /
+        // eye_closed). Edge-triggered, filled by the renderer at ~30fps.
+        // Imported here to keep turn-runner free of the face-event-buffer
+        // dependency at module-load time (matters for test mocks).
+        const { getRecentFaceEvents, getActiveGestures } = await import('./face-event-buffer');
+        const sinceMs = (call.args as { sinceMs?: number }).sinceMs ?? 5000;
+        const clamped = Math.max(100, Math.min(sinceMs, 60000));
+        const events = getRecentFaceEvents(clamped);
+        const active = getActiveGestures();
+        response = {
+          success: true,
+          nowMs: Date.now(),
+          sinceMs: clamped,
+          activeGestures: active,
+          events: events.map(e => ({
+            kind: e.kind,
+            edge: e.edge,
+            score: Number(e.score.toFixed(3)),
+            ageMs: e.ageMs,
+          })),
+        };
         break;
       }
 
@@ -330,12 +459,60 @@ export async function dispatchToolCalls(
         });
         ctx.state.castReady = true;
         ctx.onSpellUpdate?.(ctx.state.spell);
+        // Arm the renderer's background cast listener with the declared
+        // magic word so the cast fires the instant the participant speaks
+        // it — no Gemini round-trip required.
+        ctx.onCastArmed?.({
+          magicWord: params.magicWord,
+          gestureHint: params.gestureHint,
+        });
 
         response = {
           success: true,
           magicWord: params.magicWord,
           gestureHint: params.gestureHint,
           spell: ctx.state.spell,
+        };
+        break;
+      }
+
+      case 'register_effect_triggers': {
+        const { triggers } = call.args as {
+          triggers: Array<{
+            word: string;
+            zone: string;
+            glsl_code: string;
+            description?: string;
+          }>;
+        };
+
+        if (!Array.isArray(triggers) || triggers.length === 0) {
+          response = { success: false, error: 'triggers array is required' };
+          break;
+        }
+
+        const normalized: EffectTriggerSpec[] = triggers
+          .filter(t => t?.word && t?.zone && t?.glsl_code)
+          .map(t => ({
+            word: t.word,
+            zone: t.zone,
+            glslCode: t.glsl_code,
+            description: t.description,
+          }));
+
+        if (normalized.length === 0) {
+          response = { success: false, error: 'no valid triggers (each needs word, zone, glsl_code)' };
+          break;
+        }
+
+        ctx.onRegisterTriggers?.(normalized);
+        console.log(
+          `[TurnRunner] Registered ${normalized.length} effect trigger(s): ` +
+          normalized.map(t => `"${t.word}"→${t.zone}`).join(', ')
+        );
+        response = {
+          success: true,
+          registered: normalized.map(t => ({ word: t.word, zone: t.zone })),
         };
         break;
       }

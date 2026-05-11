@@ -71,9 +71,11 @@ export interface MerlinToolCall {
   name:
     | 'get_posture'
     | 'get_expression'
+    | 'get_face_events'
     | 'set_spell_profile'
     | 'prepare_casting'
     | 'set_zone_shader'
+    | 'register_effect_triggers'
     | 'request_visual_feedback'
     | 'generate_sprite'
     | 'set_cast_params'

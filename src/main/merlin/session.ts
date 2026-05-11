@@ -18,11 +18,12 @@ import type {
   ConversationMessage,
 } from './types';
 import type { BodyLanguageAnalysis, MicroExpressionAnalysis } from '../../shared/types';
-import { createInitialSpellState, isSpellReady } from './spell-state';
+import { createInitialSpellState, isSpellReady, transcriptMatchesMagicWord, transcriptContains } from './spell-state';
 import { pushSpellCast } from '../td-bridge';
 import { resetTDBaseline } from './reset-td';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
-import { runMerlinTurn, dispatchToolCalls, type TurnDispatchContext } from './turn-runner';
+import { runMerlinTurn, dispatchToolCalls, type TurnDispatchContext, type EffectTriggerSpec } from './turn-runner';
+import { pushZoneUpdateWithValidation } from '../td-bridge';
 
 // Default cast envelope timing (in ms). Used by triggerCast() to drive
 // the release-mode TD-side phase transitions. Was previously archetype-
@@ -37,6 +38,14 @@ const DEFAULT_CAST_ENVELOPE = {
 function getCastDuration(env: typeof DEFAULT_CAST_ENVELOPE): number {
   return env.ignitionMs + env.projectionMs + env.afterglowMs;
 }
+
+// After the cast, the participant enters PLAY mode to inhabit the spell.
+// They end the experience by speaking the end-word (heard locally — no
+// Gemini round-trip). If they wander off and never say it, the safety
+// timer auto-advances to outro so the session doesn't hang.
+const PLAY_PHASE_MAX_MS = 60_000;
+const DEFAULT_END_WORD = 'farewell';
+
 
 /**
  * Callback for when spell state updates
@@ -81,6 +90,21 @@ export interface MerlinSessionConfig {
   onRequestAnalysis?: OnRequestAnalysisCallback;
   onCaptureFrame?: OnCaptureFrameCallback;
   onSessionComplete?: () => void;
+  /**
+   * Optional hook fired when Gemini's FIRST response on a turn carries
+   * text alongside pending tool calls. Main process forwards the text
+   * to the renderer's LiveTTS so speech starts in parallel with the
+   * (potentially slow) tool dispatch — masking 25s Imagen calls behind
+   * the spoken description of the spell.
+   */
+  onSpeakChunk?: (text: string) => void;
+  /**
+   * Fired when prepare_casting dispatches — the moment Merlin declares
+   * the magic word. Main wires this to an IPC that arms the renderer's
+   * background cast listener so the cast trigger is decoupled from the
+   * Gemini conversation pipeline.
+   */
+  onCastArmed?: (payload: { magicWord: string; endWord: string; gestureHint?: string }) => void;
   phaseConfig?: Partial<MerlinPhaseConfig>;
 }
 
@@ -94,6 +118,13 @@ export class MerlinSession {
   private config: MerlinSessionConfig;
   private phaseConfig: MerlinPhaseConfig;
   private previousPhase: MerlinPhase = 'idle';
+  private playSafetyTimer: NodeJS.Timeout | null = null;
+  private endWord: string | null = null;
+  // Effect-trigger words registered by Gemini via register_effect_triggers.
+  // Matched locally in processUserSpeech BEFORE the magic-word check, so
+  // utterances like "rise" fire the registered GLSL in ~400ms instead of
+  // round-tripping through Gemini.
+  private effectTriggers: EffectTriggerSpec[] = [];
 
   constructor(config: MerlinSessionConfig = {}) {
     this.chat = new MerlinChat();
@@ -161,29 +192,64 @@ export class MerlinSession {
       onSpellUpdate: this.config.onSpellUpdate,
       onRequestAnalysis: this.config.onRequestAnalysis,
     };
+    // Parallel TTS: if the FIRST intro response already carries text
+    // alongside tool calls (typical — "Welcome, traveler. Let me see…"
+    // + set_zone_shader), forward the greeting to TTS immediately
+    // while the tool loop runs. Caller's startMerlinMode then receives
+    // an empty response.text and skips the post-loop TTS so it doesn't
+    // double-speak.
+    let introStreamedText = '';
+    if (result.text && result.toolCalls.length > 0 && this.config.onSpeakChunk) {
+      this.config.onSpeakChunk(result.text);
+      introStreamedText = result.text;
+    }
     // The intro flow doesn't expect request_visual_feedback (it runs
     // before any spell shaders exist), so dispatch.extraImages should
     // always be empty here. We dispatch only function responses; if a
     // tool ever does emit extras during intro, they'd be silently
     // dropped. The full image flow lives in runMerlinTurn.
-    while (result.toolCalls.length > 0) {
+    let accumulatedIntroText = result.text;
+    // Hard cap on intro tool-dispatch rounds. The prompt forbids tools,
+    // the gate blocks all but perception + spell_profile, but a stubborn
+    // model could still loop on rejected calls. Two rounds is enough for
+    // Gemini to receive the synthetic "tool unavailable" error and
+    // resign to text-only — more than that just delays the greeting.
+    const INTRO_MAX_DISPATCH_ROUNDS = 2;
+    let introRound = 0;
+    while (result.toolCalls.length > 0 && introRound < INTRO_MAX_DISPATCH_ROUNDS) {
       const dispatch = await dispatchToolCalls(result.toolCalls, ctx, introTurnId, 'live', introZoneAttempts);
       result = await this.chat.sendToolResults(dispatch.toolResults);
+      if (result.text && result.text !== 'No response generated') {
+        accumulatedIntroText += result.text;
+      }
+      introRound++;
+    }
+    if (result.toolCalls.length > 0) {
+      console.log(`[MerlinSession] Intro hit ${INTRO_MAX_DISPATCH_ROUNDS}-round tool cap with ${result.toolCalls.length} calls pending — proceeding with whatever text we have`);
     }
 
-    const introText = result.text;
+    // Full text for the chat-history bubble (initial chunk + post-tool).
+    // spokenText is just the un-streamed remainder so the renderer
+    // doesn't kick off a second speakWithStreaming that would cancel
+    // the in-flight chunk mid-playback.
+    const introFullText = accumulatedIntroText;
+    const introSpokenText = introStreamedText
+      ? accumulatedIntroText.slice(introStreamedText.length)
+      : accumulatedIntroText;
 
-    // Add to conversation history
+    // Add the full text to conversation history (everything Gemini said,
+    // streamed + post-tool). The chat-bubble display reads from this.
     this.conversationHistory.push({
       role: 'assistant',
-      content: introText,
+      content: introFullText,
       timestamp: Date.now(),
     });
 
     return {
-      text: introText,
+      text: introFullText,
       phase: this.state.phase,
       spell: this.state.spell,
+      spokenText: introSpokenText,
     };
   }
 
@@ -201,6 +267,75 @@ export class MerlinSession {
 
     this.state.turnCount++;
     this.state.lastUserInput = transcript;
+
+    // Snapshot the entry phase. Play-phase logic below keys off this:
+    // - phaseAtEntry === 'play' AND end-word matches → end play, run Gemini outro turn
+    // - phaseAtEntry === 'play' AND end-word doesn't match → silent (no Gemini)
+    // - phaseAtEntry !== 'play' AND magic-word matches → first cast, silent (no Gemini)
+    const phaseAtEntry = this.state.phase;
+
+    // Local effect-trigger match (registered via register_effect_triggers).
+    // Runs BEFORE the magic word and BEFORE Gemini — utterances like
+    // "rise" or "still" land in ~400ms instead of the full Gemini round
+    // trip. Triggers fire visual-only; no Gemini turn is consumed.
+    const trigger = this.effectTriggers.find(t => transcriptContains(transcript, t.word));
+    if (trigger) {
+      console.log(
+        `[MerlinSession] Effect trigger "${trigger.word}" matched in "${transcript}" — firing ${trigger.zone}`
+      );
+      void pushZoneUpdateWithValidation(trigger.zone, trigger.glslCode);
+      // Don't return — magic-word and end-word checks should still run
+      // on the same utterance, since "rise" + "{magic word}" in one
+      // breath is a legitimate combination.
+    }
+
+    // Magic-word cast trigger. Fire BEFORE the Gemini turn so the cast
+    // envelope (mode_float=1.0 → energy tween) starts immediately as the
+    // participant finishes speaking. On first cast this advances phase to
+    // 'play' via markCastCompleted; on subsequent utterances during play
+    // it re-fires the visual envelope only (the participant can keep
+    // hitting the cast as they inhabit the spell).
+    const magicMatched = transcriptMatchesMagicWord(transcript, this.state.spell.magicWord);
+    if (magicMatched) {
+      console.log(
+        `[MerlinSession] Magic word "${this.state.spell.magicWord}" ` +
+        `matched in transcript "${transcript}" — triggering cast`
+      );
+      this.triggerCast();
+    }
+
+    // First cast: triggerCast just moved us to 'play'. Skip Gemini entirely
+    // for this turn — the farewell waits for the end-word (or safety
+    // timer). No narration during play.
+    if (phaseAtEntry !== 'play' && this.state.phase === 'play') {
+      console.log('[MerlinSession] Cast fired — entering PLAY phase silently');
+      return {
+        text: '',
+        phase: this.state.phase,
+        spell: this.state.spell,
+        spokenText: '',
+      };
+    }
+
+    // Already in play: end-word match closes the session with a farewell;
+    // anything else (including re-casts) stays silent.
+    if (phaseAtEntry === 'play') {
+      if (this.endWord && transcriptContains(transcript, this.endWord)) {
+        console.log(`[MerlinSession] End-word "${this.endWord}" matched — closing play phase`);
+        this.closePlay('end-word');
+        // Fall through to the Gemini turn — phase is now 'outro' and the
+        // outro rules will produce the farewell.
+      } else {
+        // Re-cast visual already handled above (if magicMatched); nothing
+        // else to do this turn.
+        return {
+          text: '',
+          phase: this.state.phase,
+          spell: this.state.spell,
+          spokenText: '',
+        };
+      }
+    }
 
     // Update perception state
     if (bodyAnalysis) {
@@ -249,24 +384,63 @@ export class MerlinSession {
       state: this.state,
       onSpellUpdate: this.config.onSpellUpdate,
       onRequestAnalysis: this.config.onRequestAnalysis,
+      onRegisterTriggers: (triggers) => {
+        // Replace the full set; Gemini calling this tool again redefines
+        // the entire trigger library, not appends. Matches what the tool
+        // description tells the model.
+        this.effectTriggers = [...triggers];
+        console.log(
+          `[MerlinSession] Effect triggers updated (${this.effectTriggers.length}): ` +
+          this.effectTriggers.map(t => `"${t.word}"→${t.zone}`).join(', ')
+        );
+      },
+      onSpeakChunk: this.config.onSpeakChunk,
+      onCastArmed: ({ magicWord, gestureHint }) => {
+        // Forward to the session config caller with the end-word
+        // included so the renderer arms both at once. Default end-word
+        // matches what closePlay/processUserSpeech expects.
+        this.config.onCastArmed?.({
+          magicWord,
+          endWord: this.endWord ?? DEFAULT_END_WORD,
+          gestureHint,
+        });
+      },
     };
     const turn = await runMerlinTurn(this.chat, contextMessage, ctx, turnId, 'live');
     let accumulatedText = turn.finalText;
 
-    // If still no text after tool calls, ask for a spoken response
-    if (!accumulatedText.trim()) {
+    // Followup re-prompt — used to be unconditional on empty text, but
+    // that fires even when the chunk path already streamed the response
+    // (which made finalText empty as the un-streamed remainder). The
+    // followup then generated a SECOND response that played over the
+    // chunk via stopStreaming(). Only re-prompt if nothing was streamed
+    // AND nothing landed in the final text.
+    if (!accumulatedText.trim() && !turn.streamedAny) {
       const followUp = await this.chat.sendMessage('Now respond to the user based on what you learned. Be brief.');
       this.emitChatResult(turnId, followUp);
       accumulatedText = followUp.text === 'No response generated' ? '' : followUp.text;
     }
 
-    const responseText = accumulatedText || 'I see. Tell me more.';
-    emitGeminiTurn({ id: turnId, source: 'live', responseText, final: true });
+    // For the chat-history bubble, use the FULL accumulated text (the
+    // initial chunk + any post-tool follow-up). For the spoken-text
+    // path, use only the un-streamed remainder so the chunk doesn't get
+    // cancelled by a second speakWithStreaming. If nothing streamed and
+    // nothing came back from tools, fall back to the placeholder.
+    const fullText = (turn.streamedAny ? turn.fullText : accumulatedText) || 'I see. Tell me more.';
+    const spokenText = turn.streamedAny
+      ? turn.finalText // un-streamed remainder; may be empty if entire response was streamed
+      : (accumulatedText || 'I see. Tell me more.');
+    // Final marker only — the response text was already emitted to the
+    // sidebar by emitChatResult inside runMerlinTurn (or the followUp
+    // emitChatResult above), so re-emitting responseText here creates a
+    // duplicate Gemini card. The `final: true` flag is purely cosmetic
+    // (locks the card visually); the renderer doesn't need the text.
+    emitGeminiTurn({ id: turnId, source: 'live', final: true });
 
     // Add assistant response to history
     this.conversationHistory.push({
       role: 'assistant',
-      content: responseText,
+      content: fullText,
       timestamp: Date.now(),
     });
 
@@ -277,9 +451,10 @@ export class MerlinSession {
     }
 
     return {
-      text: responseText,
+      text: fullText,
       phase: this.state.phase,
       spell: this.state.spell,
+      spokenText,
     };
   }
 
@@ -361,13 +536,58 @@ export class MerlinSession {
   }
 
   /**
-   * Mark the spell as cast (called externally when gesture+word detected)
+   * Mark the spell as cast and enter PLAY phase. The participant now
+   * inhabits the cast spell silently; Merlin says nothing until the
+   * end-word is spoken (or the safety timer expires).
    */
   markCastCompleted(): void {
     this.state.castCompleted = true;
+    this.state.phase = 'play';
+    this.previousPhase = 'play';
+    // Lock in the end-word for local matching. For now uses the default;
+    // a future Gemini extension to prepare_casting can override it.
+    this.endWord = (this.state.spell as { endWord?: string }).endWord ?? DEFAULT_END_WORD;
+
+    if (this.playSafetyTimer) clearTimeout(this.playSafetyTimer);
+    this.playSafetyTimer = setTimeout(() => {
+      console.log(`[MerlinSession] Play phase safety timer expired (${PLAY_PHASE_MAX_MS}ms) — closing session`);
+      this.closePlay('timeout');
+    }, PLAY_PHASE_MAX_MS);
+
+    if (this.config.onPhaseChange) {
+      this.config.onPhaseChange('play');
+    }
+  }
+
+  /**
+   * Exit PLAY phase. On 'end-word' reason, the caller (processUserSpeech)
+   * proceeds with the Gemini turn so phase=outro produces the farewell
+   * narration. On 'timeout', there's no further user input so we fire
+   * onSessionComplete directly — the renderer tears down without a final
+   * spoken line.
+   */
+  /**
+   * Close the PLAY phase. Public so the renderer-side background cast
+   * listener can fire it via IPC (`merlin-trigger-end`) without going
+   * through the Gemini conversation pipeline. Idempotent — calling twice
+   * is safe (the timer is cleared on first call; subsequent calls see
+   * the cleared state).
+   */
+  closePlay(reason: 'end-word' | 'timeout'): void {
+    if (this.playSafetyTimer) {
+      clearTimeout(this.playSafetyTimer);
+      this.playSafetyTimer = null;
+    }
     this.state.phase = 'outro';
+    this.previousPhase = 'outro';
     if (this.config.onPhaseChange) {
       this.config.onPhaseChange('outro');
+    }
+    // Reset TD zones to baseline (used to fire from updatePhase when
+    // phase transitioned to outro; now that transition happens here).
+    void resetTDBaseline();
+    if (reason === 'timeout' && this.config.onSessionComplete) {
+      this.config.onSessionComplete();
     }
   }
 
@@ -380,10 +600,29 @@ export class MerlinSession {
         text: 'Session was not active.',
         phase: 'idle',
         spell: createInitialSpellState(),
+        spokenText: 'Session was not active.',
       };
     }
 
     this.state.phase = 'outro';
+
+    // If the cast already happened, the cast turn's Gemini response
+    // already produced the closing narration that's being TTS'd as
+    // we speak. Calling chat.endSession() here would generate a
+    // SECOND outro and try to play it concurrently — the participant
+    // hears two overlapping wizards. Skip the second Gemini call;
+    // return empty text so stopMerlinMode's TTS guard is a no-op.
+    if (this.state.castCompleted) {
+      console.log('[MerlinSession] endSession: cast already produced the closing narration; skipping second outro');
+      const response: MerlinResponse = {
+        text: '',
+        phase: 'idle',
+        spell: this.state.spell,
+        spokenText: '',
+      };
+      this.state.phase = 'idle';
+      return response;
+    }
 
     const outroText = await this.chat.endSession();
 
@@ -398,6 +637,7 @@ export class MerlinSession {
       text: outroText,
       phase: 'idle',
       spell: this.state.spell,
+      spokenText: outroText,
     };
 
     // Reset state
@@ -444,8 +684,8 @@ export class MerlinSession {
    * whatever GLSL Gemini wrote into the zones via set_zone_shader.
    */
   triggerCast(): void {
-    if (!this.state.castReady || !isSpellReady(this.state.spell) || this.state.castCompleted) {
-      console.log('[MerlinSession] Cannot cast: not ready or already completed');
+    if (!this.state.castReady || !isSpellReady(this.state.spell)) {
+      console.log('[MerlinSession] Cannot cast: spell not ready');
       return;
     }
 
@@ -459,7 +699,20 @@ export class MerlinSession {
       envelope
     );
 
-    this.markCastCompleted();
+    // The peak-hold + idle restore are handled TD-side now. The
+    // cast_decay_tick executeDAT polls each frame and resets
+    // spell_state['mode_float'] to -1.0 once CAST_PEAK_HOLD_SEC
+    // elapses since cast_start_time. Robust to Node disconnects.
+    // See ws_callbacks.py:check_cast_decay.
+
+    // Mark the cast completed only on the FIRST cast — markCastCompleted
+    // advances the phase to 'outro' and fires onSessionComplete. The
+    // visual cast envelope is allowed to re-fire on subsequent magic-word
+    // utterances (the participant can play with the spell), but the
+    // conversational + phase machinery has done its one-shot work.
+    if (!this.state.castCompleted) {
+      this.markCastCompleted();
+    }
   }
 }
 
