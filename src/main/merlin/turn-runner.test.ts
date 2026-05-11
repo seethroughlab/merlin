@@ -73,6 +73,16 @@ vi.mock('./gemini-events', () => ({
   emitGeminiTurn: vi.fn(),
 }));
 
+// prompts.ts pulls shader templates from disk via electron.app at module
+// load. Stub it so the static import of prompts (for ALLOWED_TOOLS_PER_PHASE)
+// doesn't crash under vitest where `electron.app` is undefined.
+vi.mock('./shader-templates', () => ({
+  formatTemplatesForSystemPrompt: () => '',
+  formatTemplateForPrompt: () => '',
+  loadTemplate: () => '',
+  ZONE_TEMPLATE_FILES: {},
+}));
+
 // Tiny envelope so the captureTemporalFrames sleeps don't drag tests out
 // to ~1s each. Real values are tested via integration; the dispatch logic
 // is what these unit tests assert.
@@ -83,12 +93,15 @@ vi.mock('./reset-td', () => ({
 
 import { dispatchToolCalls } from './turn-runner';
 import type { TurnDispatchContext } from './turn-runner';
-import type { MerlinToolCall } from './types';
+import type { MerlinToolCall, MerlinPhase } from './types';
 
 // set_cast_params doesn't read from session state, so a minimal cast keeps
-// this test focused on dispatch + push wiring.
-function makeCtx(): TurnDispatchContext {
-  return { state: {} as TurnDispatchContext['state'] };
+// this test focused on dispatch + push wiring. When phase is omitted the
+// runtime gate is disabled (ALLOWED_TOOLS_PER_PHASE[undefined] === undefined),
+// matching the original test behavior. Pass an explicit phase to exercise
+// the gate.
+function makeCtx(phase?: MerlinPhase): TurnDispatchContext {
+  return { state: { phase } as TurnDispatchContext['state'] };
 }
 
 beforeEach(() => {
@@ -321,5 +334,108 @@ describe('dispatchToolCalls — set_particle_params', () => {
       success: false,
       error: expect.stringMatching(/not connected/i),
     });
+  });
+});
+
+describe('dispatchToolCalls — register_effect_triggers', () => {
+  it('forwards the normalized trigger set to onRegisterTriggers and returns success', async () => {
+    const onRegisterTriggers = vi.fn();
+    const call: MerlinToolCall = {
+      name: 'register_effect_triggers',
+      args: {
+        triggers: [
+          { word: 'rise', zone: 'force_field', glsl_code: 'force.y += 0.1;', description: 'lift' },
+          { word: 'still', zone: 'velocity_modifier', glsl_code: 'vel *= 0.5;' },
+        ],
+      },
+    };
+
+    const ctx: TurnDispatchContext = { state: {} as TurnDispatchContext['state'], onRegisterTriggers };
+    const result = await dispatchToolCalls([call], ctx, 'turn-reg-1', 'live', new Map());
+
+    expect(onRegisterTriggers).toHaveBeenCalledTimes(1);
+    const passed = onRegisterTriggers.mock.calls[0][0];
+    expect(passed).toHaveLength(2);
+    expect(passed[0]).toMatchObject({ word: 'rise', zone: 'force_field', glslCode: 'force.y += 0.1;', description: 'lift' });
+    expect(passed[1]).toMatchObject({ word: 'still', zone: 'velocity_modifier', glslCode: 'vel *= 0.5;' });
+    expect(result.toolResults[0].response).toMatchObject({
+      success: true,
+      registered: [
+        { word: 'rise', zone: 'force_field' },
+        { word: 'still', zone: 'velocity_modifier' },
+      ],
+    });
+  });
+
+  it('rejects an empty triggers array', async () => {
+    const call: MerlinToolCall = {
+      name: 'register_effect_triggers',
+      args: { triggers: [] },
+    };
+    const result = await dispatchToolCalls([call], makeCtx(), 'turn-reg-2', 'live', new Map());
+    expect(result.toolResults[0].response).toMatchObject({ success: false });
+  });
+
+  it('drops malformed entries (missing word/zone/code) and rejects if none survive', async () => {
+    const call: MerlinToolCall = {
+      name: 'register_effect_triggers',
+      args: {
+        triggers: [
+          { word: 'rise' }, // missing zone + glsl_code
+          { zone: 'force_field', glsl_code: 'force.y += 0.1;' }, // missing word
+        ],
+      },
+    };
+    const result = await dispatchToolCalls([call], makeCtx(), 'turn-reg-3', 'live', new Map());
+    expect(result.toolResults[0].response).toMatchObject({ success: false });
+  });
+});
+
+describe('dispatchToolCalls — phase-gated tools', () => {
+  it('drops a tool not allowed in the current phase and returns synthetic error', async () => {
+    const call: MerlinToolCall = {
+      name: 'prepare_casting',
+      args: { magicWord: 'aevenoor', gestureHint: 'open hands' },
+    };
+
+    // discovery does NOT include prepare_casting (only formation does).
+    const result = await dispatchToolCalls([call], makeCtx('discovery'), 'turn-gate-1', 'live', new Map());
+
+    expect(result.toolResults).toHaveLength(1);
+    expect(result.toolResults[0].name).toBe('prepare_casting');
+    expect(result.toolResults[0].response).toMatchObject({ success: false });
+    const errMsg = (result.toolResults[0].response as { error: string }).error;
+    expect(errMsg).toContain('discovery');
+    expect(errMsg).toContain('prepare_casting');
+    // No state-changing pushes fired.
+    expect(mockPushSpellCast).not.toHaveBeenCalled();
+    expect(mockPushCastParams).not.toHaveBeenCalled();
+    expect(mockPushParticleParams).not.toHaveBeenCalled();
+  });
+
+  it('allows a tool that IS in the phase allowlist', async () => {
+    const call: MerlinToolCall = {
+      name: 'set_cast_params',
+      args: { riseMs: 100, fallMs: 1000, peakEnergy: 0.6 },
+    };
+
+    // discovery includes set_cast_params — should dispatch normally.
+    const result = await dispatchToolCalls([call], makeCtx('discovery'), 'turn-gate-2', 'live', new Map());
+
+    expect(mockPushCastParams).toHaveBeenCalledWith({ riseMs: 100, fallMs: 1000, peakEnergy: 0.6 });
+    expect(result.toolResults[0].response).toMatchObject({ success: true });
+  });
+
+  it('blocks set_zone_shader during ready_to_cast (perception-only phase)', async () => {
+    const call: MerlinToolCall = {
+      name: 'set_zone_shader',
+      args: { zone: 'force_field', code: 'pos += vec3(0);' },
+    };
+
+    const result = await dispatchToolCalls([call], makeCtx('ready_to_cast'), 'turn-gate-3', 'live', new Map());
+
+    expect(result.toolResults[0].response).toMatchObject({ success: false });
+    const errMsg = (result.toolResults[0].response as { error: string }).error;
+    expect(errMsg).toContain('ready_to_cast');
   });
 });
