@@ -580,6 +580,25 @@ export interface GeminiTurn {
   screenshots?: GeminiScreenshot[];
   /** True on the final emission; lets the renderer mark the card done. */
   final?: boolean;
+  /**
+   * Live face-gesture summary that was injected into the per-turn
+   * session context (e.g. "Currently smiling. Brows raised 3s ago.").
+   * Surfaced in the LIVE Gemini card so the user can verify exactly
+   * what Gemini was told about face state for this turn. Null/absent
+   * when the buffer was quiet.
+   */
+  faceActivity?: string;
+  /**
+   * Categorizes this emission within a user-speech turn so the LIVE
+   * card can show clearly what each chunk is doing:
+   *  - 'initial'              — first Gemini reply (text streamed to TTS, tools queued)
+   *  - 'post-tool-spoken'     — text after tool dispatch that WILL be spoken
+   *                             (used when the initial response was tools-only)
+   *  - 'post-tool-dropped'    — text after tool dispatch that the runtime
+   *                             discards because the initial already responded
+   *                             (rendered with strikethrough + "(not spoken)" label)
+   */
+  kind?: 'initial' | 'post-tool-spoken' | 'post-tool-dropped';
 }
 
 // ============ RESET TD ============

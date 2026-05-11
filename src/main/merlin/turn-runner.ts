@@ -115,9 +115,9 @@ export async function runMerlinTurn(
   const zoneAttempts = new Map<string, number>();
 
   let result = await chat.sendMessage(initialMessage);
-  emitChatResult(turnId, source, result);
+  emitChatResult(turnId, source, result, 'initial');
 
-  const initialText = result.text === 'No response generated' ? '' : result.text;
+  const initialText = sanitizeGeminiText(result.text);
   let accumulatedText = initialText;
   let streamedText = '';
   let toolCallCount = 0;
@@ -145,9 +145,43 @@ export async function runMerlinTurn(
   if (initialText && result.toolCalls.length > 0 && ctx.onSpeakChunk) {
     ctx.onSpeakChunk(initialText);
     streamedText = initialText;
+  } else if (!initialText && result.toolCalls.length > 0 && ctx.onSpeakChunk) {
+    // Gemini went straight to tools without an acknowledgement —
+    // despite the RESPOND FIRST prompt rule. Fire a brief pre-canned
+    // filler so the participant hears Merlin's voice within 200ms
+    // instead of waiting 25s for sprite generation in silence. The
+    // filler is also added to accumulatedText so the chat bubble
+    // reflects what was actually said.
+    const filler = pickAckFiller();
+    console.warn(`[TurnRunner] Initial Gemini response had tool calls but no text — speaking filler: "${filler}"`);
+    ctx.onSpeakChunk(filler);
+    streamedText = filler;
+    accumulatedText = filler;
   }
 
-  while (result.toolCalls.length > 0) {
+  // Hard cap on tool-dispatch rounds. Without this, when Gemini calls
+  // a tool that the phase gate forbids, the gate returns a synthetic
+  // error and Gemini retries with the same forbidden tool — sometimes
+  // 4+ rounds, each adding a new text response that gets accumulated.
+  // The participant then waits 60+ seconds between the streamed chunk
+  // and the eventual spokenText (the post-tool remainder), with no
+  // intermediate audio. Cap at MAX_DISPATCH_ROUNDS and stop with the
+  // text we have.
+  const MAX_DISPATCH_ROUNDS = 5;
+  let rounds = 0;
+  // ONE Merlin response per user-speech turn. If the chunk path
+  // already streamed the initial text, we DROP any post-tool text
+  // emissions from accumulation so the participant doesn't hear ack +
+  // next question + meta-commentary mashed into one TTS playback.
+  // Gemini still emits the text (visible in the dev LIVE card via
+  // emitChatResult), but it doesn't reach the spoken response. The
+  // next user-speech turn drives Gemini's next spoken response —
+  // preserving the ask/ack alternation cadence naturally.
+  // If NO chunk fired (Gemini emitted tools-only initially), then a
+  // pre-canned filler may have been spoken, and we DO accumulate
+  // post-tool text since the filler isn't a real response.
+  const chunkAlreadyResponded = streamedText.length > 0;
+  while (result.toolCalls.length > 0 && rounds < MAX_DISPATCH_ROUNDS) {
     toolCallCount += result.toolCalls.length;
     const dispatch = await dispatchToolCalls(
       result.toolCalls,
@@ -160,10 +194,24 @@ export async function runMerlinTurn(
     // inside the function response as a multimodal `parts` entry —
     // single round-trip, no separate user-role follow-up needed.
     result = await chat.sendToolResults(dispatch.toolResults, dispatch.extraImages);
-    emitChatResult(turnId, source, result);
-    if (result.text && result.text !== 'No response generated') {
-      accumulatedText += result.text;
+    const subText = sanitizeGeminiText(result.text);
+    // Tag the emission so the LIVE card can label dropped post-tool
+    // text distinctly from text that actually reaches the participant.
+    const emissionKind: 'post-tool-spoken' | 'post-tool-dropped' = chunkAlreadyResponded
+      ? 'post-tool-dropped'
+      : 'post-tool-spoken';
+    emitChatResult(turnId, source, result, emissionKind);
+    if (subText) {
+      if (chunkAlreadyResponded) {
+        console.log(`[TurnRunner] Dropping post-tool text (chunk already responded): "${subText.slice(0, 80)}${subText.length > 80 ? '…' : ''}"`);
+      } else {
+        accumulatedText += subText;
+      }
     }
+    rounds++;
+  }
+  if (result.toolCalls.length > 0) {
+    console.warn(`[TurnRunner] Hit ${MAX_DISPATCH_ROUNDS}-round dispatch cap with ${result.toolCalls.length} tools pending; proceeding with accumulated text.`);
   }
 
   // finalText is the un-streamed remainder. The renderer uses
@@ -182,7 +230,62 @@ export async function runMerlinTurn(
   };
 }
 
-function emitChatResult(turnId: string, source: GeminiTurnSource, result: ChatTurnResult): void {
+/**
+ * Strip stage-direction-style markers and meta-annotations that Gemini
+ * occasionally emits despite explicit prompt rules forbidding them. The
+ * model has been observed mimicking the capitalized `THEY SAID:` /
+ * `FACE ACTIVITY:` markers from the per-turn context, producing things
+ * like "-- THE PARTICIPANT IS SPEAKING --" or "**Analyzing the
+ * Approach**" in its actual response text. These leak into the chat
+ * bubble and (worse) get read verbatim by the TTS.
+ *
+ * Patterns stripped:
+ *   --[whitespace] ALL CAPS WORDS [whitespace]--   (with optional
+ *     trailing newlines)
+ *   **Bold internal-thinking phrases** at start of line
+ *   (parenthetical stage directions in italics — left alone for now;
+ *    too risky to strip without false positives on legitimate asides)
+ *
+ * Conservative: only strips patterns that are clearly meta-annotation,
+ * not normal punctuation. Real em-dashes in prose ("decisions can feel
+ * — like a fog —") survive.
+ */
+/**
+ * Pre-canned acknowledgement filler used when Gemini violates the
+ * RESPOND FIRST rule and emits only tool calls on a user-speech turn.
+ * Picked at random from a small pool so the participant doesn't hear
+ * the same phrase every time. Kept deliberately vague so it fits any
+ * preceding utterance.
+ */
+const ACK_FILLERS = [
+  'Let me see what shape this wants to take.',
+  "Hold a moment — I'm reading what you've given me.",
+  "Mm. Let me sit with that.",
+  'A moment, while I shape this.',
+  "Let me draw on what you've said.",
+];
+function pickAckFiller(): string {
+  return ACK_FILLERS[Math.floor(Math.random() * ACK_FILLERS.length)];
+}
+
+function sanitizeGeminiText(raw: string): string {
+  if (!raw || raw === 'No response generated') return '';
+  let text = raw;
+  // -- ALL CAPS PHRASE --  (also handles asymmetric dash counts ≥2)
+  text = text.replace(/-{2,}\s*[A-Z][A-Z\s'’-]+[A-Z]\s*-{2,}/g, '');
+  // **Bold meta** at line start (e.g., "**Analyzing the Text Delivery**")
+  text = text.replace(/^\s*\*\*[^*\n]+\*\*\s*\n*/gm, '');
+  // Collapse any blank lines we just created.
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  return text;
+}
+
+function emitChatResult(
+  turnId: string,
+  source: GeminiTurnSource,
+  result: ChatTurnResult,
+  kind?: 'initial' | 'post-tool-spoken' | 'post-tool-dropped',
+): void {
   const toolCalls: GeminiToolCall[] = result.toolCalls.map(tc => ({
     name: tc.name,
     args: tc.args as Record<string, unknown>,
@@ -194,6 +297,7 @@ function emitChatResult(turnId: string, source: GeminiTurnSource, result: ChatTu
       source,
       responseText: text || undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      ...(kind ? { kind } : {}),
     });
     // Mirror Gemini's text + tool calls to stdout so the dev console
     // shows what the model is "thinking" alongside the per-zone push

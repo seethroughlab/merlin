@@ -156,6 +156,15 @@ let merlinIsProcessing = false;
 let armedMagicWord: string | null = null;
 let armedEndWord: string | null = null;
 
+// In-flight chunk-path TTS promise. The chunk handler is fire-and-forget
+// (it starts speaking as soon as Gemini emits its initial text during
+// tool dispatch), but the post-turn spokenText TTS path needs to AWAIT
+// the chunk before starting its own request — otherwise main fires two
+// TTS requests at the LiveTTS WebSocket in quick succession and the
+// server interleaves the two audio streams on the wire. Tracking this
+// promise so the spokenText path can sequence cleanly.
+let inFlightSpeechPromise: Promise<void> | null = null;
+
 // Pending analysis capture (started when user begins speaking)
 let pendingAnalysisCapture: Promise<{
   face: MicroExpressionAnalysis | null;
@@ -544,13 +553,15 @@ async function captureAndAnalyzeBodyLanguage(): Promise<void> {
   if (statusDisplay) statusDisplay.textContent = 'Capturing skeleton strip (5s)...';
 
   try {
-    // Capture skeleton strip (8 frames over 5 seconds)
+    // Capture body strip (8 frames over 5 seconds). Real photo crop +
+    // skeleton overlay (see skeletonStrip.ts). Frame source getter
+    // gives the strip access to the current rendered video frame.
     const result = await captureSkeletonStrip({
       frameCount: 8,
       intervalMs: 625,  // 5000ms / 8 frames
-      frameWidth: 128,
-      frameHeight: 192,
-    });
+      frameWidth: 192,
+      frameHeight: 288,
+    }, getFrameSource);
 
     if (!result) {
       if (statusDisplay) statusDisplay.textContent = 'No pose detected for capture';
@@ -641,9 +652,9 @@ async function captureQuickBodyAnalysis(): Promise<typeof lastBodyAnalysis> {
     const result = await captureSkeletonStrip({
       frameCount: 3,
       intervalMs: 333,  // ~1 second total
-      frameWidth: 128,
-      frameHeight: 192,
-    });
+      frameWidth: 192,
+      frameHeight: 288,
+    }, getFrameSource);
 
     if (!result) {
       console.log('[QuickBody] No skeleton detected');
@@ -1164,6 +1175,99 @@ function displayPhaseLabel(phase: string): string {
     default:
       return capitalize(phase);
   }
+}
+
+// ============ FACE HUD ============
+// Renders the live face-gesture state in the sidebar so the user can
+// verify FaceLandmarker is producing events. Updated from the
+// setFaceGestureCallback registered at MediaPipe init.
+
+const FACE_KIND_LABEL: Record<string, { label: string; emoji: string }> = {
+  mouth_open: { label: 'mouth open', emoji: '😮' },
+  smile:      { label: 'smile',      emoji: '😄' },
+  brow_raise: { label: 'brows up',   emoji: '🤨' },
+  eye_closed: { label: 'eyes closed', emoji: '😑' },
+};
+
+const faceHudActive = new Set<string>();
+interface RecentFaceEvent {
+  kind: string;
+  edge: 'start' | 'end';
+  at: number; // performance.now()
+}
+const faceHudRecent: RecentFaceEvent[] = [];
+const FACE_HUD_RECENT_MAX = 8;
+let faceHudRefreshInterval: ReturnType<typeof setInterval> | null = null;
+
+function updateFaceHud(evt: { kind: string; edge: 'start' | 'end'; timestamp: number }): void {
+  if (evt.edge === 'start') faceHudActive.add(evt.kind);
+  else faceHudActive.delete(evt.kind);
+
+  faceHudRecent.unshift({ kind: evt.kind, edge: evt.edge, at: evt.timestamp });
+  while (faceHudRecent.length > FACE_HUD_RECENT_MAX) faceHudRecent.pop();
+
+  renderFaceHud();
+  // Kick a slow refresh so the "Xs ago" labels stay accurate while
+  // nothing new fires.
+  if (!faceHudRefreshInterval) {
+    faceHudRefreshInterval = setInterval(renderFaceHud, 1000);
+  }
+}
+
+function renderFaceHud(): void {
+  const activeEl = document.getElementById('face-hud-active');
+  const recentEl = document.getElementById('face-hud-recent');
+  if (!activeEl || !recentEl) return;
+
+  if (faceHudActive.size === 0) {
+    activeEl.innerHTML = '<span class="face-hud-empty">neutral</span>';
+  } else {
+    activeEl.innerHTML = '';
+    for (const kind of faceHudActive) {
+      const meta = FACE_KIND_LABEL[kind] ?? { label: kind, emoji: '·' };
+      const pill = document.createElement('span');
+      pill.className = 'face-pill';
+      pill.textContent = `${meta.emoji} ${meta.label}`;
+      activeEl.appendChild(pill);
+    }
+  }
+
+  const now = performance.now();
+  // Drop entries older than 10s from the recent display (buffer keeps
+  // them for slightly longer but the HUD only shows recent).
+  while (faceHudRecent.length > 0 && now - faceHudRecent[faceHudRecent.length - 1].at > 10000) {
+    faceHudRecent.pop();
+  }
+
+  if (faceHudRecent.length === 0) {
+    recentEl.innerHTML = '';
+    // No recent activity — pause the refresh timer.
+    if (faceHudRefreshInterval) {
+      clearInterval(faceHudRefreshInterval);
+      faceHudRefreshInterval = null;
+    }
+    return;
+  }
+
+  recentEl.innerHTML = '';
+  for (const e of faceHudRecent) {
+    const meta = FACE_KIND_LABEL[e.kind] ?? { label: e.kind, emoji: '·' };
+    const secs = Math.max(0, Math.round((now - e.at) / 1000));
+    const line = document.createElement('div');
+    line.className = 'face-recent-line';
+    line.textContent = `${meta.emoji} ${meta.label} ${e.edge === 'start' ? 'started' : 'ended'} ${secs}s ago`;
+    recentEl.appendChild(line);
+  }
+}
+
+function resetFaceHud(): void {
+  faceHudActive.clear();
+  faceHudRecent.length = 0;
+  if (faceHudRefreshInterval) {
+    clearInterval(faceHudRefreshInterval);
+    faceHudRefreshInterval = null;
+  }
+  renderFaceHud();
 }
 
 /**
@@ -2042,15 +2146,17 @@ async function initMediaPipe(): Promise<void> {
 
     mediapipeReady = loaded.length > 0;
 
-    // Wire face-gesture events. Renderer-only signals — log to console
-    // and forward to main via IPC so future consumers (Gemini tool,
-    // spell-effect router, etc.) can hook in without renderer changes.
+    // Wire face-gesture events. Renderer-only signals — log to console,
+    // forward to main via IPC for the get_face_events tool / FACE
+    // ACTIVITY context injection, AND update the sidebar HUD so the
+    // user can SEE that detection is working.
     setFaceGestureCallback((evt: FaceGestureEvent) => {
       const ts = new Date(performance.timeOrigin + evt.timestamp).toISOString().slice(11, 23);
       console.log(`[FaceGesture ${ts}] ${evt.kind} ${evt.edge} (score=${evt.score.toFixed(2)})`);
       if (window.electronAPI?.sendFaceGesture) {
         window.electronAPI.sendFaceGesture(evt);
       }
+      updateFaceHud(evt);
     });
   } catch (error) {
     console.error('MediaPipe init error:', error);
@@ -2291,12 +2397,35 @@ function appendGeminiTurn(turn: Partial<GeminiTurn> & { id: string; source: Gemi
   // bubble above the LIVE card already shows the participant's words.
   // GeminiTurn.userPrompt is still emitted in case other surfaces need it.
 
-  // Response text and tool calls — each emission produces a new section so
-  // retry-followup responses appear below their pushResults.
+  // FACE ACTIVITY (live) — surfaces the per-turn snippet that main
+  // injected into Gemini's context (e.g. "Currently smiling. Brows
+  // raised 3s ago."). Only added on first sight so retry-followup
+  // events don't duplicate it.
+  if (turn.faceActivity && !card.querySelector('.gemini-face-activity')) {
+    const faceDiv = document.createElement('div');
+    faceDiv.className = 'gemini-face-activity';
+    faceDiv.textContent = `face: ${turn.faceActivity}`;
+    body.appendChild(faceDiv);
+  }
+
+  // Response text and tool calls — each emission produces a new section
+  // so retry-followup responses appear below their pushResults. The
+  // `kind` field labels each emission so the user can see at a glance:
+  //   - 'initial'              → first response (text streamed to TTS)
+  //   - 'post-tool-spoken'     → post-tool text that WAS spoken (filler-cover case)
+  //   - 'post-tool-dropped'    → post-tool text dropped from speech (one-response-per-turn rule)
   if (turn.responseText || (turn.toolCalls && turn.toolCalls.length > 0)) {
+    const kind = turn.kind ?? 'initial';
     const respDiv = document.createElement('div');
-    respDiv.className = 'gemini-response';
-    respDiv.innerHTML = `<div class="gemini-role">Gemini</div>`;
+    respDiv.className = `gemini-response gemini-response-${kind}`;
+
+    // Role label with kind annotation so it's obvious what the emission
+    // is doing in the turn flow.
+    let kindLabel = '';
+    if (kind === 'initial') kindLabel = ' · initial → TTS';
+    else if (kind === 'post-tool-spoken') kindLabel = ' · post-tool → TTS';
+    else if (kind === 'post-tool-dropped') kindLabel = ' · post-tool · not spoken';
+    respDiv.innerHTML = `<div class="gemini-role">Gemini${kindLabel}</div>`;
 
     if (turn.responseText) {
       const textDiv = document.createElement('div');
@@ -2518,9 +2647,16 @@ async function startMerlinMode(): Promise<void> {
     // Speak the un-streamed intro remainder. If the chunk path already
     // streamed the greeting during tool dispatch, spokenText is the
     // post-tool portion (often empty). When no chunk fired, spokenText
-    // equals the full intro.
-    if (ttsReady && response.spokenText) {
-      await speakWithStreaming(response.spokenText, 'wizard');
+    // equals the full intro. Await any in-flight chunk first so we
+    // don't fire a second concurrent TTS request.
+    if (ttsReady) {
+      if (inFlightSpeechPromise) {
+        await inFlightSpeechPromise;
+        inFlightSpeechPromise = null;
+      }
+      if (response.spokenText) {
+        await speakWithStreaming(response.spokenText, 'wizard');
+      }
     }
 
     // Start continuous listening (after TTS finishes)
@@ -2566,6 +2702,7 @@ async function stopMerlinMode(): Promise<void> {
   // Reset face-gesture edge-detector so stale ON-states from a previous
   // session don't suppress 'start' events on the next session.
   resetFaceGestureState();
+  resetFaceHud();
 
   // End session
   if (window.electronAPI) {
@@ -2731,8 +2868,17 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     // full response. Empty means everything already spoken — skip.
     if (ttsReady && response.spokenText) {
       stopContinuousListening();
-      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Speaking remainder (${response.spokenText.length} chars)`);
 
+      // Wait for any in-flight chunk-path TTS to finish before kicking
+      // off the remainder. Two parallel TTS requests would interleave
+      // their audio chunks at the LiveTTS server and play overlapping.
+      if (inFlightSpeechPromise) {
+        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Awaiting in-flight chunk TTS before speaking remainder`);
+        await inFlightSpeechPromise;
+      }
+      inFlightSpeechPromise = null;
+
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Speaking remainder (${response.spokenText.length} chars)`);
       await speakWithStreaming(response.spokenText, 'wizard');
 
       // Resume listening after TTS finishes
@@ -2740,8 +2886,14 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
         console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after TTS`);
         await startContinuousListening(handleMerlinTranscript);
       }
+    } else if (inFlightSpeechPromise) {
+      // No remainder, but a chunk is still in flight — wait for it so
+      // listening doesn't resume mid-speech.
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder — awaiting chunk TTS to finish`);
+      await inFlightSpeechPromise;
+      inFlightSpeechPromise = null;
     } else {
-      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder text — chunk path already spoke everything`);
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No speech this turn`);
     }
 
   } catch (error) {
@@ -2873,8 +3025,19 @@ if (window.electronAPI) {
     if (!ttsReady || !text) return;
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Parallel-TTS chunk: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
     stopContinuousListening();
-    // Fire-and-forget; speakWithStreaming queues internally.
-    void speakWithStreaming(text, 'wizard');
+    // Track the promise so the post-turn spokenText TTS path can await
+    // it. Without this serialization, the second speakWithStreaming
+    // fires another LiveTTS request while the chunk's audio chunks are
+    // still arriving from the server — they interleave on the wire and
+    // play overlapping (two voices on top of each other).
+    const chunkPromise = speakWithStreaming(text, 'wizard');
+    inFlightSpeechPromise = chunkPromise;
+    void chunkPromise.finally(() => {
+      // Clear only if the spokenText path didn't already replace this.
+      if (inFlightSpeechPromise === chunkPromise) {
+        inFlightSpeechPromise = null;
+      }
+    });
   });
 
   // Cast armed — main fires this when prepare_casting dispatches. From

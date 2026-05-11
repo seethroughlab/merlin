@@ -24,6 +24,7 @@ import { resetTDBaseline } from './reset-td';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
 import { runMerlinTurn, dispatchToolCalls, type TurnDispatchContext, type EffectTriggerSpec } from './turn-runner';
 import { pushZoneUpdateWithValidation } from '../td-bridge';
+import { summarizeRecentFaceActivity } from './face-event-buffer';
 
 // Default cast envelope timing (in ms). Used by triggerCast() to drive
 // the release-mode TD-side phase transitions. Was previously archetype-
@@ -74,7 +75,13 @@ export type OnCaptureFrameCallback = () => Promise<string | null>;
  * Default phase duration configuration
  */
 const DEFAULT_PHASE_CONFIG: MerlinPhaseConfig = {
-  introTurns: 1,
+  // Intro is the SESSION-START narration (fired by startSession before
+  // any user speech). The first user-speech turn is already discovery —
+  // they're responding to Merlin's opening. introTurns=0 means
+  // updatePhase moves us into discovery on turn 1, NOT keeping us in
+  // intro where the narrowed tool set would force Gemini into a retry
+  // loop with all its visual tools getting dropped.
+  introTurns: 0,
   discoveryTurns: 3,
   formationTurns: 1,
   castingTurns: 1,
@@ -375,9 +382,24 @@ export class MerlinSession {
     // Create context message for Gemini
     const contextMessage = createTurnContext(transcript, this.state);
 
+    // Snapshot the face-activity line that buildSessionContext just
+    // injected (it called the same summarizer internally). Surfaced
+    // to the LIVE sidebar card so the user can verify exactly what
+    // Gemini was told about face state — observability for the
+    // FaceLandmarker → buffer → context pipeline.
+    const faceActivity = summarizeRecentFaceActivity();
+    if (faceActivity) {
+      console.log(`[MerlinSession] Injecting FACE ACTIVITY: "${faceActivity}"`);
+    }
+
     // Open a sidebar turn for this user input.
     const turnId = nextTurnId();
-    emitGeminiTurn({ id: turnId, source: 'live', userPrompt: transcript });
+    emitGeminiTurn({
+      id: turnId,
+      source: 'live',
+      userPrompt: transcript,
+      ...(faceActivity ? { faceActivity } : {}),
+    });
 
     // Run Gemini turn through the shared dispatcher.
     const ctx: TurnDispatchContext = {
