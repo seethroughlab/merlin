@@ -44,7 +44,7 @@ Visuals are not driven directly by sensor input, but by AI-interpreted meaning. 
 
 ## **2.2 Constrained Generativity**
 
-The system feels open-ended but operates within bounded visual grammars, controlled shader injection zones, and a curated set of spell archetypes.
+The system feels open-ended but operates within bounded visual grammars and controlled shader injection zones. Bounds come from zone contracts (allowed uniforms, allowed locals, max snippet length, banned keywords) and a curated library of VFX techniques injected into Gemini's prompt as concrete patterns to reach for — not from a fixed archetype enumeration.
 
 ## **2.3 Perceived Intelligence \> Actual Intelligence**
 
@@ -253,33 +253,37 @@ Typical mappings (defaults — Merlin can override based on context and posture)
 | **Whole body** | Protection, grounding, ritual presence — enveloping rather than emitting. |
 | **Wand (future)** | Theatrical or directed casting when a physical prop is present. |
 
-## **7.2 Spell Archetypes (Constrained Variety)**
+## **7.2 Visual Authoring Model**
 
-Rather than infinite generation, Gemini selects from a curated archetype set. Each archetype maps to a specific POP spawn pattern, force-field behavior, color logic, and velocity shaping.
+Visuals are authored per-spell by Gemini directly, via constrained GLSL snippets injected into named shader zones (force_field, color_over_life, size_over_life, spawn_behavior, velocity_modifier, post_fx, billboard_vertex, billboard_pixel). There is no fixed archetype enumeration; the system trusts Gemini to compose visuals from primitives, kept safe by the sandbox below.
 
-* rising\_embers
+The system prompt provides Gemini with:
 
-* orbiting\_stardust
+* **Zone contracts** declaring available uniforms, allowed locals, max snippet length, and banned keywords per zone. Snippets are injected at a `{zone_code}` marker inside a template that handles boilerplate (read inputs, write outputs, apply defaults).
 
-* breathing\_mist
+* **VFX technique library** (`VISUAL_TECHNIQUES`) — a small set of named patterns Gemini can reach for as building blocks: phase-gate, turbulence, velocity stretch, velocity-to-color, death flare, geometric spawn, spatial color, per-particle flicker.
 
-* protective\_ring
+* **Element recipes** — short style descriptors (e.g., "fire = warm orange-to-red gradients with flickering edges; water = soft blue rippling with flowing motion").
 
-* hand\_trail\_ribbons
+* **Body-target uniforms** (`uChestPos`, `uEyeLPos`, `uEyeRPos`, `uHandLPos`, `uHandRPos`) so spawn position, force fields, and velocity modifiers can anchor to the casting origin without Gemini reasoning about coordinates.
 
-* crystal\_growth
+* **Compile-and-rollback** — every set_zone_shader call goes through validation (syntax, contract, banned keywords) and a TD compile pass. Failed compiles roll back to the previous working snippet and feed the actual GLSL error back to Gemini for up to two repair attempts before the system gives up on that zone for the turn.
 
-* storm\_field
+* **Sprite generation** (`generate_sprite`) — Gemini can also commission Imagen sprites/flipbooks for the particle texture, with the extracted palette pushed back as `uSpriteColor1` / `uSpriteColor2` uniforms so per-particle color matches the texture.
 
-* light\_beam
+* **Particle simulation parameters** (`set_particle_params`) — count, lifespan, emit rate, spawn radius, blend mode (additive vs alpha) — so the simulation feel adapts to the spell character (sparse candle flame vs dense blizzard, emissive light vs physical fragments).
+
+* **Cast envelope tuning** (`set_cast_params`) — rise / fall / peak energy parameters per spell so the energy curve matches the spell's character (slow meditative drift vs explosive snap).
+
+Constrained generativity comes from the zone surface area, the VISUAL_TECHNIQUES vocabulary, and the parameter tools — not from selecting from a fixed archetype list.
 
 ## **7.3 Depth vs. Breadth Strategy**
 
-* **Breadth** comes from combinations across the spell-space axes.
+* **Breadth** comes from combinations across the spell-space axes (intent × element × energy × origin) and the open-ended GLSL surface — every spell is a fresh authoring pass, not a recombination of fixed archetypes.
 
-* **Depth** comes from timing, modulation, gesture coupling, and shader variation.
+* **Depth** comes from timing, modulation, gesture coupling, the energy CHOP envelope, sprite-palette coupling, and per-spell parameter tuning.
 
-Avoid adding more archetypes too early. Increase richness through parameterization first.
+If visual variety begins to feel narrow, the first lever is enriching the VFX technique library or the element recipes — both of which broaden Gemini's vocabulary without adding code paths. Adding new shader zones or new tools is a heavier change reserved for capabilities the existing zones can't express.
 
 # **8\. Visual System**
 
@@ -297,7 +301,7 @@ These two modes are designed and tuned independently. Conflating them is a commo
 | **Purpose** | Hold attention; visualize that interpretation is happening; foreshadow the spell. | The spell itself. Decisive, embodied, unmistakably caused by the user. |
 | **Energy** | Low to moderate; gradually escalating as the spell concept clarifies. | High, peaked at the cast moment, then decaying. |
 | **Direction** | Inward / gathering toward the casting origin. | Outward / projected from the casting origin along the spell's vector. |
-| **Specificity** | Generic at first, gaining the spell's identity (color, motion, archetype) as Discovery progresses. | Fully specific to the spell — archetype, element, energy, motion all expressed. |
+| **Specificity** | Generic at first, gaining the spell's identity (color, motion, character) as Discovery progresses. | Fully specific to the spell — element, energy, motion, and shader-authored particle behavior all expressed. |
 | **Failure mode** | If absent or static: user disengages, feels nothing is happening. | If too similar to buildup: the cast feels anticlimactic. |
 
 ## **8.2 Buildup / Formation Visuals**
@@ -322,7 +326,7 @@ The release effect is the spell. It is the climax the entire session has been bu
 
 * Originates from the casting anchor on the body and projects along the vector implied by that origin (forward from hands, outward from heart, along the gaze for eyes, radially for whole body).
 
-* Expresses the full spell archetype — color, motion style, energy, element — at peak intensity.
+* Expresses the full spell character — color, motion style, energy, element — at peak intensity, via the per-spell GLSL Gemini authored.
 
 * Has a clear three-beat shape: ignition → projection → afterglow. The afterglow is where buildup re-establishes itself in a calmer form before the session resolves.
 
@@ -475,7 +479,7 @@ Merlin redirects rather than refuses outright:
 
 *“Magic of harm tends to twist back on its wielder. Perhaps we shape something protective instead.”*
 
-The intent is then mapped onto an adjacent archetype: protection, release, or boundary.
+The intent is then mapped onto an adjacent intent: protection, release, or boundary.
 
 ## **12.2 Impossible Requests**
 
@@ -623,7 +627,7 @@ The arc deliberately leans on perception. Merlin doesn’t ask the user to decla
 
 ## **15.3 Spell Formation**
 
-***\[Spell state\]** intent=release (adjacent: calm); element=water+light; energy=0.3; motion=ripple; archetype=breathing\_mist; casting\_origin=heart.*
+***\[Spell state\]** intent=release (adjacent: calm); element=water+light; energy=0.3; motion=ripple; tone=gentle; casting\_origin=heart.*
 
 **Merlin:** Then we won’t conjure noise. We’ll conjure breath.
 
@@ -683,7 +687,7 @@ This script intentionally illustrates the principle that interpretation precedes
 
 * **The user’s hesitation is treated as data, not a problem.** “I don’t know” becomes the seed of the spell rather than a dead end.
 
-* **Confirmation closes the loop.** Merlin offers a hypothesis (“stillness, not flatness”) and lets the user accept or correct it before committing to a spell archetype.
+* **Confirmation closes the loop.** Merlin offers a hypothesis (“stillness, not flatness”) and lets the user accept or correct it before committing to a spell concept.
 
 * **The body becomes the casting interface.** The hand on the chest is both an emotional gesture and a spatial anchor for the visual system.
 
@@ -699,7 +703,7 @@ This script intentionally illustrates the principle that interpretation precedes
 
 * Multi-user interaction modes (paired or group spells).
 
-* Expanded archetype library, gated on parameter-depth saturation.
+* Expanded VFX technique library and element recipes, gated on observed Gemini hallucination patterns or repeated visual misses.
 
 # **17\. Summary**
 
