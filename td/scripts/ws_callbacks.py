@@ -263,22 +263,27 @@ def _wire_spell_state_uniforms():
             f"if op('/project1/spell_state').findCell('{row}', cols=[0]) is not None else {default}"
         )
 
+    # Each uniform: {'type': 'float'|'vec2'|'vec3'|'vec4', 'components': {x:expr, y:expr,...}}
+    # The 'type' field maps to the glsl op's vec{i}type parameter — without
+    # setting it, TD defaults to 'float' and ignores y/z/w even if they're
+    # populated. That's exactly why uSpriteColor1/2 were compiling as float
+    # despite having all three component values wired.
     UNIFORMS = {
-        'uSpellEnergy': {'x': energy_expr},
-        'uSpellMode':   {'x': mode_expr},
-        'uSpriteColor1': {
+        'uSpellEnergy':   {'type': 'float', 'components': {'x': energy_expr}},
+        'uSpellMode':     {'type': 'float', 'components': {'x': mode_expr}},
+        'uSpriteColor1':  {'type': 'vec3', 'components': {
             'x': _color_expr('sprite_color1_r'),
             'y': _color_expr('sprite_color1_g'),
             'z': _color_expr('sprite_color1_b'),
-        },
-        'uSpriteColor2': {
+        }},
+        'uSpriteColor2':  {'type': 'vec3', 'components': {
             'x': _color_expr('sprite_color2_r'),
             'y': _color_expr('sprite_color2_g'),
             'z': _color_expr('sprite_color2_b'),
-        },
-        'uHandsDistance': {'x': _scalar_expr('hands_distance', '1.0')},
-        'uHandsVelMag':   {'x': _scalar_expr('hands_vel_mag', '0.0')},
-        'uHandsSmooth':   {'x': _scalar_expr('hands_smooth', '0.5')},
+        }},
+        'uHandsDistance': {'type': 'float', 'components': {'x': _scalar_expr('hands_distance', '1.0')}},
+        'uHandsVelMag':   {'type': 'float', 'components': {'x': _scalar_expr('hands_vel_mag', '0.0')}},
+        'uHandsSmooth':   {'type': 'float', 'components': {'x': _scalar_expr('hands_smooth', '0.5')}},
     }
 
     def wire_op(node, slots=8):
@@ -311,7 +316,9 @@ def _wire_spell_state_uniforms():
             else:
                 free_slots.append(i)
 
-        for uniform_name, components in UNIFORMS.items():
+        for uniform_name, spec in UNIFORMS.items():
+            components = spec['components']
+            utype = spec['type']
             if uniform_name in existing:
                 slot = existing[uniform_name]
             elif free_slots:
@@ -321,6 +328,12 @@ def _wire_spell_state_uniforms():
                 # No room — node has all 8 vec slots claimed by other
                 # uniforms. Skip; warning will surface in TD.
                 continue
+            # Set the explicit uniform type. Without this, TD defaults to
+            # 'float' and declares the uniform as `uniform float NAME`
+            # regardless of how many value components are populated.
+            typepar = getattr(node.par, f'vec{slot}type', None)
+            if typepar is not None:
+                typepar.val = utype
             for comp, expr in components.items():
                 valpar = getattr(node.par, f'vec{slot}value{comp}', None)
                 if valpar is not None:
@@ -341,7 +354,23 @@ def _wire_spell_state_uniforms():
         if n is not None:
             wire_op(n)
 
-    print("[WS] Wired uSpellEnergy / uSpellMode uniforms to spell_state (Vectors page)")
+    print("[WS] Wired uSpellEnergy / uSpellMode / uSpriteColor1/2 uniforms to spell_state (Vectors page)")
+    # Diagnostic: confirm uSpriteColor1/2 actually landed on a slot with vec3 type.
+    probe_node = op('/project1/glsl_color')
+    if probe_node is not None:
+        for uniform_name in ('uSpriteColor1', 'uSpriteColor2'):
+            slot = None
+            for i in range(8):
+                np = getattr(probe_node.par, f'vec{i}name', None)
+                if np is not None and np.eval() == uniform_name:
+                    slot = i
+                    break
+            if slot is not None:
+                tp = getattr(probe_node.par, f'vec{slot}type', None)
+                tval = tp.eval() if tp is not None else '<no type param>'
+                print(f"[WS] {uniform_name} -> glsl_color vec{slot} type={tval}")
+            else:
+                print(f"[WS] {uniform_name} NOT_BOUND on glsl_color")
 
 
 def _wire_info_dats():
@@ -583,11 +612,38 @@ def handle_zone_update(dat, msg):
         send_compile_result(dat, zone, False, f"Zone not found: {zone}")
         return
 
-    # Write merged shader to textDAT
+    # Write merged shader to textDAT, then cook the chain in order:
+    #   1. compute_dat — propagate the new text through TD's eval graph
+    #   2. particle1 (parent POP network) — without this, TDIn_PartId()
+    #      and other per-particle intrinsics aren't available to the
+    #      compute shader's compiler, producing the maddening
+    #      `'TDIn_PartId' : no matching overloaded function found`
+    #      error at line 6 even though the snippet is identical to one
+    #      that compiled fine a moment earlier.
+    #   3. glsl_pop — finally compile the merged shader against a fresh
+    #      particle context.
     compute_dat.text = full_shader
+    compute_dat.cook(force=True)
+    particle = op('/project1/particle1')
+    if particle:
+        particle.cook(force=True)
     glsl_pop.cook(force=True)
 
     ok, err = _check_glsl_compile(glsl_pop)
+
+    # One retry pass for the specific TDIn_PartId / per-particle-intrinsic
+    # races that can occur right after pushParticleParams or other
+    # particle1-mutating messages. Re-cooking particle1 then glsl_pop
+    # gives TD a second chance to fully wire up the particle inputs
+    # before compile. Empirically this clears the error in the common
+    # case where the next push happened too quickly after a particle
+    # params update.
+    if not ok and err and 'TDIn_PartId' in err and particle:
+        print(f"[WS] Zone '{zone}' hit TDIn_PartId race — retrying after extra particle1 cook")
+        particle.cook(force=True)
+        glsl_pop.cook(force=True)
+        ok, err = _check_glsl_compile(glsl_pop)
+
     send_compile_result(dat, zone, ok, err)
     if ok:
         print(f"[WS] Zone '{zone}' updated successfully")
@@ -606,8 +662,11 @@ def handle_top_zone_update(dat, zone, full_shader):
         send_compile_result(dat, zone, False, f"TOP zone not found: {zone}")
         return
 
-    # Write shader to code DAT
+    # Write shader to code DAT, then cook in order (code_dat first to
+    # propagate the new text, then glsl_top to read it). See
+    # handle_zone_update for why the explicit code_dat cook matters.
     code_dat.text = full_shader
+    code_dat.cook(force=True)
     glsl_top.cook(force=True)
 
     ok, err = _check_glsl_compile(glsl_top)
@@ -633,8 +692,11 @@ def handle_mat_zone_update(dat, zone, full_shader):
         send_compile_result(dat, zone, False, f"MAT zone not found: {zone}")
         return
 
-    # Write shader to the appropriate code DAT (pixel or vertex)
+    # Write shader to the appropriate code DAT (pixel or vertex), then
+    # cook in order (code_dat first, glsl_mat second). See
+    # handle_zone_update for why the explicit code_dat cook matters.
     code_dat.text = full_shader
+    code_dat.cook(force=True)
     glsl_mat.cook(force=True)
 
     ok, err = _check_glsl_compile(glsl_mat)
