@@ -283,8 +283,9 @@ export function detectImageFormat(imageData: Buffer): DetectedImageFormat {
 
 /**
  * Validate sprite image data — accepts any format TD's moviefilein
- * supports (PNG / JPEG / WebP). Full pixel-level validation would
- * require an image decoding library; for now we trust Gemini.
+ * supports (PNG / JPEG / WebP). Includes a pixel-level check for a
+ * light background (Imagen sometimes ignores the "PURE BLACK
+ * background" instruction in the prompt and returns sprites on white).
  */
 export function validateSpriteImage(
   imageData: Buffer,
@@ -300,16 +301,23 @@ export function validateSpriteImage(
       message: `Unrecognized image format (first 12 bytes: ${imageData.subarray(0, 12).toString('hex')})`,
     };
   }
+  const bg = detectBorderBrightness(imageData);
+  if (bg && bg.isLight) {
+    return {
+      isValid: false,
+      message: `Sprite has a light background (avg border brightness ${bg.avgBrightness.toFixed(2)} of 1.0). Particles need a black/dark background so additive blending composites cleanly. Regenerate with stronger emphasis on "pure black background, RGB 0,0,0".`,
+    };
+  }
   return {
     isValid: true,
-    message: `Valid ${format.toUpperCase()} (basic validation)`,
+    message: `Valid ${format.toUpperCase()} (border bg=${bg ? bg.avgBrightness.toFixed(2) : 'n/a'})`,
     processedData: imageData,
   };
 }
 
 /**
- * Validate flipbook atlas — same format-agnostic check as the sprite
- * validator. Atlas geometry validation would need an image decoder.
+ * Validate flipbook atlas — same format check + background-brightness
+ * check as the single-sprite validator.
  */
 export function validateFlipbookAtlas(
   imageData: Buffer,
@@ -326,11 +334,77 @@ export function validateFlipbookAtlas(
       message: `Unrecognized image format (first 12 bytes: ${imageData.subarray(0, 12).toString('hex')})`,
     };
   }
+  const bg = detectBorderBrightness(imageData);
+  if (bg && bg.isLight) {
+    return {
+      isValid: false,
+      message: `Flipbook atlas has a light background (avg border brightness ${bg.avgBrightness.toFixed(2)} of 1.0). Particles need a black/dark background so additive blending composites cleanly. Regenerate with stronger emphasis on "pure black background, RGB 0,0,0".`,
+    };
+  }
   return {
     isValid: true,
-    message: `Valid ${format.toUpperCase()} atlas (basic validation)`,
+    message: `Valid ${format.toUpperCase()} atlas (border bg=${bg ? bg.avgBrightness.toFixed(2) : 'n/a'})`,
     processedData: imageData,
   };
+}
+
+/**
+ * Sample the four borders of a decoded image and return the average
+ * brightness of those edge pixels (0 = black, 1 = white). Returns null
+ * if Electron's nativeImage couldn't decode the buffer (rare — would
+ * have been caught by detectImageFormat already).
+ *
+ * Used to reject sprites whose background isn't dark enough for
+ * additive blending in TD. Imagen sometimes ignores the prompt's
+ * "PURE BLACK background" instruction and returns sprites on white —
+ * those look broken when composited as particles, so we'd rather
+ * reject + retry than ship a white-bordered atlas.
+ *
+ * Threshold of 0.4 is permissive: a properly-prompted sprite usually
+ * has avg border brightness < 0.1, full-white is 1.0, so 0.4 catches
+ * genuinely-light backgrounds without false-positives on sprites that
+ * happen to extend close to the edges.
+ */
+function detectBorderBrightness(imageData: Buffer): {
+  avgBrightness: number;
+  isLight: boolean;
+} | null {
+  try {
+    // Lazy-load electron to keep this module testable.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { nativeImage } = require('electron') as typeof import('electron');
+    const img = nativeImage.createFromBuffer(imageData);
+    const { width, height } = img.getSize();
+    if (width === 0 || height === 0) return null;
+    const pixels = img.toBitmap(); // BGRA
+    let sum = 0;
+    let count = 0;
+    // Sample every ~32nd pixel along each border so this is O(1) cost
+    // regardless of image size.
+    const step = Math.max(1, Math.floor(Math.min(width, height) / 32));
+    const sample = (x: number, y: number): void => {
+      const i = (y * width + x) * 4;
+      const b = pixels[i];
+      const g = pixels[i + 1];
+      const r = pixels[i + 2];
+      // Rec. 601 luma — close enough for brightness check.
+      sum += 0.299 * r + 0.587 * g + 0.114 * b;
+      count++;
+    };
+    for (let x = 0; x < width; x += step) {
+      sample(x, 0);
+      sample(x, height - 1);
+    }
+    for (let y = 0; y < height; y += step) {
+      sample(0, y);
+      sample(width - 1, y);
+    }
+    if (count === 0) return null;
+    const avgBrightness = sum / count / 255;
+    return { avgBrightness, isLight: avgBrightness > 0.4 };
+  } catch {
+    return null;
+  }
 }
 
 // ============ SPRITE GENERATOR CLASS ============
