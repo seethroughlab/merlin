@@ -113,8 +113,26 @@ export async function runMerlinTurn(
   source: GeminiTurnSource
 ): Promise<TurnResult> {
   const zoneAttempts = new Map<string, number>();
+  // Per-turn dedup state shared across dispatch rounds. Lives at the
+  // run level so a second generate_sprite / request_visual_feedback
+  // in a LATER round (after Gemini sees the first result) is also
+  // refused, not just batch-duplicates.
+  const usedOnceThisTurn = new Set<string>();
 
-  let result = await chat.sendMessage(initialMessage);
+  // Filter the tool registry per-call to only what's allowed in the
+  // current phase. This stops Gemini from emitting tool calls the
+  // runtime gate will just drop (e.g. prepare_casting in discovery)
+  // and saves the round-trip those wasted calls would have cost.
+  // Re-derived each round because tool calls can advance the phase
+  // mid-turn (prepare_casting → ready_to_cast, etc.).
+  const phaseAllowedTools = (): string[] | undefined => {
+    const set = ALLOWED_TOOLS_PER_PHASE[ctx.state.phase];
+    return set ? Array.from(set) : undefined;
+  };
+
+  let result = await chat.sendMessage(initialMessage, {
+    allowedTools: phaseAllowedTools(),
+  });
   emitChatResult(turnId, source, result, 'initial');
 
   const initialText = sanitizeGeminiText(result.text);
@@ -142,6 +160,12 @@ export async function runMerlinTurn(
   // tools (often a 25s Imagen call) run in the background. We forward
   // the chunk to the renderer through ctx.onSpeakChunk and mark it as
   // already streamed so the final returned text doesn't double-speak.
+  // Track whether the streamed-out chunk was Gemini's real ack vs a
+  // pre-canned filler. A filler is just a stall (200ms placeholder
+  // covering Imagen's 25s round-trip) and does NOT count as Gemini's
+  // response for the one-response-per-turn rule — the real ack still
+  // lands as post-tool text and should be spoken.
+  let fillerSpoken = false;
   if (initialText && result.toolCalls.length > 0 && ctx.onSpeakChunk) {
     ctx.onSpeakChunk(initialText);
     streamedText = initialText;
@@ -157,6 +181,7 @@ export async function runMerlinTurn(
     ctx.onSpeakChunk(filler);
     streamedText = filler;
     accumulatedText = filler;
+    fillerSpoken = true;
   }
 
   // Hard cap on tool-dispatch rounds. Without this, when Gemini calls
@@ -180,7 +205,7 @@ export async function runMerlinTurn(
   // If NO chunk fired (Gemini emitted tools-only initially), then a
   // pre-canned filler may have been spoken, and we DO accumulate
   // post-tool text since the filler isn't a real response.
-  const chunkAlreadyResponded = streamedText.length > 0;
+  const chunkAlreadyResponded = streamedText.length > 0 && !fillerSpoken;
   while (result.toolCalls.length > 0 && rounds < MAX_DISPATCH_ROUNDS) {
     toolCallCount += result.toolCalls.length;
     const dispatch = await dispatchToolCalls(
@@ -188,12 +213,15 @@ export async function runMerlinTurn(
       ctx,
       turnId,
       source,
-      zoneAttempts
+      zoneAttempts,
+      usedOnceThisTurn,
     );
     // In Gemini 3 the screenshot from request_visual_feedback rides
     // inside the function response as a multimodal `parts` entry —
     // single round-trip, no separate user-role follow-up needed.
-    result = await chat.sendToolResults(dispatch.toolResults, dispatch.extraImages);
+    result = await chat.sendToolResults(dispatch.toolResults, dispatch.extraImages, {
+      allowedTools: phaseAllowedTools(),
+    });
     const subText = sanitizeGeminiText(result.text);
     // Tag the emission so the LIVE card can label dropped post-tool
     // text distinctly from text that actually reaches the participant.
@@ -205,6 +233,10 @@ export async function runMerlinTurn(
       if (chunkAlreadyResponded) {
         console.log(`[TurnRunner] Dropping post-tool text (chunk already responded): "${subText.slice(0, 80)}${subText.length > 80 ? '…' : ''}"`);
       } else {
+        // Add a separator if appending onto existing text (e.g. filler
+        // followed by the real post-tool ack) so the chat bubble reads
+        // naturally instead of running together.
+        if (accumulatedText && !/[\s]$/.test(accumulatedText)) accumulatedText += ' ';
         accumulatedText += subText;
       }
     }
@@ -220,7 +252,7 @@ export async function runMerlinTurn(
   // already streamed, calling speakStreaming again would invoke
   // stopStreaming() and cut the chunk off mid-playback.
   const finalText = streamedText
-    ? accumulatedText.slice(streamedText.length)
+    ? accumulatedText.slice(streamedText.length).trimStart()
     : accumulatedText;
   return {
     finalText,
@@ -431,14 +463,51 @@ export async function dispatchToolCalls(
   ctx: TurnDispatchContext,
   turnId: string,
   source: GeminiTurnSource,
-  zoneAttempts: Map<string, number>
+  zoneAttempts: Map<string, number>,
+  usedOnceThisTurn?: Set<string>,
 ): Promise<DispatchResult> {
   const results: Array<{ name: string; response: unknown; callId?: string }> = [];
   const extraImages: DispatchImage[] = [];
   const allowed = ALLOWED_TOOLS_PER_PHASE[ctx.state.phase];
 
+  // Per-turn cap on expensive duplicate tool calls. Gemini sometimes
+  // emits 2+ generate_sprite or request_visual_feedback calls within a
+  // single turn — either in one batch, or across multiple dispatch
+  // rounds in the same turn (call once, see the result, call again to
+  // "iterate"). Each duplicate adds 25s (Imagen) or ~2s (screenshot)
+  // of wall-clock time and the result is largely identical. Allow the
+  // first; return a synthetic refusal for the rest so Gemini sees the
+  // constraint and refines on the NEXT turn (after the participant
+  // responds) instead of looping. set_zone_shader and set_spell_profile
+  // are NOT capped — they legitimately run multiple times per turn.
+  const ONCE_PER_TURN = new Set<string>([
+    'generate_sprite',
+    'request_visual_feedback',
+  ]);
+  // If a parent runner passed in a shared set, use that (cross-round
+  // dedup). Otherwise scope to this single dispatch invocation.
+  const usedOnce = usedOnceThisTurn ?? new Set<string>();
+
   for (const call of toolCalls) {
     let response: unknown;
+
+    // Per-turn dedup for expensive tools. Runs before the phase gate
+    // so duplicates don't get a confusing phase-error first.
+    if (ONCE_PER_TURN.has(call.name) && usedOnce.has(call.name)) {
+      console.warn(
+        `[TurnRunner] Dropping duplicate '${call.name}' — already ran once this turn.`
+      );
+      results.push({
+        name: call.name,
+        response: {
+          success: false,
+          error: `'${call.name}' already ran once this turn. Only one per turn is allowed — refine on the next turn after the participant responds.`,
+        },
+        ...(call.id ? { callId: call.id } : {}),
+      });
+      continue;
+    }
+    if (ONCE_PER_TURN.has(call.name)) usedOnce.add(call.name);
 
     // Phase-gate: drop tool calls forbidden by the current phase.
     // Returns a synthetic error response so Gemini sees the constraint
@@ -795,6 +864,45 @@ export async function dispatchToolCalls(
           ? ` A FOURTH inline image is also attached: the ${activeSpriteAssetType ?? ''} sprite that should currently be on every particle (described as "${activeSpriteDescription ?? '(no description)'}"). Compare its texture to what you see in the frames — if the particles don't show this sprite's texture, the sprite load failed or a shader is masking it; investigate before iterating on visual style.`
           : '';
 
+        // Compute a structured verdict from the threshold metrics so
+        // Gemini sees a single explicit pass/fail signal rather than
+        // having to interpret three loosely-named floats. Gemini has a
+        // tendency to gloss over numbers and declare the spell good
+        // from the screenshot alone — `status` makes the failure
+        // unambiguous in the response.
+        const visibleParticles = v?.visibleParticles ?? null;
+        const avgBrightness = v?.avgBrightness ?? null;
+        const renderDiff = v?.renderVsWebcamDiff ?? null;
+        let verdictStatus: 'invisible' | 'weak' | 'ok' = 'ok';
+        let verdictReason: string | undefined;
+        if (visibleParticles !== null && visibleParticles < 10) {
+          verdictStatus = 'invisible';
+          verdictReason = `visible_particles=${visibleParticles} — particles are not rendering at all`;
+        } else if (avgBrightness !== null && avgBrightness < 0.005) {
+          verdictStatus = 'invisible';
+          verdictReason = `avg_brightness=${avgBrightness.toFixed(4)} — particles render fully transparent or pure black`;
+        } else if (renderDiff !== null && renderDiff < 0.005) {
+          verdictStatus = 'invisible';
+          verdictReason = `render_vs_webcam_diff=${renderDiff.toFixed(4)} — final composite is essentially the unchanged webcam, particles contribute no visible pixels`;
+        } else if (
+          (visibleParticles !== null && visibleParticles < 50) ||
+          (avgBrightness !== null && avgBrightness < 0.02) ||
+          (renderDiff !== null && renderDiff < 0.01)
+        ) {
+          verdictStatus = 'weak';
+          const parts: string[] = [];
+          if (visibleParticles !== null && visibleParticles < 50) parts.push(`visible_particles=${visibleParticles} (<50)`);
+          if (avgBrightness !== null && avgBrightness < 0.02) parts.push(`avg_brightness=${avgBrightness.toFixed(4)} (<0.02)`);
+          if (renderDiff !== null && renderDiff < 0.01) parts.push(`render_vs_webcam_diff=${renderDiff.toFixed(4)} (<0.01)`);
+          verdictReason = `below threshold: ${parts.join(', ')}`;
+        }
+
+        const verdictInstruction = verdictStatus === 'invisible'
+          ? ' VERDICT: status="invisible" — the spell is BROKEN. Particles are not visible on screen. The screenshot may look plausible but the metrics are ground truth. Do NOT declare the spell ready. Refine force_field, color_over_life, or particle_params via set_zone_shader before any further conversation.'
+          : verdictStatus === 'weak'
+            ? ' VERDICT: status="weak" — the spell is rendering but barely. The participant will not see a clear effect. Consider one refinement round before proceeding.'
+            : ' VERDICT: status="ok" — the metrics clear the visibility thresholds.';
+
         response = {
           success: true,
           intent,
@@ -806,14 +914,16 @@ export async function dispatchToolCalls(
             fps: m?.fps ?? null,
             particle_count: m?.particleCount ?? null,
             coverage: m?.coverage ?? null,
-            visible_particles: v?.visibleParticles ?? null,
-            avg_brightness: v?.avgBrightness ?? null,
-            render_vs_webcam_diff: v?.renderVsWebcamDiff ?? null,
+            visible_particles: visibleParticles,
+            avg_brightness: avgBrightness,
+            render_vs_webcam_diff: renderDiff,
           },
+          status: verdictStatus,
+          ...(verdictReason ? { status_reason: verdictReason } : {}),
           active_sprite: activeSpriteAttached
             ? { description: activeSpriteDescription, assetType: activeSpriteAssetType }
             : null,
-          instruction: baseInstruction + spriteInstruction,
+          instruction: baseInstruction + spriteInstruction + verdictInstruction,
         };
         break;
       }

@@ -67,7 +67,7 @@ describe('testLiveSpell', () => {
     const result = await testLiveSpell({ prompt: 'a protective shield' });
 
     expect(mockInitChat).toHaveBeenCalled();
-    expect(mockSendMessage).toHaveBeenCalledWith('a protective shield');
+    expect(mockSendMessage).toHaveBeenCalledWith('a protective shield', expect.any(Object));
     expect(result.success).toBe(true);
     expect(result.toolCallCount).toBe(0);
     expect(result.finalText).toMatch(/protective shield/);

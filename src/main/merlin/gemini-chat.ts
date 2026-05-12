@@ -99,6 +99,36 @@ interface ToolResultImage {
 export class MerlinChat {
   private chat: Chat | null = null;
   private history: Content[] = [];
+  private mode: ChatMode = 'merlin';
+
+  /**
+   * Build a per-call config that overrides the chat-level tool registry
+   * with a filtered subset. Used to enforce per-phase tool gating at
+   * the API level — Gemini physically can't call a tool that isn't in
+   * the per-call `tools` list, so we don't waste a round-trip on
+   * disallowed calls and the runtime gate becomes a safety net.
+   *
+   * Per-call config in @google/genai does NOT inherit from chat-level
+   * config — we have to re-supply systemInstruction + toolConfig.
+   */
+  private buildPerCallConfig(allowedToolNames: string[]): Record<string, unknown> {
+    const baseTools = this.mode === 'visual-author' ? MERLIN_VISUAL_AUTHOR_TOOLS : MERLIN_TOOLS;
+    const filtered = baseTools.filter(t => allowedToolNames.includes(t.name as string));
+    const systemInstruction =
+      this.mode === 'visual-author' ? MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT : MERLIN_SYSTEM_PROMPT;
+    console.log(`[MerlinChat] Per-call tools filter: ${filtered.length}/${baseTools.length} tools allowed → [${filtered.map(t => t.name).join(', ')}]`);
+    return {
+      systemInstruction,
+      ...(filtered.length > 0
+        ? { tools: [{ functionDeclarations: filtered }] }
+        : {}),
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingConfigMode.AUTO,
+        },
+      },
+    };
+  }
 
   /**
    * Start a new chat session with an image of the person
@@ -106,6 +136,7 @@ export class MerlinChat {
    */
   async startChatWithImage(imageBase64: string): Promise<ChatTurnResult> {
     this.history = [];
+    this.mode = 'merlin';
     this.chat = buildChat(this.history);
 
     const messageParts: Part[] = [
@@ -134,6 +165,7 @@ export class MerlinChat {
    */
   async startChat(): Promise<ChatTurnResult> {
     this.history = [];
+    this.mode = 'merlin';
     this.chat = buildChat(this.history);
 
     const result = await this.chat.sendMessage({ message: INTRO_WITH_IMAGE_PROMPT });
@@ -161,19 +193,34 @@ export class MerlinChat {
    */
   initChat(opts: { mode?: ChatMode } = {}): void {
     const mode = opts.mode ?? 'visual-author';
+    this.mode = mode;
     this.history = [];
     this.chat = buildChat(this.history, mode);
   }
 
   /**
    * Send a plain user-text message and get a response.
+   *
+   * Optional `allowedTools` filters the tool registry to a subset for
+   * this single call. Used by the live session to enforce per-phase
+   * tool gating at the API level — Gemini physically can't call tools
+   * outside the allowed list, so we don't burn a round-trip on
+   * disallowed calls (e.g. prepare_casting in discovery).
    */
-  async sendMessage(message: string): Promise<ChatTurnResult> {
+  async sendMessage(
+    message: string,
+    opts: { allowedTools?: string[] } = {},
+  ): Promise<ChatTurnResult> {
     if (!this.chat) {
       throw new Error('Chat not started - call startChat() first');
     }
 
-    const result = await this.chat.sendMessage({ message });
+    const config = opts.allowedTools
+      ? this.buildPerCallConfig(opts.allowedTools)
+      : undefined;
+    const result = await this.chat.sendMessage(
+      config ? { message, config: config as never } : { message },
+    );
     const response = parseResult(result);
 
     this.history.push(
@@ -201,7 +248,8 @@ export class MerlinChat {
    */
   async sendToolResults(
     results: Array<{ name: string; response: unknown; callId?: string }>,
-    images: ToolResultImage[] = []
+    images: ToolResultImage[] = [],
+    opts: { allowedTools?: string[] } = {},
   ): Promise<ChatTurnResult> {
     if (!this.chat) {
       throw new Error('Chat not started');
@@ -238,7 +286,12 @@ export class MerlinChat {
       };
     });
 
-    const result = await this.chat.sendMessage({ message: parts });
+    const config = opts.allowedTools
+      ? this.buildPerCallConfig(opts.allowedTools)
+      : undefined;
+    const result = await this.chat.sendMessage(
+      config ? { message: parts, config: config as never } : { message: parts },
+    );
     return parseResult(result);
   }
 
