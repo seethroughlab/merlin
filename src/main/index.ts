@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join, dirname } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 // OSC removed - all communication now via WebSocket (td-bridge)
 import { createSpoutSender, wireWindowToSender, closeSpout, resizeSpoutSender } from './spout';
 import { initGemini, analyzeMicroExpressions, analyzeBodyLanguage, interpretVoiceCommand, isGeminiAvailable } from './gemini';
@@ -14,6 +14,8 @@ import { applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-flip
 import { testLiveSpell } from './merlin/test-live-spell';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
 import { resetTDBaseline } from './merlin/reset-td';
+import { generateParticipantLine, isParticipantLLMAvailable, type ParticipantRequest } from './participant';
+import { startConversationTestTrigger } from './conversation-test-trigger';
 import { saveSessionState, loadSessionState, applySessionState, listSavedSessions, deleteSession } from './merlin/state-persistence';
 import { pushFaceEvent, clearFaceEventBuffer } from './merlin/face-event-buffer';
 import {
@@ -277,6 +279,12 @@ function createMainWindow(): void {
       maskWindow.close();
     }
   });
+
+  // HTTP trigger for the Conversation Tester (Shift+T → Conversation).
+  // Lets Claude (or any external caller) kick off a preset run via
+  // `curl -X POST http://localhost:8765/run-conversation -d '{"presetId":"sarah-phd"}'`
+  // and get back the saved transcript path. Started once mainWindow exists.
+  startConversationTestTrigger(() => mainWindow);
 }
 
 /**
@@ -485,6 +493,43 @@ ipcMain.handle('get-settings', () => {
 ipcMain.handle('save-setting', (_event, key: string, value: unknown) => {
   setSetting(key as keyof ReturnType<typeof getAllSettings>, value as never);
   return true;
+});
+
+// Claude-as-participant — Conversation Tester asks main to generate the
+// next participant utterance from the conversation so far. Returns null
+// if no ANTHROPIC_API_KEY is set, so the renderer can fall back to the
+// preset's canned script.
+ipcMain.handle('generate-participant-line', async (_event, req: ParticipantRequest) => {
+  try {
+    const line = await generateParticipantLine(req);
+    return { ok: true, line, available: isParticipantLLMAvailable() };
+  } catch (err) {
+    console.error('[Participant] generate failed:', err);
+    return { ok: false, error: String(err), available: isParticipantLLMAvailable() };
+  }
+});
+
+ipcMain.handle('participant-llm-available', () => {
+  return isParticipantLLMAvailable();
+});
+
+// Persist a Conversation Tester transcript to disk so Claude can read
+// it without the dev having to copy/paste from the browser console.
+// Files land in <repo>/logs/conversation-test-<timestamp>.json.
+ipcMain.handle('save-conversation-transcript', (_event, payload: { id: string; json: string }) => {
+  try {
+    const logsDir = join(process.cwd(), 'logs');
+    if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
+    const safeId = (payload.id || 'unnamed').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = join(logsDir, `conversation-test-${stamp}-${safeId}.json`);
+    writeFileSync(path, payload.json, 'utf8');
+    console.log(`[ConversationTest] Transcript saved: ${path}`);
+    return { ok: true, path };
+  } catch (err) {
+    console.error('[ConversationTest] Failed to save transcript:', err);
+    return { ok: false, error: String(err) };
+  }
 });
 
 // IPC handler for portrait mode - broadcast to all windows and resize Spout

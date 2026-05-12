@@ -211,6 +211,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-reset-td-baseline');
   },
 
+  // Persist a Conversation Tester transcript to <repo>/logs/ so it's
+  // readable from outside the Electron renderer (the dev console isn't
+  // accessible to Claude).
+  saveConversationTranscript: (payload: { id: string; json: string }): Promise<{ ok: boolean; path?: string; error?: string }> => {
+    return ipcRenderer.invoke('save-conversation-transcript', payload);
+  },
+
+  // Claude-as-participant for the Conversation Tester. Returns the next
+  // in-character utterance given the conversation so far, or null if
+  // ANTHROPIC_API_KEY isn't configured (renderer falls back to canned
+  // script in that case).
+  generateParticipantLine: (req: {
+    characterDescription: string;
+    faceDescription?: string;
+    bodyDescription?: string;
+    expectedSpell?: { intent: string; element: string };
+    history: Array<{ speaker: 'merlin' | 'participant'; text: string }>;
+    closing?: boolean;
+  }): Promise<{ ok: boolean; line?: string | null; error?: string; available: boolean }> => {
+    return ipcRenderer.invoke('generate-participant-line', req);
+  },
+  participantLLMAvailable: (): Promise<boolean> => {
+    return ipcRenderer.invoke('participant-llm-available');
+  },
+
+  // Conversation Tester HTTP trigger — main fires this event when an
+  // external caller POSTs to /run-conversation. Renderer responds via
+  // sendConversationTestComplete once the run finishes.
+  onConversationTestTrigger: (callback: (payload: { requestId: string; presetId: string; claudeDriven: boolean }) => void): (() => void) => {
+    const handler = (_event: unknown, payload: { requestId: string; presetId: string; claudeDriven: boolean }) => callback(payload);
+    ipcRenderer.on('conversation-test-trigger', handler);
+    return () => ipcRenderer.removeAllListeners('conversation-test-trigger');
+  },
+  sendConversationTestComplete: (payload: { requestId: string; transcriptPath?: string; error?: string }) => {
+    ipcRenderer.send('conversation-test-complete', payload);
+  },
+
   // ============ SESSION PERSISTENCE ============
 
   merlinListSessions: (): Promise<SessionSummary[]> => {
@@ -226,11 +263,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('merlin-delete-session', sessionId);
   },
 
-  // Listen for Gemini conversation events (used by the unified sidebar)
+  // Listen for Gemini conversation events (used by the unified sidebar
+  // AND by the Conversation Tester runner). Returns a remover that
+  // removes ONLY this listener — not all listeners on the channel, or
+  // the runner's cleanup would silence the sidebar's chips too.
   onGeminiConversation: (callback: (turn: Partial<GeminiTurn>) => void) => {
     const handler = (_event: unknown, turn: Partial<GeminiTurn>) => callback(turn);
     ipcRenderer.on('gemini-conversation', handler);
-    return () => ipcRenderer.removeAllListeners('gemini-conversation');
+    return () => ipcRenderer.removeListener('gemini-conversation', handler);
   },
 
   // ============ TTS ============
@@ -328,6 +368,18 @@ declare global {
       merlinTestGetMirroredState: () => Promise<MirroredTDState>;
       merlinTestLiveSpell: (input: LiveSpellTestInput) => Promise<LiveSpellTestResult>;
       merlinResetTDBaseline: () => Promise<ResetTDResult>;
+      saveConversationTranscript: (payload: { id: string; json: string }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      generateParticipantLine: (req: {
+        characterDescription: string;
+        faceDescription?: string;
+        bodyDescription?: string;
+        expectedSpell?: { intent: string; element: string };
+        history: Array<{ speaker: 'merlin' | 'participant'; text: string }>;
+        closing?: boolean;
+      }) => Promise<{ ok: boolean; line?: string | null; error?: string; available: boolean }>;
+      participantLLMAvailable: () => Promise<boolean>;
+      onConversationTestTrigger: (callback: (payload: { requestId: string; presetId: string; claudeDriven: boolean }) => void) => () => void;
+      sendConversationTestComplete: (payload: { requestId: string; transcriptPath?: string; error?: string }) => void;
       merlinListSessions: () => Promise<SessionSummary[]>;
       merlinSaveSession: (name?: string) => Promise<{ success: boolean; sessionId?: string; error?: string }>;
       merlinLoadSession: (sessionId: string) => Promise<{ success: boolean; spell?: SpellState; zoneResults?: Record<string, boolean>; error?: string }>;

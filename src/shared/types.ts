@@ -324,6 +324,53 @@ export interface LiveSpellTestPreset {
 }
 
 /**
+ * Multi-turn participant script for the Conversation tab.
+ * Each preset describes a fictional character and 4-5 utterances they
+ * might say across a session. The runner feeds these lines through the
+ * real `merlinProcessSpeech` IPC path, bypassing Whisper.
+ *
+ * Special script line markers:
+ * - `[CAST]` fires `merlinTriggerCast` directly.
+ * - `[END]`  fires `merlinTriggerEnd`.
+ */
+export interface ConversationTestPreset {
+  id: string;
+  label: string;
+  description: string;
+  expectedSpell?: { intent: string; element: string };
+  /**
+   * Static face + body "analysis" pushed via merlinUpdateAnalysis
+   * before each turn so Gemini sees the character's emotional + postural
+   * state. Replaces what MediaPipe + analyzeMicroExpressions would
+   * produce in the live mic path. Hand-written per character so test
+   * runs are deterministic.
+   */
+  expectedFace?: Partial<MicroExpressionAnalysis>;
+  expectedBody?: Partial<BodyLanguageAnalysis>;
+  script: string[];
+}
+
+/**
+ * Per-turn capture of what happened during a scripted conversation
+ * test. Returned by the runner so the panel can render a transcript
+ * and `console.log` a JSON dump that Claude can read to evaluate.
+ */
+export interface ConversationTurnSnapshot {
+  index: number;
+  participantLine: string;
+  /** Full Gemini text for the turn (sanitized, no stage directions). */
+  geminiText: string;
+  phaseBefore: string;
+  phaseAfter: string;
+  toolCalls: Array<{ name: string; args: Record<string, unknown> }>;
+  spell: SpellState;
+  faceActivity: string | null;
+  durationMs: number;
+  /** True when the line was a `[CAST]` or `[END]` marker (no Gemini round-trip). */
+  marker?: 'cast' | 'end';
+}
+
+/**
  * Individual zone shader result
  */
 export interface ZoneShaderResult {

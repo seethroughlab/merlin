@@ -85,9 +85,11 @@ import type {
   GeminiPushResult,
   GeminiRetryMarker,
   GeminiTurnSource,
+  ConversationTurnSnapshot,
 } from '../shared/types';
 import { SHADER_TEST_PRESETS } from '../shared/test-shader-presets';
 import { LIVE_SPELL_PRESETS } from '../shared/live-spell-presets';
+import { CONVERSATION_TEST_PRESETS } from '../shared/conversation-test-presets';
 import { transcriptContains } from '../shared/transcript-match';
 
 // DOM Elements
@@ -155,6 +157,13 @@ let merlinIsProcessing = false;
 // bypassing the slow merlin-process-speech / Gemini round-trip.
 let armedMagicWord: string | null = null;
 let armedEndWord: string | null = null;
+
+// Conversation Tester (Shift+T → Conversation tab) sets this to mute
+// all TTS during scripted runs so an end-to-end conversation walks
+// through in seconds without anyone having to listen to Merlin speak.
+// The chunk handler and post-turn spokenText handler both early-return
+// when this is true.
+let testModeMuteTts = false;
 
 // In-flight chunk-path TTS promise. The chunk handler is fire-and-forget
 // (it starts speaking as soon as Gemini emits its initial text during
@@ -1454,6 +1463,7 @@ function createTestShaderPanel(): HTMLElement {
         <button class="test-shader-tab" data-tab="sprites">Sprites</button>
         <button class="test-shader-tab" data-tab="flipbook">Flipbook</button>
         <button class="test-shader-tab" data-tab="live-spell">Live Spell</button>
+        <button class="test-shader-tab" data-tab="conversation">Conversation</button>
         <button class="test-shader-tab" data-tab="sessions">Sessions</button>
       </div>
       <button class="close-btn">×</button>
@@ -1574,6 +1584,30 @@ function createTestShaderPanel(): HTMLElement {
       <div id="ls-results" class="test-shader-results"></div>
     </div>
 
+    <div class="test-shader-tab-content" data-tab="conversation" style="display: none;">
+      <div class="test-shader-config conversation-form">
+        <div class="config-row">
+          <label>Character:</label>
+          <select id="cv-preset">
+            ${CONVERSATION_TEST_PRESETS.map(p => `<option value="${p.id}">${p.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="config-row conversation-opts">
+          <label class="conversation-opt"><input type="checkbox" id="cv-mute-tts" checked> Mute TTS</label>
+          <label class="conversation-opt"><input type="checkbox" id="cv-claude-driven" checked> Claude-driven (in-character)</label>
+          <label class="conversation-opt">Pause (s): <input type="number" id="cv-pause" value="1.0" step="0.1" min="0" style="width: 60px"></label>
+        </div>
+        <div class="conversation-buttons">
+          <button id="cv-run-btn" class="generate-btn">Run Script</button>
+          <button id="cv-stop-btn" class="generate-btn" disabled>Stop</button>
+          <button id="cv-copy-btn" class="generate-btn" disabled>Copy Transcript</button>
+        </div>
+      </div>
+      <div id="cv-preview" class="conversation-preview"></div>
+      <div id="cv-status" class="test-shader-status"></div>
+      <div id="cv-transcript" class="conversation-transcript"></div>
+    </div>
+
     <div class="test-shader-tab-content" data-tab="sessions" style="display: none;">
       <div class="test-shader-config">
         <div class="config-row">
@@ -1630,6 +1664,44 @@ function createTestShaderPanel(): HTMLElement {
     const preset = LIVE_SPELL_PRESETS.find(p => p.id === lsPresetSelect.value);
     if (preset) lsPromptEl.value = preset.prompt;
   });
+
+  // === Conversation tab event listeners ===
+  const cvPresetSelect = panel.querySelector('#cv-preset') as HTMLSelectElement;
+  const cvPreviewEl = panel.querySelector('#cv-preview') as HTMLDivElement;
+  const renderPreview = () => {
+    const preset = CONVERSATION_TEST_PRESETS.find(p => p.id === cvPresetSelect.value);
+    if (!preset) {
+      cvPreviewEl.innerHTML = '';
+      return;
+    }
+    const spellLine = preset.expectedSpell
+      ? `<div class="cv-preview-meta">expected: ${escapeHtml(preset.expectedSpell.intent)} / ${escapeHtml(preset.expectedSpell.element)}</div>`
+      : '';
+    const faceLine = preset.expectedFace?.primaryEmotion
+      ? `<div class="cv-preview-meta">face: ${escapeHtml(preset.expectedFace.primaryEmotion)}${preset.expectedFace.secondaryEmotion ? ' + ' + escapeHtml(preset.expectedFace.secondaryEmotion) : ''}</div>`
+      : '';
+    const bodyLine = preset.expectedBody?.primaryPosture
+      ? `<div class="cv-preview-meta">body: ${escapeHtml(preset.expectedBody.primaryPosture)}</div>`
+      : '';
+    cvPreviewEl.innerHTML = `
+      <div class="cv-preview-desc">${escapeHtml(preset.description)}</div>
+      ${spellLine}
+      ${faceLine}
+      ${bodyLine}
+      <ol class="cv-preview-script">
+        ${preset.script.map(line => `<li>${escapeHtml(line)}</li>`).join('')}
+      </ol>
+    `;
+  };
+  cvPresetSelect.addEventListener('change', renderPreview);
+  // Initial fill — the first option is selected by default.
+  renderPreview();
+
+  const cvRunBtn = panel.querySelector('#cv-run-btn') as HTMLButtonElement;
+  const cvStopBtn = panel.querySelector('#cv-stop-btn') as HTMLButtonElement;
+  const cvCopyBtn = panel.querySelector('#cv-copy-btn') as HTMLButtonElement;
+  cvRunBtn.addEventListener('click', () => runConversationFromPanel(panel));
+  cvStopBtn.addEventListener('click', () => requestConversationStop());
 
   // === Sessions tab event listeners ===
   const sessionSaveBtn = panel.querySelector('#session-save-btn') as HTMLButtonElement;
@@ -2117,6 +2189,400 @@ async function runLiveSpell(): Promise<void> {
 
   btn.disabled = false;
   btn.textContent = 'Run Full Creative Process';
+}
+
+// ============ CONVERSATION TESTER ============
+//
+// Multi-turn scripted participant playback. The runner walks a list of
+// utterances through the real Merlin pipeline (merlinStart →
+// merlinProcessSpeech per line → merlinEnd) and bypasses Whisper. TTS
+// is muted via `testModeMuteTts` so the whole conversation runs in
+// seconds. Tool calls per turn are captured by listening to
+// `gemini-conversation` events emitted by the live session.
+
+let conversationRunActive = false;
+let conversationRunStopRequested = false;
+
+interface ConversationRunOpts {
+  /** Slug for the saved transcript filename (e.g. preset id or "custom"). */
+  id: string;
+  character: string;
+  script: string[];
+  muteTts: boolean;
+  pauseMs: number;
+  /** Synthetic face analysis pushed before each turn. Replaces MediaPipe. */
+  face?: Partial<MicroExpressionAnalysis>;
+  /** Synthetic body analysis pushed before each turn. Replaces MediaPipe. */
+  body?: Partial<BodyLanguageAnalysis>;
+  /**
+   * When true, the runner uses the first script line as an opener and
+   * then asks Claude (via main IPC) to generate each subsequent
+   * participant utterance in-character. Falls back to the canned
+   * script silently if the IPC reports no Anthropic key is configured.
+   */
+  claudeDriven?: boolean;
+  /** Used to ask Claude to lean toward this spell shape. */
+  expectedSpell?: { intent: string; element: string };
+  onTurnComplete: (turn: ConversationTurnSnapshot) => void;
+  onStatus: (msg: string) => void;
+}
+
+interface ConversationRunResult {
+  snapshots: ConversationTurnSnapshot[];
+  transcriptPath?: string;
+}
+
+async function runConversationTest(opts: ConversationRunOpts): Promise<ConversationRunResult> {
+  if (conversationRunActive) throw new Error('A conversation test is already running');
+  if (merlinModeActive) {
+    opts.onStatus('Stopping live Merlin session before test…');
+    await stopMerlinMode();
+    // stopMerlinMode triggers a 3s UI fade — wait a beat so the next
+    // start gets a clean slate.
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  conversationRunActive = true;
+  conversationRunStopRequested = false;
+  testModeMuteTts = opts.muteTts;
+
+  // Collect gemini-conversation events emitted between merlinProcessSpeech
+  // start and resolution. We tag the start of each turn with a sentinel
+  // and pull events that arrived after it.
+  const liveEvents: Partial<GeminiTurn>[] = [];
+  const removeListener = window.electronAPI.onGeminiConversation((turn) => {
+    if (turn.source === 'live') liveEvents.push(turn);
+  });
+
+  const snapshots: ConversationTurnSnapshot[] = [];
+
+  // Conversation history for the Claude-as-participant path. We log
+  // every Merlin response and every participant line here so Claude
+  // can produce a coherent in-character reply each turn.
+  const history: Array<{ speaker: 'merlin' | 'participant'; text: string }> = [];
+
+  // Indexes of script lines that drive a real conversational turn (i.e.
+  // not [CAST]/[END] markers). Used to figure out which line is the
+  // first conversational turn (use canned opener) and which is the
+  // last (tell Claude to wind down).
+  const conversationalIdxs = opts.script
+    .map((line, idx) => ({ line: line.trim(), idx }))
+    .filter(({ line }) => line && line !== '[CAST]' && line !== '[END]')
+    .map(({ idx }) => idx);
+  const firstConversationalIdx = conversationalIdxs[0];
+  const lastConversationalIdx = conversationalIdxs[conversationalIdxs.length - 1];
+
+  // Phase + spell flow through the per-call response objects — no need
+  // to subscribe to onMerlinUpdate. merlinStart, merlinProcessSpeech,
+  // merlinTriggerCast and merlinTriggerEnd all return the current
+  // phase, and merlinStart/merlinProcessSpeech additionally return the
+  // current SpellState.
+  let currentPhase: string;
+  let currentSpell: SpellState;
+  let claudeAvailable = opts.claudeDriven === true;
+
+  // Make the merlin-conversation sidebar visible so the chat-history
+  // bubbles we add per turn are actually seen. Live mode does this via
+  // startMerlinMode; the runner sidesteps that and calls merlinStart
+  // directly, so we have to flip the classes ourselves.
+  const sidebarEl = document.getElementById('sidebar');
+  const merlinPanelEl = document.getElementById('merlin-panel');
+  sidebarEl?.classList.add('merlin-active');
+  merlinPanelEl?.classList.add('active');
+  clearMerlinUI();
+
+  try {
+    opts.onStatus('Starting Merlin session…');
+    const intro = await window.electronAPI.merlinStart();
+    currentPhase = intro.phase;
+    currentSpell = intro.spell;
+    if (intro.text) {
+      addMerlinMessage('assistant', intro.text);
+      history.push({ speaker: 'merlin', text: intro.text });
+    }
+    // Drain intro-time gemini events so they don't get attributed to turn 1.
+    await new Promise(r => setTimeout(r, 50));
+    liveEvents.length = 0;
+
+    for (let i = 0; i < opts.script.length; i++) {
+      if (conversationRunStopRequested) {
+        opts.onStatus('Stopped by user');
+        break;
+      }
+      let line = opts.script[i].trim();
+      if (!line) continue;
+
+      const phaseBefore = currentPhase;
+      const t0 = performance.now();
+
+      // Marker handling: [CAST] / [END] bypass Gemini and fire IPC directly.
+      if (line === '[CAST]') {
+        opts.onStatus(`Turn ${i + 1}: triggering cast`);
+        const result = await window.electronAPI.merlinTriggerCast();
+        if (result.phase) currentPhase = result.phase;
+        await new Promise(r => setTimeout(r, 150)); // let downstream effects propagate
+        const snap: ConversationTurnSnapshot = {
+          index: i + 1,
+          participantLine: '[CAST]',
+          geminiText: result.ok ? '(cast triggered)' : `(cast skipped: ${result.reason || 'unknown'})`,
+          phaseBefore,
+          phaseAfter: currentPhase,
+          toolCalls: [],
+          spell: currentSpell,
+          faceActivity: null,
+          durationMs: Math.round(performance.now() - t0),
+          marker: 'cast',
+        };
+        snapshots.push(snap);
+        opts.onTurnComplete(snap);
+        if (opts.pauseMs > 0) await new Promise(r => setTimeout(r, opts.pauseMs));
+        continue;
+      }
+      if (line === '[END]') {
+        opts.onStatus(`Turn ${i + 1}: triggering end`);
+        const result = await window.electronAPI.merlinTriggerEnd();
+        if (result.phase) currentPhase = result.phase;
+        await new Promise(r => setTimeout(r, 150));
+        const snap: ConversationTurnSnapshot = {
+          index: i + 1,
+          participantLine: '[END]',
+          geminiText: result.ok ? '(play closed)' : `(end skipped: ${result.reason || 'unknown'})`,
+          phaseBefore,
+          phaseAfter: currentPhase,
+          toolCalls: [],
+          spell: currentSpell,
+          faceActivity: null,
+          durationMs: Math.round(performance.now() - t0),
+          marker: 'end',
+        };
+        snapshots.push(snap);
+        opts.onTurnComplete(snap);
+        if (opts.pauseMs > 0) await new Promise(r => setTimeout(r, opts.pauseMs));
+        continue;
+      }
+
+      // Claude-as-participant: replace canned mid-conversation lines
+      // with an in-character utterance generated from history. Keep
+      // the first conversational line as the opener so each preset has
+      // a consistent starting beat. If the IPC reports no API key (or
+      // the call fails) we fall through to the canned script.
+      const isFirstTurn = i === firstConversationalIdx;
+      const isClosingTurn = i === lastConversationalIdx;
+      if (claudeAvailable && !isFirstTurn) {
+        opts.onStatus(`Turn ${i + 1}: asking Claude for participant line…`);
+        const result = await window.electronAPI.generateParticipantLine({
+          characterDescription: opts.character,
+          faceDescription: opts.face?.description,
+          bodyDescription: opts.body?.description,
+          expectedSpell: opts.expectedSpell,
+          history,
+          closing: isClosingTurn,
+        });
+        if (!result.available) {
+          console.warn('[ConversationTest] ANTHROPIC_API_KEY not set; falling back to canned script.');
+          claudeAvailable = false;
+        } else if (result.ok && result.line) {
+          line = result.line;
+        } else {
+          console.warn('[ConversationTest] Claude returned no line; falling back to canned script:', result.error);
+        }
+      }
+
+      opts.onStatus(`Turn ${i + 1}/${opts.script.length}: ${line.slice(0, 60)}${line.length > 60 ? '…' : ''}`);
+      // Mirror the live mic path: surface the participant's line in the
+      // sidebar's merlin-conversation chat history so it's visible
+      // alongside Merlin's replies (the live LIVE Gemini card hides
+      // userPrompt by design — this is the canonical "what did the
+      // participant say" bubble).
+      addMerlinMessage('user', line);
+      history.push({ speaker: 'participant', text: line });
+      // Push the character's synthetic face + body analysis so Gemini's
+      // per-turn context contains the same shape it would have from
+      // MediaPipe + analyzeMicroExpressions in the live mic path.
+      if (opts.face || opts.body) {
+        window.electronAPI.merlinUpdateAnalysis({
+          face: opts.face,
+          body: opts.body,
+        });
+      }
+      const turnStartIdx = liveEvents.length;
+      const response = await window.electronAPI.merlinProcessSpeech(line);
+      // Brief grace period so any trailing post-tool events flush.
+      await new Promise(r => setTimeout(r, 50));
+      if (response.text) {
+        addMerlinMessage('assistant', response.text);
+        history.push({ speaker: 'merlin', text: response.text });
+      }
+
+      const turnEvents = liveEvents.slice(turnStartIdx);
+      const toolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      let faceActivity: string | null = null;
+      for (const ev of turnEvents) {
+        if (ev.toolCalls) {
+          for (const tc of ev.toolCalls) {
+            toolCalls.push({ name: tc.name, args: tc.args });
+          }
+        }
+        if (ev.faceActivity) faceActivity = ev.faceActivity;
+      }
+
+      currentPhase = response.phase;
+      currentSpell = response.spell;
+      const snap: ConversationTurnSnapshot = {
+        index: i + 1,
+        participantLine: line,
+        geminiText: response.text,
+        phaseBefore,
+        phaseAfter: response.phase,
+        toolCalls,
+        spell: response.spell,
+        faceActivity,
+        durationMs: Math.round(performance.now() - t0),
+      };
+      snapshots.push(snap);
+      opts.onTurnComplete(snap);
+
+      if (opts.pauseMs > 0 && i < opts.script.length - 1) {
+        await new Promise(r => setTimeout(r, opts.pauseMs));
+      }
+    }
+
+    opts.onStatus('Ending Merlin session…');
+    try {
+      await window.electronAPI.merlinEnd();
+    } catch (err) {
+      console.warn('[ConversationTest] merlinEnd error:', err);
+    }
+  } finally {
+    removeListener();
+    testModeMuteTts = false;
+    conversationRunActive = false;
+    conversationRunStopRequested = false;
+  }
+
+  const transcriptJson = JSON.stringify({
+    id: opts.id,
+    character: opts.character,
+    runAt: new Date().toISOString(),
+    muteTts: opts.muteTts,
+    pauseMs: opts.pauseMs,
+    claudeDriven: opts.claudeDriven === true,
+    snapshots,
+  }, null, 2);
+  console.log('[ConversationTest] Full transcript:', transcriptJson);
+  let transcriptPath: string | undefined;
+  try {
+    const saveResult = await window.electronAPI.saveConversationTranscript({
+      id: opts.id,
+      json: transcriptJson,
+    });
+    if (saveResult.ok) {
+      transcriptPath = saveResult.path;
+      opts.onStatus(`Saved transcript: ${saveResult.path}`);
+      console.log(`[ConversationTest] Transcript saved to ${saveResult.path}`);
+    } else {
+      console.warn('[ConversationTest] Failed to save transcript:', saveResult.error);
+    }
+  } catch (err) {
+    console.warn('[ConversationTest] Save IPC failed:', err);
+  }
+  return { snapshots, transcriptPath };
+}
+
+function requestConversationStop(): void {
+  conversationRunStopRequested = true;
+}
+
+/**
+ * Glue between the Conversation tab UI and `runConversationTest`.
+ * Reads the form, drives the runner, renders per-turn rows into the
+ * transcript pane, and enables the Copy button once the run finishes.
+ */
+async function runConversationFromPanel(panel: HTMLElement): Promise<void> {
+  const runBtn = panel.querySelector('#cv-run-btn') as HTMLButtonElement;
+  const stopBtn = panel.querySelector('#cv-stop-btn') as HTMLButtonElement;
+  const copyBtn = panel.querySelector('#cv-copy-btn') as HTMLButtonElement;
+  const statusDiv = panel.querySelector('#cv-status') as HTMLDivElement;
+  const transcriptDiv = panel.querySelector('#cv-transcript') as HTMLDivElement;
+  const presetSelect = panel.querySelector('#cv-preset') as HTMLSelectElement;
+  const muteEl = panel.querySelector('#cv-mute-tts') as HTMLInputElement;
+  const pauseEl = panel.querySelector('#cv-pause') as HTMLInputElement;
+
+  const preset = CONVERSATION_TEST_PRESETS.find(p => p.id === presetSelect.value);
+  if (!preset) {
+    statusDiv.textContent = 'No character selected';
+    statusDiv.className = 'test-shader-status error';
+    return;
+  }
+  const script = preset.script;
+  const pauseMs = Math.max(0, parseFloat(pauseEl.value || '1') * 1000);
+  const muteTts = muteEl.checked;
+  const claudeEl = panel.querySelector('#cv-claude-driven') as HTMLInputElement;
+  const claudeDriven = claudeEl.checked;
+
+  runBtn.disabled = true;
+  stopBtn.disabled = false;
+  copyBtn.disabled = true;
+  transcriptDiv.innerHTML = '';
+  statusDiv.className = 'test-shader-status loading';
+
+  const renderTurn = (turn: ConversationTurnSnapshot) => {
+    const row = document.createElement('div');
+    row.className = 'conversation-turn';
+    const toolsHtml = turn.toolCalls.length
+      ? `<div class="cv-tools">${turn.toolCalls.map(tc => `<span class="cv-tool-chip">${escapeHtml(tc.name)}</span>`).join('')}</div>`
+      : '';
+    const faceHtml = turn.faceActivity
+      ? `<div class="cv-face">face: ${escapeHtml(turn.faceActivity)}</div>`
+      : '';
+    const spellHtml = (turn.spell && (turn.spell.intent || turn.spell.element))
+      ? `<div class="cv-spell">spell: ${escapeHtml(turn.spell.intent || '–')} / ${escapeHtml(turn.spell.element || '–')}${turn.spell.castingOrigin ? ' / ' + escapeHtml(turn.spell.castingOrigin) : ''}</div>`
+      : '';
+    row.innerHTML = `
+      <div class="cv-line cv-you">YOU: ${escapeHtml(turn.participantLine)}</div>
+      <div class="cv-line cv-merlin">MERLIN: ${escapeHtml(turn.geminiText)}</div>
+      <div class="cv-meta">phase: ${escapeHtml(turn.phaseBefore)} → ${escapeHtml(turn.phaseAfter)} · ${turn.durationMs}ms</div>
+      ${spellHtml}
+      ${toolsHtml}
+      ${faceHtml}
+    `;
+    transcriptDiv.appendChild(row);
+    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+  };
+
+  let snapshots: ConversationTurnSnapshot[] = [];
+  try {
+    const result = await runConversationTest({
+      id: preset.id,
+      character: preset.description,
+      script,
+      muteTts,
+      pauseMs,
+      face: preset.expectedFace,
+      body: preset.expectedBody,
+      claudeDriven,
+      expectedSpell: preset.expectedSpell,
+      onTurnComplete: renderTurn,
+      onStatus: (msg) => {
+        statusDiv.textContent = msg;
+      },
+    });
+    snapshots = result.snapshots;
+    statusDiv.textContent = `Done — ${snapshots.length} turn(s)`;
+    statusDiv.className = 'test-shader-status success';
+  } catch (err) {
+    statusDiv.textContent = `Error: ${err}`;
+    statusDiv.className = 'test-shader-status error';
+  } finally {
+    runBtn.disabled = false;
+    stopBtn.disabled = true;
+    copyBtn.disabled = snapshots.length === 0;
+    copyBtn.onclick = () => {
+      const json = JSON.stringify(snapshots, null, 2);
+      void navigator.clipboard.writeText(json);
+      statusDiv.textContent = 'Transcript copied to clipboard';
+    };
+  }
 }
 
 /**
@@ -2887,12 +3353,22 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
         await startContinuousListening(handleMerlinTranscript);
       }
     } else if (inFlightSpeechPromise) {
-      // No remainder, but a chunk is still in flight — wait for it so
-      // listening doesn't resume mid-speech.
+      // No remainder, but a chunk IS in flight (the common path under
+      // the one-response-per-turn rule). Wait for the chunk to finish,
+      // then RESUME listening — the chunk handler called
+      // stopContinuousListening when TTS started, so without resuming
+      // here the mic stays closed forever and the session "stops after
+      // 1 reaction".
       console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder — awaiting chunk TTS to finish`);
       await inFlightSpeechPromise;
       inFlightSpeechPromise = null;
+      if (merlinModeActive) {
+        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after chunk-only turn`);
+        await startContinuousListening(handleMerlinTranscript);
+      }
     } else {
+      // Neither chunk nor remainder fired this turn — the mic was
+      // never closed, so listening is still active. Nothing to do.
       console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No speech this turn`);
     }
 
@@ -3023,6 +3499,13 @@ if (window.electronAPI) {
   // (or is skipped because finalText was already streamed).
   window.electronAPI.onMerlinSpeakChunk((text: string) => {
     if (!ttsReady || !text) return;
+    if (testModeMuteTts) {
+      // Conversation Tester is running — swallow chunk TTS silently so
+      // the handleMerlinTranscript spokenText path can still serialize
+      // on a resolved promise without waiting for any audio.
+      inFlightSpeechPromise = Promise.resolve();
+      return;
+    }
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Parallel-TTS chunk: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
     stopContinuousListening();
     // Track the promise so the post-turn spokenText TTS path can await
@@ -3038,6 +3521,46 @@ if (window.electronAPI) {
         inFlightSpeechPromise = null;
       }
     });
+  });
+
+  // Conversation Tester HTTP trigger — main forwards POSTs to
+  // /run-conversation here. Runs the preset and signals completion
+  // back so main can resolve the HTTP response with the transcript
+  // path.
+  window.electronAPI.onConversationTestTrigger(async ({ requestId, presetId, claudeDriven }) => {
+    const preset = CONVERSATION_TEST_PRESETS.find(p => p.id === presetId);
+    if (!preset) {
+      window.electronAPI.sendConversationTestComplete({
+        requestId,
+        error: `unknown presetId: ${presetId}`,
+      });
+      return;
+    }
+    console.log(`[ConversationTest] HTTP trigger received for ${presetId} (requestId=${requestId})`);
+    try {
+      const result = await runConversationTest({
+        id: preset.id,
+        character: preset.description,
+        script: preset.script,
+        muteTts: true,
+        pauseMs: 0,
+        face: preset.expectedFace,
+        body: preset.expectedBody,
+        claudeDriven,
+        expectedSpell: preset.expectedSpell,
+        onTurnComplete: () => { /* trigger path doesn't update panel UI */ },
+        onStatus: (msg) => console.log(`[ConversationTest] ${msg}`),
+      });
+      window.electronAPI.sendConversationTestComplete({
+        requestId,
+        transcriptPath: result.transcriptPath,
+      });
+    } catch (err) {
+      window.electronAPI.sendConversationTestComplete({
+        requestId,
+        error: String(err),
+      });
+    }
   });
 
   // Cast armed — main fires this when prepare_casting dispatches. From
