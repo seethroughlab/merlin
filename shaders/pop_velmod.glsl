@@ -31,7 +31,7 @@ void main() {
     vec3 idDrift = (hash31(id) - 0.5) * 0.001;
     vel += idDrift * (0.5 + 0.5 * uSpellEnergy);
 
-    // {zone_code}
+{zone_code}
 
     PartVel[idx] = vel;
 }

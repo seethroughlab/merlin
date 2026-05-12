@@ -16,6 +16,14 @@ uniform float uChromaticAberration;
 
 out vec4 fragColor;
 
+// Per-particle hash for stable, well-distributed random values. Available
+// in every POP/TOP/MAT zone so user snippets can call hash31(id) anywhere.
+vec3 hash31(float p) {
+    vec3 p3 = fract(vec3(p) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xxy + p3.yzz) * p3.zyx);
+}
+
 void main() {
     vec2 uv = vUV.st;
     vec4 color = texture(sTD2DInputs[0], uv);
@@ -32,7 +40,7 @@ void main() {
     float vignette = 1.0 - length(uv - 0.5) * uVignetteStrength * uSpellEnergy;
     color.rgb *= vignette;
 
-    // {zone_code}
+{zone_code}
 
     fragColor = color;
 }

@@ -1,3 +1,11 @@
+// Per-particle hash for stable, well-distributed random values. Available
+// in every POP/TOP/MAT zone so user snippets can call hash31(id) anywhere.
+vec3 hash31(float p) {
+    vec3 p3 = fract(vec3(p) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xxy + p3.yzz) * p3.zyx);
+}
+
 void main() {
     const uint idx = TDIndex();
     if (idx >= TDNumElements()) return;
@@ -9,18 +17,18 @@ void main() {
     float lifeSpan = TDIn_PartLifeSpan();
     float life = 1.0 - (age / max(lifeSpan, 0.001));
 
-    // Default size with life fade. baseSize=0.08 keeps idle particles
-    // big enough to be visible over the webcam (which the additive
-    // composite blends them onto) while letting high-energy spells push
-    // size up further via the (0.5 + uSpellEnergy) multiplier.
+    // Default size with life fade. 0.08 keeps idle particles big enough
+    // to be visible over the webcam (which the additive composite blends
+    // them onto) while letting high-energy spells push size up further
+    // via the (0.5 + uSpellEnergy) multiplier.
     //   idle (energy=0.2): size ≈ 0.056
     //   buildup (energy=0.5): size ≈ 0.080
     //   release (energy=1.0): size ≈ 0.120
-    float baseSize = 0.08;
-    float size = baseSize * life;
-    size *= (0.5 + uSpellEnergy);
+    // NOTE: inline literal instead of `float baseSize = 0.08` so user zone
+    // code is free to declare its own baseSize without redefinition error.
+    float size = 0.08 * life * (0.5 + uSpellEnergy);
 
-    // {zone_code}
+{zone_code}
 
     xscale[idx] = vec3(size);
 

@@ -32,7 +32,7 @@ void main() {
         vec3 jitter = (r - 0.5) * 0.05;
         vel = outward + jitter;
 
-        // {zone_code}
+{zone_code}
     }
 
     P[idx] = pos;

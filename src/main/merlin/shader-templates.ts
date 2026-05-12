@@ -112,7 +112,18 @@ export function formatTemplateForPrompt(zoneName: string): string {
  * Includes only the most commonly used zones to avoid prompt bloat.
  */
 export function formatTemplatesForSystemPrompt(): string {
-  const primaryZones = ['force_field', 'color_over_life', 'size_over_life', 'post_fx'];
+  // Include spawn_behavior and velocity_modifier in the system-prompt
+  // templates so Gemini sees the hash31() helper, the local-variable
+  // scope, and the default drag — all critical for the EYE-BURST,
+  // FOUNTAIN, and force-magnitude-vs-drag recipes to make sense.
+  const primaryZones = [
+    'force_field',
+    'spawn_behavior',
+    'velocity_modifier',
+    'color_over_life',
+    'size_over_life',
+    'post_fx',
+  ];
 
   const sections: string[] = [];
   for (const zone of primaryZones) {
