@@ -1023,15 +1023,21 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Create hidden Spout output windows (video + mask)
+  // Create hidden Spout output window (video).
+  // Mask window disabled — TD does person segmentation via NVIDIA
+  // Broadcast, so we no longer publish a "Merlin Mask" Spout sender.
+  // The MediaPipe-based segmenter in the renderer is also commented
+  // out. Re-enable by uncommenting the createMaskWindow calls below
+  // and the segmentation paths in src/renderer/mediapipe/index.ts +
+  // src/renderer/main.ts.
   await createSpoutWindow();
-  await createMaskWindow();
+  // await createMaskWindow();
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
       await createSpoutWindow();
-      await createMaskWindow();
+      // await createMaskWindow();
     }
   });
 });

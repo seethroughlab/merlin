@@ -6,14 +6,15 @@
 
 import {
   initAllMediaPipe,
-  initImageSegmenter,
+  // Segmentation disabled — TD/NVIDIA Broadcast handles person mask.
+  // initImageSegmenter,
   detectPose,
   drawPose,
   detectFaces,
   drawFaces,
-  segmentImage,
-  drawSegmentationOverlay,
-  segmentToMask,
+  // segmentImage,
+  // drawSegmentationOverlay,
+  // segmentToMask,
   detectFaceLandmarks,
   drawFaceLandmarks,
   getFaceBlendshapes,
@@ -350,17 +351,21 @@ function renderLoop(): void {
     }
   }
 
-  // In Mask mode, render segmentation mask (white=person, black=background)
-  if (isMaskMode) {
-    if (mediapipeReady) {
-      segmentToMask(frameSource as HTMLVideoElement, ctx, timestamp);
-    } else {
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    requestAnimationFrame(renderLoop);
-    return;
-  }
+  // Mask mode disabled — TouchDesigner does person segmentation via
+  // NVIDIA Broadcast, which is markedly better than MediaPipe selfie
+  // segmentation. The renderer no longer produces a "Merlin Mask"
+  // Spout output. Leave the branch in place so re-enabling is one
+  // uncomment away.
+  // if (isMaskMode) {
+  //   if (mediapipeReady) {
+  //     segmentToMask(frameSource as HTMLVideoElement, ctx, timestamp);
+  //   } else {
+  //     ctx.fillStyle = 'black';
+  //     ctx.fillRect(0, 0, canvas.width, canvas.height);
+  //   }
+  //   requestAnimationFrame(renderLoop);
+  //   return;
+  // }
 
   // Draw video frame to canvas
   ctx.drawImage(frameSource, 0, 0);
@@ -382,13 +387,13 @@ function renderLoop(): void {
 
   // MediaPipe processing (use frameSource for proper orientation)
   if (mediapipeReady && overlayCtx) {
-    // Segmentation (detect and optionally draw - first so it's behind other overlays)
-    if (detectSegmentEnabled) {
-      segmentImage(frameSource as HTMLVideoElement, timestamp);
-    }
-    if (drawSegmentEnabled && detectSegmentEnabled) {
-      drawSegmentationOverlay(overlayCtx);
-    }
+    // Segmentation disabled — TD/NVIDIA Broadcast handles person mask now.
+    // if (detectSegmentEnabled) {
+    //   segmentImage(frameSource as HTMLVideoElement, timestamp);
+    // }
+    // if (drawSegmentEnabled && detectSegmentEnabled) {
+    //   drawSegmentationOverlay(overlayCtx);
+    // }
 
     // Pose detection
     if (detectPoseEnabled) {
@@ -3415,13 +3420,16 @@ async function main(): Promise<void> {
   // Initialize camera first
   await initCamera();
 
-  if (isMaskMode) {
-    // Mask mode: only initialize segmentation
-    console.log('Initializing segmentation for mask output...');
-    await initImageSegmenter();
-    mediapipeReady = true;
-    console.log('Segmentation ready');
-  } else if (!isSpoutMode) {
+  // Mask-mode branch disabled — TD/NVIDIA Broadcast handles the mask.
+  // The mask-window creation in main/index.ts is also commented out, so
+  // ?mask should never be hit in practice. Leaving the dispatch shell.
+  // if (isMaskMode) {
+  //   console.log('Initializing segmentation for mask output...');
+  //   await initImageSegmenter();
+  //   mediapipeReady = true;
+  //   console.log('Segmentation ready');
+  // } else if (!isSpoutMode) {
+  if (!isSpoutMode && !isMaskMode) {
     // Preview mode: initialize everything
     await loadSettings();
     setupSidebar();
