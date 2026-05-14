@@ -9,7 +9,7 @@ You're inheriting Merlin Mirror. This document is the single entrypoint: read it
 3. **This file** — your map of the project.
 4. **[`docs/architecture.md`](./architecture.md)** — system block diagram, request/response cycle, error paths.
 5. **[`docs/conversation-flow.md`](./conversation-flow.md)** — per-turn execution, phase machine, IPC/WS event glossary. **Critical reference**: come back to it whenever you touch session, runtime, or the mic.
-6. **[`docs/Merlin Mirror PRD.md`](./Merlin%20Mirror%20PRD.md)** — design intent. Tells you why the experience is shaped the way it is.
+6. **[`docs/PRD.md`](./PRD.md)** — design intent. Tells you why the experience is shaped the way it is.
 7. **[`CLAUDE.md`](../CLAUDE.md)** — module-by-module architecture reference. Written for Claude Code originally, but accurate and useful for humans.
 8. **[`td/ARCHITECTURE.md`](../td/ARCHITECTURE.md)** — TouchDesigner-side: COMP layout, GLSL zones, body tracking, MCP-and-save trap.
 
@@ -43,9 +43,9 @@ You're inheriting Merlin Mirror. This document is the single entrypoint: read it
 | Listening-stuck-closed bug | **Fixed.** Documented for context in `docs/conversation-flow.md`. |
 | Logger migration | **Done.** All console.* sites in `src/main/td-bridge/` and `src/main/merlin/` (~136 sites, 18 files) use `log.info/warn/error` from `src/main/logger.ts`. Two intentional exceptions in `turn-runner.ts` for the per-turn `[Gemini source turnId]` observability stream. |
 | ESLint warnings | 46 warnings, 0 errors. Unused-var cleanup in `src/renderer/main.ts` and `any` casts in `src/main/spout.ts` are the main ones. |
-| `background_environment` zone | **P1 / ready to ship.** Spec in [`docs/improvement-07-background-environment.md`](./improvement-07-background-environment.md). Estimated 4–6 hours TD setup + Electron integration. |
+| `background_environment` zone | **P1 / ready to ship.** Spec in [`docs/specs/background-environment.md`](./specs/background-environment.md). Estimated 4–6 hours TD setup + Electron integration. |
 | Session replay / persistence UI | **P2.** Persistence API exists (`src/main/merlin/state-persistence.ts`); renderer UI not built. |
-| Mesh-mode rendering | **P3 / blocked.** Merlin-side infrastructure ready; TD-side geometry/MAT nodes deferred. See [`docs/mesh-mode-pipeline.md`](./mesh-mode-pipeline.md). |
+| Mesh-mode rendering | **P3 / blocked.** Merlin-side infrastructure ready; TD-side geometry/MAT nodes deferred. See [`docs/specs/mesh-mode.md`](./specs/mesh-mode.md). |
 | Body-occlusion masking | **Shipped.** See `td/ARCHITECTURE.md` § "Render chain" and the `sMaskInput` sampler. |
 
 ## Things that will bite you

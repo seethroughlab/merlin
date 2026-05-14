@@ -56,7 +56,7 @@ Gemini SDK: **`@google/genai` v1+** is the only SDK in use. The live Merlin chat
 - `mat_billboard_pixel.glsl`, `mat_billboard_vertex.glsl` - Billboard material templates. Pixel shader computes per-particle flipbook frame from `(driveSource, frameDuration, playbackMode)` uniforms set on flipbook_config.
 - All templates have a `// {zone_code}` injection point where Gemini's snippet is merged
 
-> Particle rendering is **billboard/flipbook only** for now. Mesh-mode rendering was scoped out and pruned; see `docs/mesh-mode-pipeline.md` for the future-work notes.
+> Particle rendering is **billboard/flipbook only** for now. Mesh-mode rendering was scoped out and pruned; see `docs/specs/mesh-mode.md` for the future-work notes.
 
 ### Body-tracked particle uniforms
 

@@ -22,7 +22,7 @@ Trigger a live session with **Shift+M**, or open the test panel with **Shift+T**
 | [`docs/HANDOFF.md`](./docs/HANDOFF.md) | Onboarding for new contributors — reading order, "where to start" file map, known issues |
 | [`docs/architecture.md`](./docs/architecture.md) | System block diagram, data flows, error paths |
 | [`docs/conversation-flow.md`](./docs/conversation-flow.md) | Per-turn execution: phase machine, IPC/WS events, listening lifecycle |
-| [`docs/Merlin Mirror PRD.md`](./docs/Merlin%20Mirror%20PRD.md) | Design intent and intended participant experience |
+| [`docs/PRD.md`](./docs/PRD.md) | Design intent and intended participant experience |
 | [`CLAUDE.md`](./CLAUDE.md) | Module-by-module architecture reference (used by Claude Code; safe for humans too) |
 | [`td/ARCHITECTURE.md`](./td/ARCHITECTURE.md) | TouchDesigner-side: COMP layout, GLSL zones, body-tracking flow |
 
