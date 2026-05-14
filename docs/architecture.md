@@ -13,7 +13,7 @@ flowchart LR
         Renderer <-- IPC --> Main
     end
     Renderer -- Spout 'Merlin Mask'<br/>(body segmentation) --> TD
-    Main -- WS localhost:8001 --> TD["<b>TouchDesigner</b> (client)<br/>td/demo.toe<br/>ws_parlor + ws_callbacks.py<br/>5 POPs + TOP + billboard MAT<br/>render1 → glsl_postfx → out_final"]
+    Main -- WS localhost:8001 --> TD["<b>TouchDesigner</b> (client)<br/>td/demo.toe<br/>ws_merlin + ws_callbacks.py<br/>5 POPs + TOP + billboard MAT<br/>render1 → glsl_postfx → out_final"]
     TD --> Display["Display / projector"]
 ```
 

@@ -8,8 +8,8 @@ Everything lives under `/project1/`. The Electron-facing surfaces:
 
 | Node | Role |
 |------|------|
-| `ws_parlor` (WebSocket DAT) | Connects to `ws://localhost:8001`. `td_ready` handshake on connect. |
-| `ws_parlor_callbacks` (Text DAT) | Bound to `td/scripts/ws_callbacks.py` with `syncfile=1` — edits to the .py reflect immediately, no .toe save needed. |
+| `ws_merlin` (WebSocket DAT) | Connects to `ws://localhost:8001`. `td_ready` handshake on connect. |
+| `ws_merlin_callbacks` (Text DAT) | Bound to `td/scripts/ws_callbacks.py` with `syncfile=1` — edits to the .py reflect immediately, no .toe save needed. |
 | `landmark_table` (Table DAT) | MediaPipe pose landmarks pushed in by Electron each frame (33 rows × x/y/z/visibility). |
 | `body_positions` (Script CHOP) | Reads `landmark_table` and emits world-space chest / eyes / hands as channels. Callbacks at `body_positions_callbacks1`. |
 | `pointgenerator1` (POP) | Particle emitter. `tx/ty/tz` parameters are expression-bound to `body_positions.chest_x/y/z` so emission tracks the body. |
@@ -63,7 +63,7 @@ These are bound across the relevant zone ops by `_wire_spell_state_uniforms` and
 
 ```mermaid
 flowchart LR
-    MP["<b>MediaPipe Pose</b><br/>(Electron renderer)"] -- IPC<br/>tracking_frame --> WS["ws_parlor<br/>(WebSocket DAT)"]
+    MP["<b>MediaPipe Pose</b><br/>(Electron renderer)"] -- IPC<br/>tracking_frame --> WS["ws_merlin<br/>(WebSocket DAT)"]
     WS --> LT["landmark_table<br/>Table DAT, 33 rows"]
     LT --> BP["body_positions<br/>Script CHOP<br/>chest_x/y/z · eyes_l/r · hands_l/r"]
     BP --> PG["pointgenerator1<br/>.tx/ty/tz = chest"]
@@ -87,7 +87,7 @@ flowchart LR
 
 ## Outbound (Merlin → TD) and inbound (TD → Merlin) message types
 
-Both directions go through `ws_parlor`. See [`CLAUDE.md`](../CLAUDE.md#outbound-message-types-merlin--td) for the full list. The flows you'll hit most often:
+Both directions go through `ws_merlin`. See [`CLAUDE.md`](../CLAUDE.md#outbound-message-types-merlin--td) for the full list. The flows you'll hit most often:
 
 - `zone_update` → `_check_glsl_compile` → `compile_result` back
 - `sprite_texture` → load the PNG into `movieFileIn` → `sprite_loaded` back when GPU-ready

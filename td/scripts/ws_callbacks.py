@@ -1,5 +1,5 @@
 """
-WebSocket callbacks for Parlor <-> TouchDesigner communication.
+WebSocket callbacks for Merlin <-> TouchDesigner communication.
 
 Expanded POP system for mirror/echo AR visuals.
 """
@@ -537,7 +537,7 @@ def onConnect(dat):
 
 
 def onDisconnect(dat):
-    print(f"[WS] Disconnected from Parlor")
+    print(f"[WS] Disconnected from Merlin")
 
 
 def onReceiveText(dat, rowIndex, message):
@@ -1282,7 +1282,7 @@ def handle_request_screenshot(dat):
         import tempfile
         import os
 
-        temp_path = os.path.join(tempfile.gettempdir(), 'parlor_screenshot.png')
+        temp_path = os.path.join(tempfile.gettempdir(), 'merlin_screenshot.png')
         render_top.save(temp_path)
 
         with open(temp_path, 'rb') as f:

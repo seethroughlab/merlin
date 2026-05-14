@@ -68,7 +68,7 @@ The renderer's BrowserWindow gets a `--spout` flag; the Spout sender publishes a
 The Electron app shows TD status in the sidebar. Common causes:
 - TD isn't running — open `td/demo.toe`.
 - Port 8001 is held by a stale process. `predev` should kill it; if not, find and kill it manually (Task Manager → Electron / node).
-- TD's `/project1/ws_parlor_callbacks` textDAT lost its file binding. Open the .toe, select the DAT, verify `file` points at `scripts/ws_callbacks.py` and `syncfile=1`.
+- TD's `/project1/ws_merlin_callbacks` textDAT lost its file binding. Open the .toe, select the DAT, verify `file` points at `scripts/ws_callbacks.py` and `syncfile=1`.
 
 **Shaders don't compile**
 - Open TD's textport. Failed compiles print to it from `_check_glsl_compile`.

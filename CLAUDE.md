@@ -88,7 +88,7 @@ When Gemini's compile fails, the test panel and live session both feed the error
 
 ### `td/scripts/ws_callbacks.py` syncs from disk
 
-The `/project1/ws_parlor_callbacks` textDAT has `syncfile=True`. **Edits to the .py file reflect in TD without TD restart or .toe save** — TD evaluates the callback fresh on each WS message. Verify a sync took by reading the textDAT's `.text` via MCP and greping for the new symbol.
+The `/project1/ws_merlin_callbacks` textDAT has `syncfile=True`. **Edits to the .py file reflect in TD without TD restart or .toe save** — TD evaluates the callback fresh on each WS message. Verify a sync took by reading the textDAT's `.text` via MCP and greping for the new symbol.
 
 ### MCP-created nodes don't survive restart unless .toe is saved
 
