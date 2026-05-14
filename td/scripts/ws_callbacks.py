@@ -373,6 +373,83 @@ def _wire_spell_state_uniforms():
                 print(f"[WS] {uniform_name} NOT_BOUND on glsl_color")
 
 
+def _wire_billboard_occlusion_uniforms():
+    """Wire uChestPos + uScreenResolution + sMaskInput on /project1/glsl_billboard
+    for the z-aware body-mask occlusion path.
+
+    uChestPos: expression-bound to body_positions.chest_xyz (same pattern as
+    on the glslPOPs — e.g. glsl_force vec4 uses
+    `op('body_positions')['chest_x']`).
+    uScreenResolution: expression-bound to render1's width/height so the
+    pixel shader can convert gl_FragCoord to mask-space UV.
+    sMaskInput: bound on the sampler page to /project1/spout_mask (set
+    separately via MCP since sampler-page binding is a one-shot we save
+    to the .toe). This function just verifies it's wired.
+
+    Idempotent — safe to call on every connect.
+    """
+    bb = op('/project1/glsl_billboard')
+    if bb is None:
+        return
+
+    # Probe for the EXPRESSION mode enum the same way wire_op() does.
+    probe_par = bb.par.vec0valuex
+    expression_mode = type(probe_par.mode).EXPRESSION
+
+    # Find slot index for a named uniform on the Vectors page, or claim
+    # the next free slot. Returns None if nothing's free.
+    def _claim_slot(node, name, max_slots=16):
+        for i in range(max_slots):
+            np = getattr(node.par, f'vec{i}name', None)
+            if np is None:
+                continue
+            if np.eval() == name:
+                return i
+        for i in range(max_slots):
+            np = getattr(node.par, f'vec{i}name', None)
+            if np is None:
+                continue
+            if not np.eval():
+                np.val = name
+                return i
+        return None
+
+    # uChestPos — vec3, reads body_positions.chest_{x,y,z}
+    slot = _claim_slot(bb, 'uChestPos')
+    if slot is not None:
+        for axis, row in (('x', 'chest_x'), ('y', 'chest_y'), ('z', 'chest_z')):
+            valpar = getattr(bb.par, f'vec{slot}value{axis}', None)
+            if valpar is not None:
+                valpar.expr = f"op('body_positions')['{row}']"
+                valpar.mode = expression_mode
+
+    # uScreenResolution — vec2, reads render1.resolutionw/h
+    slot = _claim_slot(bb, 'uScreenResolution')
+    if slot is not None:
+        vx = getattr(bb.par, f'vec{slot}valuex', None)
+        vy = getattr(bb.par, f'vec{slot}valuey', None)
+        if vx is not None:
+            vx.expr = "op('/project1/render1').par.resolutionw.eval()"
+            vx.mode = expression_mode
+        if vy is not None:
+            vy.expr = "op('/project1/render1').par.resolutionh.eval()"
+            vy.mode = expression_mode
+
+    # Diagnostic: confirm the mask sampler is wired (was set via MCP).
+    mask_sampler_slot = None
+    for i in range(8):
+        sn = getattr(bb.par, f'sampler{i}name', None)
+        st = getattr(bb.par, f'sampler{i}top', None)
+        if sn is not None and sn.eval() == 'sMaskInput':
+            mask_sampler_slot = (i, str(st.eval()) if st is not None else '?')
+            break
+    if mask_sampler_slot is None:
+        print("[WS] sMaskInput sampler NOT_BOUND on glsl_billboard — run MCP set sampler1name=sMaskInput, sampler1top=/project1/spout_mask")
+    else:
+        print(f"[WS] sMaskInput -> glsl_billboard sampler{mask_sampler_slot[0]} top={mask_sampler_slot[1]}")
+    print(f"[WS] Wired uChestPos + uScreenResolution on glsl_billboard for body-mask occlusion")
+
+
 def _wire_info_dats():
     """Ensure each glsl_*_info DAT's `op` parameter points at its matching
     GLSL op. This is what `_check_glsl_compile` reads to surface real
@@ -422,6 +499,13 @@ def onConnect(dat):
         _wire_spell_state_uniforms()
     except Exception as e:
         print(f"[WS] Failed to wire spell_state uniforms: {e}")
+
+    # Self-heal: wire uChestPos + uScreenResolution on glsl_billboard for
+    # the z-aware body-mask occlusion path. Idempotent.
+    try:
+        _wire_billboard_occlusion_uniforms()
+    except Exception as e:
+        print(f"[WS] Failed to wire billboard occlusion uniforms: {e}")
 
     # Self-heal: ensure each glsl_*_info DAT points at the right GLSL op
     # so compile errors actually flow back to Gemini.

@@ -10,8 +10,15 @@ in float vLife;
 in float vId;
 in float vSpellEnergy;
 in float vSpellMode;
+// World-space z of the particle, passed from the vertex shader. Compared
+// against uChestPos.z to decide whether the body silhouette occludes this
+// particle (z behind body → mask). See the discard block at the bottom.
+in float vWorldZ;
 
 uniform sampler2D sSpriteMap;
+// Body segmentation mask piped in from Electron via Spout "Merlin Mask"
+// → /project1/spout_mask. R = 1 inside body, R = 0 outside.
+uniform sampler2D sMaskInput;
 uniform float uTime;
 
 // Flipbook config via vec uniforms (set by TD bridge):
@@ -26,6 +33,13 @@ uniform vec4 uFlipbook2;
 // generate_sprite call. See improvement-05-palette-sync.md.
 uniform vec3 uSpriteColor1;
 uniform vec3 uSpriteColor2;
+
+// Body plane reference for z-aware occlusion. Same uniform as on the
+// glslPOPs — comes from body_positions.chest_xyz via parameter expression
+// wired by ws_callbacks. Render-target resolution is used to convert
+// gl_FragCoord to mask-space UV.
+uniform vec3 uChestPos;
+uniform vec2 uScreenResolution;
 
 out vec4 oFragColor;
 
@@ -168,6 +182,19 @@ void main()
             0.114 + 0.886*cosH - 0.203*sinH
         );
         color = hueMatrix * color;
+    }
+
+    // Z-aware body-mask occlusion. The segmentation mask tells us this
+    // pixel is on the participant's body. For particles whose world-z
+    // places them BEHIND the body plane (vWorldZ < uChestPos.z), treat
+    // the body silhouette as opaque and discard. Particles in front of
+    // the body always render — they pass over the silhouette regardless.
+    // uScreenResolution must be > 0 to avoid divide-by-zero on the first
+    // frame before the WS callback wires it up.
+    if (vWorldZ < uChestPos.z && uScreenResolution.x > 0.0) {
+        vec2 screenUV = gl_FragCoord.xy / uScreenResolution;
+        float bodyMask = texture(sMaskInput, screenUV).r;
+        if (bodyMask > 0.5) discard;
     }
 
     // Discard fully transparent pixels

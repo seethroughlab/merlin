@@ -18,6 +18,10 @@ out float vLife;
 out float vId;
 out float vSpellEnergy;
 out float vSpellMode;
+// World-space z of the particle origin (before billboard view-space offset).
+// Passed to the pixel shader so it can compare against uChestPos.z to decide
+// whether the body-mask should occlude this particle (z behind body → mask).
+out float vWorldZ;
 
 // Per-particle hash for stable, well-distributed random values. Available
 // in every POP/TOP/MAT zone so user snippets can call hash31(id) anywhere.
@@ -62,6 +66,7 @@ void main()
     // cam/camInverse, which is easy to get wrong.
     int camIdx = TDCameraIndex();
     vec4 worldOrigin = TDDeform(vec4(0.0, 0.0, 0.0, 1.0));
+    vWorldZ = worldOrigin.z;
     vec3 instanceScale = TDInstanceScale();
 
     // Scale-in effect: particles grow from 0 over first 0.15 seconds
