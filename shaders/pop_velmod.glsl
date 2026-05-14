@@ -28,8 +28,9 @@ void main() {
     // trails. Small enough to accumulate gently across a 4s lifespan
     // rather than launch particles off-screen. Scaled by spell energy so
     // it's most visible at idle and gives way to spell zone code.
-    vec3 idDrift = (hash31(id) - 0.5) * 0.001;
-    vel += idDrift * (0.5 + 0.5 * uSpellEnergy);
+    // NOTE: inlined (no `vec3 idDrift = ...` local) so user zone code is
+    // free to declare its own idDrift without redefinition error.
+    vel += (hash31(id) - 0.5) * 0.001 * (0.5 + 0.5 * uSpellEnergy);
 
 {zone_code}
 

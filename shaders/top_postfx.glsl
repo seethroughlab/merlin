@@ -14,6 +14,12 @@ uniform float uBloomIntensity;
 uniform float uVignetteStrength;
 uniform float uChromaticAberration;
 
+// Sprite-derived palette — same uniforms as in the billboard pixel shader.
+// Wired by ws_callbacks._wire_spell_state_uniforms onto every shader op
+// including glsl_postfx. Declared in source so glslTOP knows their type.
+uniform vec3 uSpriteColor1;
+uniform vec3 uSpriteColor2;
+
 out vec4 fragColor;
 
 // Per-particle hash for stable, well-distributed random values. Available
