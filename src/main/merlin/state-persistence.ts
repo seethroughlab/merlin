@@ -11,6 +11,7 @@ import * as path from 'path';
 import type { SpellState } from '../../shared/types';
 import { zoneStateManager } from './zone-state';
 import { ZONE_NAMES } from './zone-registry';
+import { log } from '../logger';
 
 /**
  * Persisted session state
@@ -40,7 +41,6 @@ export interface SessionSummary {
 }
 
 const SESSIONS_DIR = 'sessions';
-const ts = () => new Date().toISOString().slice(11, 23);
 
 /**
  * Get the sessions directory path
@@ -57,7 +57,7 @@ function ensureSessionsDir(): void {
   const dir = getSessionsDir();
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    console.log(`[StatePersistence ${ts()}] Created sessions directory: ${dir}`);
+    log.info('StatePersistence', `Created sessions directory: ${dir}`);
   }
 }
 
@@ -98,10 +98,10 @@ export function saveSessionState(
 
     const filePath = getSessionPath(sessionId);
     fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
-    console.log(`[StatePersistence ${ts()}] Saved session: ${sessionId}`);
+    log.info('StatePersistence', `Saved session: ${sessionId}`);
     return true;
   } catch (error) {
-    console.error(`[StatePersistence ${ts()}] Failed to save session:`, error);
+    log.error('StatePersistence', 'Failed to save session:', error);
     return false;
   }
 }
@@ -114,7 +114,7 @@ export function loadSessionState(sessionId: string): PersistedState | null {
     const filePath = getSessionPath(sessionId);
 
     if (!fs.existsSync(filePath)) {
-      console.warn(`[StatePersistence ${ts()}] Session not found: ${sessionId}`);
+      log.warn('StatePersistence', `Session not found: ${sessionId}`);
       return null;
     }
 
@@ -123,13 +123,13 @@ export function loadSessionState(sessionId: string): PersistedState | null {
 
     // Validate version
     if (state.version !== '1.0') {
-      console.warn(`[StatePersistence ${ts()}] Unknown version: ${state.version}`);
+      log.warn('StatePersistence', `Unknown version: ${state.version}`);
     }
 
-    console.log(`[StatePersistence ${ts()}] Loaded session: ${sessionId}`);
+    log.info('StatePersistence', `Loaded session: ${sessionId}`);
     return state;
   } catch (error) {
-    console.error(`[StatePersistence ${ts()}] Failed to load session:`, error);
+    log.error('StatePersistence', 'Failed to load session:', error);
     return null;
   }
 }
@@ -148,7 +148,7 @@ export function applySessionState(state: PersistedState): void {
     }
   }
 
-  console.log(`[StatePersistence ${ts()}] Applied session state: ${state.sessionId}`);
+  log.info('StatePersistence', `Applied session state: ${state.sessionId}`);
 }
 
 /**
@@ -180,7 +180,7 @@ export function listSavedSessions(): SessionSummary[] {
         });
       } catch {
         // Skip invalid files
-        console.warn(`[StatePersistence ${ts()}] Skipping invalid file: ${file}`);
+        log.warn('StatePersistence', `Skipping invalid file: ${file}`);
       }
     }
 
@@ -188,7 +188,7 @@ export function listSavedSessions(): SessionSummary[] {
     sessions.sort((a, b) => b.timestamp - a.timestamp);
     return sessions;
   } catch (error) {
-    console.error(`[StatePersistence ${ts()}] Failed to list sessions:`, error);
+    log.error('StatePersistence', 'Failed to list sessions:', error);
     return [];
   }
 }
@@ -201,15 +201,15 @@ export function deleteSession(sessionId: string): boolean {
     const filePath = getSessionPath(sessionId);
 
     if (!fs.existsSync(filePath)) {
-      console.warn(`[StatePersistence ${ts()}] Session not found for deletion: ${sessionId}`);
+      log.warn('StatePersistence', `Session not found for deletion: ${sessionId}`);
       return false;
     }
 
     fs.unlinkSync(filePath);
-    console.log(`[StatePersistence ${ts()}] Deleted session: ${sessionId}`);
+    log.info('StatePersistence', `Deleted session: ${sessionId}`);
     return true;
   } catch (error) {
-    console.error(`[StatePersistence ${ts()}] Failed to delete session:`, error);
+    log.error('StatePersistence', 'Failed to delete session:', error);
     return false;
   }
 }
@@ -225,10 +225,10 @@ export function exportSession(sessionId: string, exportPath: string): boolean {
     }
 
     fs.writeFileSync(exportPath, JSON.stringify(state, null, 2));
-    console.log(`[StatePersistence ${ts()}] Exported session to: ${exportPath}`);
+    log.info('StatePersistence', `Exported session to: ${exportPath}`);
     return true;
   } catch (error) {
-    console.error(`[StatePersistence ${ts()}] Failed to export session:`, error);
+    log.error('StatePersistence', 'Failed to export session:', error);
     return false;
   }
 }
@@ -239,7 +239,7 @@ export function exportSession(sessionId: string, exportPath: string): boolean {
 export function importSession(importPath: string): PersistedState | null {
   try {
     if (!fs.existsSync(importPath)) {
-      console.warn(`[StatePersistence ${ts()}] Import file not found: ${importPath}`);
+      log.warn('StatePersistence', `Import file not found: ${importPath}`);
       return null;
     }
 
@@ -248,7 +248,7 @@ export function importSession(importPath: string): PersistedState | null {
 
     // Validate basic structure
     if (!state.sessionId || !state.zones || !state.spell) {
-      console.error(`[StatePersistence ${ts()}] Invalid session file structure`);
+      log.error('StatePersistence', 'Invalid session file structure');
       return null;
     }
 
@@ -261,10 +261,10 @@ export function importSession(importPath: string): PersistedState | null {
     const filePath = getSessionPath(newId);
     fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
 
-    console.log(`[StatePersistence ${ts()}] Imported session as: ${newId}`);
+    log.info('StatePersistence', `Imported session as: ${newId}`);
     return state;
   } catch (error) {
-    console.error(`[StatePersistence ${ts()}] Failed to import session:`, error);
+    log.error('StatePersistence', 'Failed to import session:', error);
     return null;
   }
 }

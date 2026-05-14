@@ -22,8 +22,7 @@ import type {
   LiveSpellTestResult,
 } from '../../shared/types';
 import type { MerlinSessionState } from './types';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 function buildLocalState(): MerlinSessionState {
   return {
@@ -48,7 +47,7 @@ export async function testLiveSpell(input: LiveSpellTestInput): Promise<LiveSpel
     return { success: false, toolCallCount: 0, error: 'Prompt is required' };
   }
 
-  console.log(`[TestLiveSpell ${ts()}] prompt="${prompt}"`);
+  log.info('TestLiveSpell', `prompt="${prompt}"`);
 
   const turnId = nextTurnId();
   emitGeminiTurn({ id: turnId, source: 'test_live_spell', userPrompt: prompt });
@@ -82,7 +81,7 @@ export async function testLiveSpell(input: LiveSpellTestInput): Promise<LiveSpel
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[TestLiveSpell ${ts()}] failed:`, msg);
+    log.error('TestLiveSpell', 'failed:', msg);
     emitGeminiTurn({
       id: turnId,
       source: 'test_live_spell',

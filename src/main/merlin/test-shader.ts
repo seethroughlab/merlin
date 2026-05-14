@@ -17,6 +17,7 @@ import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { loadTemplate, ZONE_TEMPLATE_FILES } from './shader-templates';
 import { ZONE_CONTRACTS } from './zone-registry';
 import { emitGeminiTurn, nextTurnId } from './gemini-events';
+import { log } from '../logger';
 import { startSingleToolChat } from './gemini-chat-helper';
 import type {
   TestShaderConfig,
@@ -26,8 +27,6 @@ import type {
 } from '../../shared/types';
 
 const MAX_RETRIES = 2;
-
-const ts = () => new Date().toISOString().slice(11, 23);
 
 /**
  * Zones whose templates have no {zone_code} marker — the WS pipeline
@@ -55,7 +54,7 @@ function resolveZones(zones: string[] | undefined): string[] {
   const allowed = new Set(all);
   const resolved = zones.filter((z) => {
     if (!allowed.has(z)) {
-      console.warn(`[TestShader ${ts()}] Dropping unsupported zone: ${z}`);
+      log.warn('TestShader', `Dropping unsupported zone: ${z}`);
       return false;
     }
     return true;
@@ -253,8 +252,9 @@ function parseShaderResponse(parts: Part[], requested: Set<string>): ParsedRespo
  */
 export async function testShaderGeneration(config: TestShaderConfig): Promise<TestShaderResult> {
   const selectedZones = resolveZones(config.zones);
-  console.log(
-    `[TestShader ${ts()}] Starting: prompt="${config.prompt.slice(0, 60)}..." zones=[${selectedZones.join(', ')}]`
+  log.info(
+    'TestShader',
+    `Starting: prompt="${config.prompt.slice(0, 60)}..." zones=[${selectedZones.join(', ')}]`,
   );
 
   const turnId = nextTurnId();
@@ -269,7 +269,7 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
     const tool = buildToolDefinition(selectedZones);
     const handle = startSingleToolChat(tool, { systemInstruction: systemPrompt });
 
-    console.log(`[TestShader ${ts()}] Sending prompt to Gemini (${selectedZones.length} zones)...`);
+    log.info('TestShader', `Sending prompt to Gemini (${selectedZones.length} zones)...`);
     const initial = await handle.send(userPrompt);
     const requested = new Set(selectedZones);
     const initialParsed = parseShaderResponse(initial.rawParts, requested);
@@ -327,9 +327,10 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
           source: 'test_shader',
           pushResults: [{ zone, success: push.success, error: push.error, warnings: push.warnings }],
         });
-        console.log(
-          `[TestShader ${ts()}] Zone ${zone} attempt 1: ${push.success ? 'OK' : 'FAILED'}` +
-          (push.error ? ` - ${push.error}` : '')
+        log.info(
+          'TestShader',
+          `Zone ${zone} attempt 1: ${push.success ? 'OK' : 'FAILED'}` +
+          (push.error ? ` - ${push.error}` : ''),
         );
 
         while (!push.success && attempt <= MAX_RETRIES) {
@@ -367,7 +368,7 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
 
           const next = retryParsed.toolCallsByZone.get(zone);
           if (!next) {
-            console.warn(`[TestShader ${ts()}] Retry response did not include zone "${zone}", giving up`);
+            log.warn('TestShader', `Retry response did not include zone "${zone}", giving up`);
             break;
           }
           zoneResult.glsl_code = next.glsl_code;
@@ -379,9 +380,10 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
             source: 'test_shader',
             pushResults: [{ zone, success: push.success, error: push.error, warnings: push.warnings }],
           });
-          console.log(
-            `[TestShader ${ts()}] Zone ${zone} attempt ${attempt}: ${push.success ? 'OK' : 'FAILED'}` +
-            (push.error ? ` - ${push.error}` : '')
+          log.info(
+            'TestShader',
+            `Zone ${zone} attempt ${attempt}: ${push.success ? 'OK' : 'FAILED'}` +
+            (push.error ? ` - ${push.error}` : ''),
           );
         }
 
@@ -390,7 +392,7 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
         zoneResult.warnings = push.warnings;
       } catch (zoneErr) {
         const msg = zoneErr instanceof Error ? zoneErr.message : String(zoneErr);
-        console.warn(`[TestShader ${ts()}] Zone ${zone} threw mid-loop: ${msg}`);
+        log.warn('TestShader', `Zone ${zone} threw mid-loop: ${msg}`);
         zoneResult.status = 'error';
         zoneResult.error = msg;
         emitGeminiTurn({
@@ -405,7 +407,7 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
     emitGeminiTurn({ id: turnId, source: 'test_shader', final: true });
 
     const compiled = zones.filter(z => z.status === 'active').length;
-    console.log(`[TestShader ${ts()}] Final: ${compiled}/${selectedZones.length} zones compiled`);
+    log.info('TestShader', `Final: ${compiled}/${selectedZones.length} zones compiled`);
 
     const success = compiled >= selectedZones.length;
     return {
@@ -416,7 +418,7 @@ export async function testShaderGeneration(config: TestShaderConfig): Promise<Te
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[TestShader ${ts()}] Error:`, errorMsg);
+    log.error('TestShader', 'Error:', errorMsg);
     emitGeminiTurn({ id: turnId, source: 'test_shader', responseText: `Error: ${errorMsg}`, final: true });
     return {
       zones: [],

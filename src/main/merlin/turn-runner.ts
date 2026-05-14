@@ -17,6 +17,7 @@ import { mergeSpellUpdate, defaultOriginForIntent } from './spell-state';
 import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { emitGeminiTurn } from './gemini-events';
 import { ALLOWED_TOOLS_PER_PHASE } from './prompts';
+import { log } from '../logger';
 import type {
   SpellState,
   GeminiToolCall,
@@ -177,7 +178,7 @@ export async function runMerlinTurn(
     // filler is also added to accumulatedText so the chat bubble
     // reflects what was actually said.
     const filler = pickAckFiller();
-    console.warn(`[TurnRunner] Initial Gemini response had tool calls but no text — speaking filler: "${filler}"`);
+    log.warn('TurnRunner', `Initial Gemini response had tool calls but no text — speaking filler: "${filler}"`);
     ctx.onSpeakChunk(filler);
     streamedText = filler;
     accumulatedText = filler;
@@ -231,7 +232,7 @@ export async function runMerlinTurn(
     emitChatResult(turnId, source, result, emissionKind);
     if (subText) {
       if (chunkAlreadyResponded) {
-        console.log(`[TurnRunner] Dropping post-tool text (chunk already responded): "${subText.slice(0, 80)}${subText.length > 80 ? '…' : ''}"`);
+        log.info('TurnRunner', `Dropping post-tool text (chunk already responded): "${subText.slice(0, 80)}${subText.length > 80 ? '…' : ''}"`);
       } else {
         // Add a separator if appending onto existing text (e.g. filler
         // followed by the real post-tool ack) so the chat bubble reads
@@ -243,7 +244,7 @@ export async function runMerlinTurn(
     rounds++;
   }
   if (result.toolCalls.length > 0) {
-    console.warn(`[TurnRunner] Hit ${MAX_DISPATCH_ROUNDS}-round dispatch cap with ${result.toolCalls.length} tools pending; proceeding with accumulated text.`);
+    log.warn('TurnRunner', `Hit ${MAX_DISPATCH_ROUNDS}-round dispatch cap with ${result.toolCalls.length} tools pending; proceeding with accumulated text.`);
   }
 
   // finalText is the un-streamed remainder. The renderer uses
@@ -335,6 +336,9 @@ function emitChatResult(
     // shows what the model is "thinking" alongside the per-zone push
     // logs. Useful when diagnosing whether Gemini is evaluating
     // screenshots vs. blindly chaining tool calls.
+    // Keep the bespoke [Gemini source turn] prefix here — these are
+    // not module-level logs, they're a separate observability stream
+    // that lets you grep Gemini-only output by turn id.
     const tag = `[Gemini ${source} ${turnId.slice(0, 6)}]`;
     if (text) {
       const trimmed = text.length > 600 ? text.slice(0, 600) + '…' : text;
@@ -494,9 +498,7 @@ export async function dispatchToolCalls(
     // Per-turn dedup for expensive tools. Runs before the phase gate
     // so duplicates don't get a confusing phase-error first.
     if (ONCE_PER_TURN.has(call.name) && usedOnce.has(call.name)) {
-      console.warn(
-        `[TurnRunner] Dropping duplicate '${call.name}' — already ran once this turn.`
-      );
+      log.warn('TurnRunner', `Dropping duplicate '${call.name}' — already ran once this turn.`);
       results.push({
         name: call.name,
         response: {
@@ -517,9 +519,9 @@ export async function dispatchToolCalls(
     // belt-and-suspenders against the model ignoring those rules.
     if (allowed && !allowed.has(call.name)) {
       const allowedList = Array.from(allowed).join(', ') || 'none';
-      console.warn(
-        `[TurnRunner] Tool '${call.name}' not allowed in phase '${ctx.state.phase}' — dropping. ` +
-        `Allowed: ${allowedList}`
+      log.warn(
+        'TurnRunner',
+        `Tool '${call.name}' not allowed in phase '${ctx.state.phase}' — dropping. Allowed: ${allowedList}`,
       );
       results.push({
         name: call.name,
@@ -679,9 +681,10 @@ export async function dispatchToolCalls(
         }
 
         ctx.onRegisterTriggers?.(normalized);
-        console.log(
-          `[TurnRunner] Registered ${normalized.length} effect trigger(s): ` +
-          normalized.map(t => `"${t.word}"→${t.zone}`).join(', ')
+        log.info(
+          'TurnRunner',
+          `Registered ${normalized.length} effect trigger(s): ` +
+          normalized.map(t => `"${t.word}"→${t.zone}`).join(', '),
         );
         response = {
           success: true,
@@ -836,8 +839,9 @@ export async function dispatchToolCalls(
             activeSpriteAssetType = lastSprite.assetType;
           }
         } catch (e) {
-          console.warn(
-            `[TurnRunner] Couldn't attach active sprite preview: ${e instanceof Error ? e.message : String(e)}`
+          log.warn(
+            'TurnRunner',
+            `Couldn't attach active sprite preview: ${e instanceof Error ? e.message : String(e)}`,
           );
         }
 
@@ -973,7 +977,7 @@ export async function dispatchToolCalls(
               return true;
             } catch (e) {
               const errMsg = e instanceof Error ? e.message : String(e);
-              console.warn(`[TurnRunner] Couldn't attach sprite preview ${assetId}: ${errMsg}`);
+              log.warn('TurnRunner', `Couldn't attach sprite preview ${assetId}: ${errMsg}`);
               return false;
             }
           };
@@ -1102,7 +1106,7 @@ export async function dispatchToolCalls(
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error(`[TurnRunner] generate_sprite error: ${errorMessage}`);
+          log.error('TurnRunner', `generate_sprite error: ${errorMessage}`);
           response = { success: false, error: errorMessage };
         }
         break;

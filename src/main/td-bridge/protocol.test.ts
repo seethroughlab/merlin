@@ -232,7 +232,11 @@ describe('handleInbound', () => {
     it('logs and ignores', () => {
       const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       handleInbound({ type: 'something_new' } as unknown as TDInboundMessage, freshState(), {});
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('Unknown message type'), 'something_new');
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('TDBridge'),
+        'Unknown message type:',
+        'something_new',
+      );
     });
   });
 });

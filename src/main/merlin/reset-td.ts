@@ -33,8 +33,7 @@ import type { CastParams, ParticleParams, PaletteColor } from '../td-bridge';
 import { getMarkerBearingZones } from './test-shader';
 import { recordFlipbookConfigPush } from './td-state-mirror';
 import type { ResetTDResult, ResetTDStep, ResetTDStatus, FlipbookConfig } from '../../shared/types';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 
 /**
@@ -112,12 +111,12 @@ function classifyPushError(error: string | undefined): { status: ResetTDStatus; 
 }
 
 export async function resetTDBaseline(): Promise<ResetTDResult> {
-  console.log(`[ResetTD ${ts()}] Starting baseline reset`);
+  log.info('ResetTD', 'Starting baseline reset');
   const steps: ResetTDStep[] = [];
   const record = (label: string, status: ResetTDStatus, opts: { error?: string; note?: string } = {}) => {
     steps.push({ label, status, ...opts });
     const tag = status === 'ok' ? 'OK' : status === 'skipped' ? `SKIPPED${opts.note ? ` - ${opts.note}` : ''}` : `FAIL${opts.error ? ` - ${opts.error}` : ''}`;
-    console.log(`[ResetTD ${ts()}]   ${label}: ${tag}`);
+    log.info('ResetTD', `  ${label}: ${tag}`);
   };
 
   // 1. Reset all marker-bearing zones. The validator rejects literally
@@ -205,6 +204,6 @@ force += vec3(
   const errors = steps.filter(s => s.status === 'error').length;
   const skipped = steps.filter(s => s.status === 'skipped').length;
   const success = errors === 0;
-  console.log(`[ResetTD ${ts()}] Done: ${success ? `all OK${skipped ? ` (${skipped} skipped)` : ''}` : `${errors} step(s) failed`}`);
+  log.info('ResetTD', `Done: ${success ? `all OK${skipped ? ` (${skipped} skipped)` : ''}` : `${errors} step(s) failed`}`);
   return { success, steps };
 }

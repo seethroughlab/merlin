@@ -14,6 +14,7 @@
 import type { BrowserWindow } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import type { GeminiToolCall, GeminiTurn } from '../../shared/types';
+import { log } from '../logger';
 
 /**
  * Maximum length for any string field inside a tool-call's args before
@@ -49,8 +50,6 @@ function truncateValue(value: unknown): unknown {
   }
   return value;
 }
-
-const ts = () => new Date().toISOString().slice(11, 23);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -90,6 +89,6 @@ export function emitGeminiTurn(turn: Partial<GeminiTurn> & Pick<GeminiTurn, 'id'
   try {
     mainWindow.webContents.send('gemini-conversation', payload);
   } catch (e) {
-    console.warn(`[GeminiEvents ${ts()}] Failed to emit turn ${turn.id}: ${e}`);
+    log.warn('GeminiEvents', `Failed to emit turn ${turn.id}: ${e}`);
   }
 }

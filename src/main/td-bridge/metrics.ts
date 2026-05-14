@@ -5,7 +5,7 @@
  * Includes FPS, particle counts, visibility, and screenshots.
  */
 
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 /**
  * Performance metrics from TD
@@ -146,7 +146,7 @@ export function handleScreenshotResponse(screenshot: {
     screenshotResolve = null;
   }
 
-  console.log(`[TDMetrics ${ts()}] Screenshot received: ${screenshot.width}x${screenshot.height}`);
+  log.info('TDMetrics', `Screenshot received: ${screenshot.width}x${screenshot.height}`);
 }
 
 /**
@@ -169,7 +169,7 @@ export function requestScreenshot(
     // Send request
     const sent = sendFn({ type: 'request_screenshot' });
     if (!sent) {
-      console.warn(`[TDMetrics ${ts()}] Failed to send screenshot request - not connected`);
+      log.warn('TDMetrics', 'Failed to send screenshot request - not connected');
       resolve(null);
       return;
     }
@@ -179,7 +179,7 @@ export function requestScreenshot(
 
     // Set timeout
     screenshotTimeout = setTimeout(() => {
-      console.warn(`[TDMetrics ${ts()}] Screenshot request timed out`);
+      log.warn('TDMetrics', 'Screenshot request timed out');
       if (screenshotResolve) {
         screenshotResolve(null);
         screenshotResolve = null;
@@ -213,7 +213,7 @@ export function waitForSpriteLoad(
     // failed result with no in-process signal that anything was wrong.
     const existing = pendingSpriteLoads.get(assetId);
     if (existing) {
-      console.warn(`[TDMetrics ${ts()}] waitForSpriteLoad(${assetId}) superseded by a newer wait — previous caller will see error="superseded by newer wait"`);
+      log.warn('TDMetrics', `waitForSpriteLoad(${assetId}) superseded by a newer wait — previous caller will see error="superseded by newer wait"`);
       clearTimeout(existing.timeoutId);
       existing.resolve({ success: false, error: 'superseded by newer wait' });
     }
@@ -222,7 +222,7 @@ export function waitForSpriteLoad(
       const pending = pendingSpriteLoads.get(assetId);
       if (pending) {
         pendingSpriteLoads.delete(assetId);
-        console.warn(`[TDMetrics ${ts()}] sprite_loaded ACK timed out for ${assetId}`);
+        log.warn('TDMetrics', `sprite_loaded ACK timed out for ${assetId}`);
         pending.resolve({ success: false, timedOut: true });
       }
     }, timeoutMs);

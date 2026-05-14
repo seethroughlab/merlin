@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { TDBridgeState, TDBridgeCallbacks } from './types';
 import { handleInbound } from './protocol';
 import { PORTS } from '../config';
+import { log } from '../logger';
 
 const DEFAULT_PORT = PORTS.TD_BRIDGE;
 const PING_INTERVAL_MS = 30000;
@@ -31,8 +32,6 @@ export const state: TDBridgeState = {
   lastMessageTime: 0,
 };
 
-const ts = () => new Date().toISOString().slice(11, 23);
-
 /**
  * Start the WebSocket server
  */
@@ -40,7 +39,7 @@ export function startServer(port: number = DEFAULT_PORT, cbs: TDBridgeCallbacks 
   callbacks = cbs;
 
   wss = new WebSocketServer({ port });
-  console.log(`[TDBridge ${ts()}] WebSocket server started on port ${port}`);
+  log.info('TDBridge', `WebSocket server started on port ${port}`);
 
   wss.on('connection', handleConnection);
   wss.on('error', (error: NodeJS.ErrnoException) => {
@@ -50,15 +49,15 @@ export function startServer(port: number = DEFAULT_PORT, cbs: TDBridgeCallbacks 
     // this path. Soft-fail so the rest of the app keeps running — Merlin
     // is usable without TD bridge, just degraded.
     if (error.code === 'EADDRINUSE') {
-      console.error(
-        `[TDBridge ${ts()}] Port ${port} is in use — TD bridge disabled. ` +
-          `If a stale Merlin is holding it, restart dev (predev should reap it).`
+      log.error(
+        'TDBridge',
+        `Port ${port} is in use — TD bridge disabled. If a stale Merlin is holding it, restart dev (predev should reap it).`,
       );
       state.connected = false;
       callbacks.onError?.(`TD bridge port ${port} in use`);
       return;
     }
-    console.error(`[TDBridge ${ts()}] Server error:`, error);
+    log.error('TDBridge', 'Server error:', error);
     callbacks.onError?.(error.message);
   });
 
@@ -75,7 +74,7 @@ export function startServer(port: number = DEFAULT_PORT, cbs: TDBridgeCallbacks 
 function handleConnection(ws: WebSocket): void {
   // Only allow one TD client at a time
   if (client && client.readyState === WebSocket.OPEN) {
-    console.log(`[TDBridge ${ts()}] Rejecting new connection (already connected)`);
+    log.info('TDBridge', 'Rejecting new connection (already connected)');
     ws.close(1008, 'Only one TouchDesigner client allowed');
     return;
   }
@@ -83,7 +82,7 @@ function handleConnection(ws: WebSocket): void {
   // If we had a previous client, this is a reconnection
   if (client) {
     reconnectCount++;
-    console.log(`[TDBridge ${ts()}] TouchDesigner reconnecting (attempt #${reconnectCount})`);
+    log.info('TDBridge', `TouchDesigner reconnecting (attempt #${reconnectCount})`);
     // Clean up old client
     try {
       client.close();
@@ -103,13 +102,13 @@ function handleConnection(ws: WebSocket): void {
   }
 
   const isReconnect = reconnectCount > 0;
-  console.log(`[TDBridge ${ts()}] TouchDesigner ${isReconnect ? 're' : ''}connected`);
+  log.info('TDBridge', `TouchDesigner ${isReconnect ? 're' : ''}connected`);
   callbacks.onConnect?.();
 
   ws.on('message', (data) => handleMessage(data.toString()));
 
   ws.on('close', (code, reason) => {
-    console.log(`[TDBridge ${ts()}] TouchDesigner disconnected (code: ${code}, reason: ${reason || 'none'})`);
+    log.info('TDBridge', `TouchDesigner disconnected (code: ${code}, reason: ${reason || 'none'})`);
     client = null;
     state.connected = false;
     state.tdReady = false;
@@ -119,7 +118,7 @@ function handleConnection(ws: WebSocket): void {
   });
 
   ws.on('error', (error) => {
-    console.error(`[TDBridge ${ts()}] Client error:`, error);
+    log.error('TDBridge', 'Client error:', error);
     callbacks.onError?.(error.message);
   });
 
@@ -154,7 +153,7 @@ function handleMessage(raw: string): void {
 
     handleInbound(message, state, callbacks);
   } catch (error) {
-    console.error(`[TDBridge ${ts()}] Failed to parse message:`, raw);
+    log.error('TDBridge', 'Failed to parse message:', raw);
   }
 }
 
@@ -168,7 +167,7 @@ function checkStaleConnection(): void {
 
   const elapsed = Date.now() - state.lastMessageTime;
   if (elapsed > STALE_TIMEOUT_MS) {
-    console.warn(`[TDBridge ${ts()}] Connection stale (no message for ${Math.round(elapsed / 1000)}s)`);
+    log.warn('TDBridge', `Connection stale (no message for ${Math.round(elapsed / 1000)}s)`);
     callbacks.onError?.('Connection stale - no response from TouchDesigner');
 
     // Close the stale connection to allow reconnection
@@ -188,7 +187,7 @@ function sendPing(): void {
 
   // If we're still awaiting a previous pong, connection is likely dead
   if (awaitingPong) {
-    console.warn(`[TDBridge ${ts()}] No pong received for previous ping, connection may be dead`);
+    log.warn('TDBridge', 'No pong received for previous ping, connection may be dead');
     callbacks.onError?.('No ping response from TouchDesigner');
     return;
   }
@@ -208,7 +207,7 @@ function sendPing(): void {
   // Set timeout for pong response
   pongTimeout = setTimeout(() => {
     if (awaitingPong) {
-      console.warn(`[TDBridge ${ts()}] Pong timeout - no response within ${PONG_TIMEOUT_MS / 1000}s`);
+      log.warn('TDBridge', `Pong timeout - no response within ${PONG_TIMEOUT_MS / 1000}s`);
       awaitingPong = false;
     }
   }, PONG_TIMEOUT_MS);
@@ -226,7 +225,7 @@ export function send(message: object): boolean {
     client.send(JSON.stringify(message));
     return true;
   } catch (error) {
-    console.error(`[TDBridge ${ts()}] Send failed:`, error);
+    log.error('TDBridge', 'Send failed:', error);
     return false;
   }
 }
@@ -264,7 +263,7 @@ export function stopServer(): void {
   state.tdReady = false;
   awaitingPong = false;
   reconnectCount = 0;
-  console.log(`[TDBridge ${ts()}] Server stopped`);
+  log.info('TDBridge', 'Server stopped');
 }
 
 /**

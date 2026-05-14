@@ -25,6 +25,7 @@ import {
 } from './prompts';
 import type { MerlinToolCall } from './types';
 import { withRetry } from '../retry';
+import { log } from '../logger';
 
 const MERLIN_MODEL = 'gemini-3-flash-preview';
 
@@ -117,7 +118,7 @@ export class MerlinChat {
     const filtered = baseTools.filter(t => allowedToolNames.includes(t.name as string));
     const systemInstruction =
       this.mode === 'visual-author' ? MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT : MERLIN_SYSTEM_PROMPT;
-    console.log(`[MerlinChat] Per-call tools filter: ${filtered.length}/${baseTools.length} tools allowed → [${filtered.map(t => t.name).join(', ')}]`);
+    log.info('MerlinChat', `Per-call tools filter: ${filtered.length}/${baseTools.length} tools allowed → [${filtered.map(t => t.name).join(', ')}]`);
     return {
       systemInstruction,
       ...(filtered.length > 0

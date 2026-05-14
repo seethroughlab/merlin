@@ -33,8 +33,7 @@ import type {
   SpritePlaybackMode,
   SpriteDriveSource,
 } from '../../shared/types';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 const VALID_FRAME_COUNTS: readonly SpriteFrameCount[] = [4, 8, 9, 12, 16];
 const VALID_PLAYBACK_MODES: readonly SpritePlaybackMode[] = ['loop', 'once', 'pingpong', 'random'];
@@ -44,7 +43,7 @@ function readPngAsBase64(path: string): string | undefined {
   try {
     return readFileSync(path).toString('base64');
   } catch (e) {
-    console.warn(`[TestSprite ${ts()}] Could not read PNG at ${path}: ${e}`);
+    log.warn('TestSprite', `Could not read PNG at ${path}: ${e}`);
     return undefined;
   }
 }
@@ -63,10 +62,10 @@ export async function generateSpriteDirect(
   _turnId?: string,
 ): Promise<SpriteTestResult> {
   const isFlipbook = Boolean(spec.animation) || (spec.frameCount !== undefined && spec.frameCount > 1);
-  console.log(
-    `[TestSprite ${ts()}] Direct: description="${spec.description}" ` +
-    `mode=${isFlipbook ? 'flipbook' : 'single'}` +
-    (isFlipbook ? ` frameCount=${spec.frameCount ?? 16}` : '')
+  log.info(
+    'TestSprite',
+    `Direct: description="${spec.description}" mode=${isFlipbook ? 'flipbook' : 'single'}` +
+    (isFlipbook ? ` frameCount=${spec.frameCount ?? 16}` : ''),
   );
 
   // If this is a standalone Direct call (no parent turn id), open a
@@ -236,7 +235,7 @@ export function coerceSpriteArgs(args: Record<string, unknown>): SpriteTestSpec 
  * can show what Gemini picked. Emits sidebar events progressively.
  */
 export async function generateSpriteWithGemini(prompt: string): Promise<SpriteTestResult> {
-  console.log(`[TestSprite ${ts()}] Gemini interpretation: "${prompt}"`);
+  log.info('TestSprite', `Gemini interpretation: "${prompt}"`);
 
   const turnId = nextTurnId();
   const userPrompt =
@@ -286,7 +285,7 @@ export async function generateSpriteWithGemini(prompt: string): Promise<SpriteTe
     };
   }
 
-  console.log(`[TestSprite ${ts()}] Gemini chose: ${JSON.stringify(spec)}`);
+  log.info('TestSprite', `Gemini chose: ${JSON.stringify(spec)}`);
 
   // Delegate to Direct, sharing this turn id so push results land on
   // the same sidebar card as the Gemini interpretation.

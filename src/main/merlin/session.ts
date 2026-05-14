@@ -25,6 +25,7 @@ import { emitGeminiTurn, nextTurnId } from './gemini-events';
 import { runMerlinTurn, dispatchToolCalls, type TurnDispatchContext, type EffectTriggerSpec } from './turn-runner';
 import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { summarizeRecentFaceActivity } from './face-event-buffer';
+import { log } from '../logger';
 
 // Default cast envelope timing (in ms). Used by triggerCast() to drive
 // the release-mode TD-side phase transitions. Was previously archetype-
@@ -60,7 +61,7 @@ function safeInvoke(label: string, fn: () => void): void {
   try {
     fn();
   } catch (err) {
-    console.error(`[MerlinSession] callback "${label}" threw:`, err);
+    log.error('MerlinSession', `callback "${label}" threw:`, err);
   }
 }
 
@@ -207,14 +208,14 @@ export class MerlinSession {
     if (this.config.onCaptureFrame) {
       const frameBase64 = await this.config.onCaptureFrame();
       if (frameBase64) {
-        console.log('[MerlinSession] Starting with image-based intro');
+        log.info('MerlinSession', 'Starting with image-based intro');
         result = await this.chat.startChatWithImage(frameBase64);
       } else {
-        console.log('[MerlinSession] Frame capture returned null, using text-only intro');
+        log.info('MerlinSession', 'Frame capture returned null, using text-only intro');
         result = await this.chat.startChat();
       }
     } else {
-      console.log('[MerlinSession] No frame capture callback, using text-only intro');
+      log.info('MerlinSession', 'No frame capture callback, using text-only intro');
       result = await this.chat.startChat();
     }
 
@@ -260,7 +261,7 @@ export class MerlinSession {
       introRound++;
     }
     if (result.toolCalls.length > 0) {
-      console.log(`[MerlinSession] Intro hit ${INTRO_MAX_DISPATCH_ROUNDS}-round tool cap with ${result.toolCalls.length} calls pending — proceeding with whatever text we have`);
+      log.info('MerlinSession', `Intro hit ${INTRO_MAX_DISPATCH_ROUNDS}-round tool cap with ${result.toolCalls.length} calls pending — proceeding with whatever text we have`);
     }
 
     // Full text for the chat-history bubble (initial chunk + post-tool).
@@ -315,8 +316,9 @@ export class MerlinSession {
     // trip. Triggers fire visual-only; no Gemini turn is consumed.
     const trigger = this.effectTriggers.find(t => transcriptContains(transcript, t.word));
     if (trigger) {
-      console.log(
-        `[MerlinSession] Effect trigger "${trigger.word}" matched in "${transcript}" — firing ${trigger.zone}`
+      log.info(
+        'MerlinSession',
+        `Effect trigger "${trigger.word}" matched in "${transcript}" — firing ${trigger.zone}`,
       );
       void pushZoneUpdateWithValidation(trigger.zone, trigger.glslCode);
       // Don't return — magic-word and end-word checks should still run
@@ -332,9 +334,9 @@ export class MerlinSession {
     // hitting the cast as they inhabit the spell).
     const magicMatched = transcriptMatchesMagicWord(transcript, this.state.spell.magicWord);
     if (magicMatched) {
-      console.log(
-        `[MerlinSession] Magic word "${this.state.spell.magicWord}" ` +
-        `matched in transcript "${transcript}" — triggering cast`
+      log.info(
+        'MerlinSession',
+        `Magic word "${this.state.spell.magicWord}" matched in transcript "${transcript}" — triggering cast`,
       );
       this.triggerCast();
     }
@@ -343,7 +345,7 @@ export class MerlinSession {
     // for this turn — the farewell waits for the end-word (or safety
     // timer). No narration during play.
     if (phaseAtEntry !== 'play' && this.state.phase === 'play') {
-      console.log('[MerlinSession] Cast fired — entering PLAY phase silently');
+      log.info('MerlinSession', 'Cast fired — entering PLAY phase silently');
       return {
         text: '',
         phase: this.state.phase,
@@ -356,7 +358,7 @@ export class MerlinSession {
     // anything else (including re-casts) stays silent.
     if (phaseAtEntry === 'play') {
       if (this.endWord && transcriptContains(transcript, this.endWord)) {
-        console.log(`[MerlinSession] End-word "${this.endWord}" matched — closing play phase`);
+        log.info('MerlinSession', `End-word "${this.endWord}" matched — closing play phase`);
         this.closePlay('end-word');
         // Fall through to the Gemini turn — phase is now 'outro' and the
         // outro rules will produce the farewell.
@@ -417,7 +419,7 @@ export class MerlinSession {
     // FaceLandmarker → buffer → context pipeline.
     const faceActivity = summarizeRecentFaceActivity();
     if (faceActivity) {
-      console.log(`[MerlinSession] Injecting FACE ACTIVITY: "${faceActivity}"`);
+      log.info('MerlinSession', `Injecting FACE ACTIVITY: "${faceActivity}"`);
     }
 
     // Open a sidebar turn for this user input.
@@ -439,9 +441,10 @@ export class MerlinSession {
         // the entire trigger library, not appends. Matches what the tool
         // description tells the model.
         this.effectTriggers = [...triggers];
-        console.log(
-          `[MerlinSession] Effect triggers updated (${this.effectTriggers.length}): ` +
-          this.effectTriggers.map(t => `"${t.word}"→${t.zone}`).join(', ')
+        log.info(
+          'MerlinSession',
+          `Effect triggers updated (${this.effectTriggers.length}): ` +
+          this.effectTriggers.map(t => `"${t.word}"→${t.zone}`).join(', '),
         );
       },
       onSpeakChunk: this.config.onSpeakChunk
@@ -609,7 +612,7 @@ export class MerlinSession {
 
     if (this.playSafetyTimer) clearTimeout(this.playSafetyTimer);
     this.playSafetyTimer = setTimeout(() => {
-      console.log(`[MerlinSession] Play phase safety timer expired (${PLAY_PHASE_MAX_MS}ms) — closing session`);
+      log.info('MerlinSession', `Play phase safety timer expired (${PLAY_PHASE_MAX_MS}ms) — closing session`);
       this.closePlay('timeout');
     }, PLAY_PHASE_MAX_MS);
 
@@ -681,7 +684,7 @@ export class MerlinSession {
     // hears two overlapping wizards. Skip the second Gemini call;
     // return empty text so stopMerlinMode's TTS guard is a no-op.
     if (this.state.castCompleted) {
-      console.log('[MerlinSession] endSession: cast already produced the closing narration; skipping second outro');
+      log.info('MerlinSession', 'endSession: cast already produced the closing narration; skipping second outro');
       const response: MerlinResponse = {
         text: '',
         phase: 'idle',
@@ -753,7 +756,7 @@ export class MerlinSession {
    */
   triggerCast(): void {
     if (!this.state.castReady || !isSpellReady(this.state.spell)) {
-      console.log('[MerlinSession] Cannot cast: spell not ready');
+      log.info('MerlinSession', 'Cannot cast: spell not ready');
       return;
     }
 

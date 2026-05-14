@@ -7,8 +7,7 @@
 import type { TDInboundMessage, TDBridgeState, TDBridgeCallbacks } from './types';
 import { zoneStateManager } from '../merlin/zone-state';
 import { updateMetrics, updateVisibility, handleScreenshotResponse, handleSpriteLoaded } from './metrics';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 /**
  * Handle an inbound message from TouchDesigner
@@ -20,7 +19,7 @@ export function handleInbound(
 ): void {
   switch (message.type) {
     case 'td_ready':
-      console.log(`[TDBridge ${ts()}] TD ready:`, message.capabilities);
+      log.info('TDBridge', 'TD ready:', message.capabilities);
       state.tdReady = true;
       state.capabilities = message.capabilities;
       callbacks.onReady?.(message.capabilities);
@@ -28,9 +27,9 @@ export function handleInbound(
 
     case 'compile_result':
       if (message.success) {
-        console.log(`[TDBridge ${ts()}] Zone "${message.zone}" compiled`);
+        log.info('TDBridge', `Zone "${message.zone}" compiled`);
       } else {
-        console.error(`[TDBridge ${ts()}] Zone "${message.zone}" failed:`, message.error);
+        log.error('TDBridge', `Zone "${message.zone}" failed:`, message.error);
       }
       // Update zone state manager
       zoneStateManager.handleCompileResult(message.zone, message.success, message.error);
@@ -93,9 +92,10 @@ export function handleInbound(
       // (so generate_sprite doesn't return until the GPU has the new
       // texture), and call the UI callback.
       if (!message.success) {
-        console.warn(
-          `[TDBridge ${ts()}] sprite_loaded reported failure for asset ${message.assetId}:`,
-          message.error
+        log.warn(
+          'TDBridge',
+          `sprite_loaded reported failure for asset ${message.assetId}:`,
+          message.error,
         );
       }
       handleSpriteLoaded({
@@ -111,6 +111,6 @@ export function handleInbound(
       break;
 
     default:
-      console.log(`[TDBridge ${ts()}] Unknown message type:`, (message as { type: string }).type);
+      log.info('TDBridge', 'Unknown message type:', (message as { type: string }).type);
   }
 }

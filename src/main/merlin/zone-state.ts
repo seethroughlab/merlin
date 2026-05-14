@@ -8,6 +8,7 @@
  */
 
 import { ZONE_NAMES, type ZoneName } from './zone-registry';
+import { log } from '../logger';
 
 /**
  * Possible zone states
@@ -70,7 +71,7 @@ class ZoneStateManager {
   updateZone(zoneName: string, code: string): void {
     const state = this.zones.get(zoneName);
     if (!state) {
-      console.warn(`[ZoneState] Unknown zone: ${zoneName}`);
+      log.warn('ZoneState', `Unknown zone: ${zoneName}`);
       return;
     }
 
@@ -80,7 +81,7 @@ class ZoneStateManager {
     state.status = 'pending';
     state.error = null;
 
-    console.log(`[ZoneState] Zone '${zoneName}' marked pending`);
+    log.info('ZoneState', `Zone '${zoneName}' marked pending`);
   }
 
   /**
@@ -95,7 +96,7 @@ class ZoneStateManager {
   async waitForCompileResult(zoneName: string, timeoutMs: number = 5000): Promise<boolean> {
     const state = this.zones.get(zoneName);
     if (!state) {
-      console.warn(`[ZoneState] waitForCompileResult: Unknown zone: ${zoneName}`);
+      log.warn('ZoneState', `waitForCompileResult: Unknown zone: ${zoneName}`);
       return false;
     }
 
@@ -130,7 +131,7 @@ class ZoneStateManager {
   handleCompileResult(zoneName: string, success: boolean, error?: string): void {
     const state = this.zones.get(zoneName);
     if (!state) {
-      console.warn(`[ZoneState] handleCompileResult: Unknown zone: ${zoneName}`);
+      log.warn('ZoneState', `handleCompileResult: Unknown zone: ${zoneName}`);
       return;
     }
 
@@ -138,12 +139,12 @@ class ZoneStateManager {
       state.status = 'active';
       state.error = null;
       state.lastCompileSuccess = true;
-      console.log(`[ZoneState] Zone '${zoneName}' compiled successfully`);
+      log.info('ZoneState', `Zone '${zoneName}' compiled successfully`);
     } else {
       state.status = 'error';
       state.error = error || 'Compilation failed';
       state.lastCompileSuccess = false;
-      console.log(`[ZoneState] Zone '${zoneName}' compile failed: ${state.error}`);
+      log.info('ZoneState', `Zone '${zoneName}' compile failed: ${state.error}`);
     }
 
     // Resolve pending compile promise
@@ -161,12 +162,12 @@ class ZoneStateManager {
   rollbackZone(zoneName: string): string | null {
     const state = this.zones.get(zoneName);
     if (!state) {
-      console.warn(`[ZoneState] rollbackZone: Unknown zone: ${zoneName}`);
+      log.warn('ZoneState', `rollbackZone: Unknown zone: ${zoneName}`);
       return null;
     }
 
     if (state.previousCode !== null) {
-      console.log(`[ZoneState] Rolling back zone '${zoneName}'`);
+      log.info('ZoneState', `Rolling back zone '${zoneName}'`);
       state.code = state.previousCode;
       state.previousCode = null;
       // Don't change status - caller should re-push the rollback code
@@ -174,7 +175,7 @@ class ZoneStateManager {
     }
 
     // No previous code - reset to default
-    console.log(`[ZoneState] No previous code for '${zoneName}', resetting to default`);
+    log.info('ZoneState', `No previous code for '${zoneName}', resetting to default`);
     state.code = null;
     state.status = 'default';
     state.error = null;
@@ -261,7 +262,7 @@ class ZoneStateManager {
     }
     this.pendingCompiles.clear();
 
-    console.log('[ZoneState] All zones reset to default');
+    log.info('ZoneState', 'All zones reset to default');
   }
 }
 

@@ -18,8 +18,7 @@ import {
   type DriveSource,
 } from './asset-manager';
 import { withRetry } from '../retry';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 // ============ CONFIGURATION ============
 
@@ -38,7 +37,7 @@ const PROMPT_INPUT_MAX_CHARS = 500;
 function clamp(input: string | undefined, label: string): string {
   if (!input) return '';
   if (input.length <= PROMPT_INPUT_MAX_CHARS) return input;
-  console.warn(`[SpriteGen] ${label} truncated from ${input.length} → ${PROMPT_INPUT_MAX_CHARS} chars`);
+  log.warn('SpriteGen', `${label} truncated from ${input.length} → ${PROMPT_INPUT_MAX_CHARS} chars`);
   return input.slice(0, PROMPT_INPUT_MAX_CHARS);
 }
 
@@ -459,7 +458,7 @@ export class SpriteGenerator {
     const style = options.style;
     const prompt = buildSpritePrompt(description, style, options.size);
 
-    console.log(`[SpriteGen ${ts()}] Starting sprite generation: "${description}"`);
+    log.info('SpriteGen', `Starting sprite generation: "${description}"`);
 
     // Start background generation
     const generationId = `sprite_${Date.now()}`;
@@ -498,7 +497,7 @@ export class SpriteGenerator {
     const style = options.style;
     const prompt = buildSpritePrompt(description, style, options.size);
 
-    console.log(`[SpriteGen ${ts()}] Generating sprite (sync): "${description}"`);
+    log.info('SpriteGen', `Generating sprite (sync): "${description}"`);
 
     return this._generateSpriteInternal(prompt, description, options);
   }
@@ -522,7 +521,7 @@ export class SpriteGenerator {
     const animDescription = animation ? `${description} with ${animation} animation` : description;
     const prompt = buildFlipbookPrompt(animDescription, style || 'soft glowing', frameCount, cols, rows);
 
-    console.log(`[SpriteGen ${ts()}] Starting flipbook generation: "${description}" (${frameCount} frames, ${cols}x${rows})`);
+    log.info('SpriteGen', `Starting flipbook generation: "${description}" (${frameCount} frames, ${cols}x${rows})`);
 
     // Start background generation
     const generationId = `flipbook_${Date.now()}`;
@@ -576,7 +575,7 @@ export class SpriteGenerator {
     const animDescription = animation ? `${description} with ${animation} animation` : description;
     const prompt = buildFlipbookPrompt(animDescription, style || 'soft glowing', frameCount, cols, rows);
 
-    console.log(`[SpriteGen ${ts()}] Generating flipbook (sync): "${description}"`);
+    log.info('SpriteGen', `Generating flipbook (sync): "${description}"`);
 
     return this._generateFlipbookInternal(prompt, description, frameCount, cols, rows, options);
   }
@@ -593,7 +592,7 @@ export class SpriteGenerator {
       const ai = ensureGenAI();
 
       // Call Gemini image generation
-      console.log(`[SpriteGen ${ts()}] Calling Gemini image generation...`);
+      log.info('SpriteGen', 'Calling Gemini image generation...');
 
       const response = await withRetry(
         () => ai.models.generateContent({
@@ -626,7 +625,7 @@ export class SpriteGenerator {
         throw new SpriteGenerationError('No image data in Gemini response');
       }
 
-      console.log(`[SpriteGen ${ts()}] Received image: ${imageData.length} bytes`);
+      log.info('SpriteGen', `Received image: ${imageData.length} bytes`);
 
       // Validate
       const validation = validateSpriteImage(imageData);
@@ -645,7 +644,7 @@ export class SpriteGenerator {
         },
       });
 
-      console.log(`[SpriteGen ${ts()}] Saved sprite: ${asset.assetId}`);
+      log.info('SpriteGen', `Saved sprite: ${asset.assetId}`);
 
       // Extract palette from the saved file. Decoded via Electron's
       // nativeImage so PNG/JPEG/WebP all work without a new dep.
@@ -659,7 +658,7 @@ export class SpriteGenerator {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[SpriteGen ${ts()}] Generation failed: ${message}`);
+      log.error('SpriteGen', `Generation failed: ${message}`);
 
       return {
         success: false,
@@ -682,7 +681,7 @@ export class SpriteGenerator {
     try {
       const ai = ensureGenAI();
 
-      console.log(`[SpriteGen ${ts()}] Calling Gemini for flipbook atlas...`);
+      log.info('SpriteGen', 'Calling Gemini for flipbook atlas...');
 
       const response = await withRetry(
         () => ai.models.generateContent({
@@ -715,7 +714,7 @@ export class SpriteGenerator {
         throw new SpriteGenerationError('No image data in Gemini response');
       }
 
-      console.log(`[SpriteGen ${ts()}] Received flipbook atlas: ${imageData.length} bytes`);
+      log.info('SpriteGen', `Received flipbook atlas: ${imageData.length} bytes`);
 
       // Validate
       const validation = validateFlipbookAtlas(imageData, cols, rows);
@@ -745,7 +744,7 @@ export class SpriteGenerator {
         driveSource: options.driveSource,
       });
 
-      console.log(`[SpriteGen ${ts()}] Saved flipbook: ${asset.assetId} (${frameCount} frames)`);
+      log.info('SpriteGen', `Saved flipbook: ${asset.assetId} (${frameCount} frames)`);
 
       // Extract palette from the middle frame so the colors represent the
       // animation's "peak" state rather than a frame-0 startup state that
@@ -762,7 +761,7 @@ export class SpriteGenerator {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[SpriteGen ${ts()}] Flipbook generation failed: ${message}`);
+      log.error('SpriteGen', `Flipbook generation failed: ${message}`);
 
       return {
         success: false,

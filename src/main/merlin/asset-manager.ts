@@ -9,8 +9,7 @@ import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 /**
  * Pick a file extension based on the image bytes' magic header. TD's
@@ -102,7 +101,7 @@ function ensureAssetsDir(): void {
   const dir = getAssetsDir();
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
-    console.log(`[AssetManager ${ts()}] Created assets directory: ${dir}`);
+    log.info('AssetManager', `Created assets directory: ${dir}`);
   }
 }
 
@@ -119,9 +118,9 @@ function loadManifest(): AssetManifest {
     try {
       const data = fs.readFileSync(manifestPath, 'utf-8');
       manifest = JSON.parse(data) as AssetManifest;
-      console.log(`[AssetManager ${ts()}] Loaded manifest with ${Object.keys(manifest.assets).length} assets`);
+      log.info('AssetManager', `Loaded manifest with ${Object.keys(manifest.assets).length} assets`);
     } catch (e) {
-      console.error(`[AssetManager ${ts()}] Failed to load manifest:`, e);
+      log.error('AssetManager', 'Failed to load manifest:', e);
       manifest = { version: '1.0', assets: {} };
     }
   } else {
@@ -143,7 +142,7 @@ function saveManifest(): void {
   try {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   } catch (e) {
-    console.error(`[AssetManager ${ts()}] Failed to save manifest:`, e);
+    log.error('AssetManager', 'Failed to save manifest:', e);
   }
 }
 
@@ -203,7 +202,7 @@ export function saveSprite(
   m.assets[assetId] = asset;
   saveManifest();
 
-  console.log(`[AssetManager ${ts()}] Saved sprite: ${assetId} (${options.width}x${options.height}, ${frameCount} frames)`);
+  log.info('AssetManager', `Saved sprite: ${assetId} (${options.width}x${options.height}, ${frameCount} frames)`);
   return asset;
 }
 
@@ -215,13 +214,13 @@ export function loadSprite(assetId: string): SpriteAsset | null {
   const asset = m.assets[assetId];
 
   if (!asset) {
-    console.warn(`[AssetManager ${ts()}] Asset not found: ${assetId}`);
+    log.warn('AssetManager', `Asset not found: ${assetId}`);
     return null;
   }
 
   // Verify file exists
   if (!fs.existsSync(asset.texturePath)) {
-    console.warn(`[AssetManager ${ts()}] Asset file missing: ${asset.texturePath}`);
+    log.warn('AssetManager', `Asset file missing: ${asset.texturePath}`);
     return null;
   }
 
@@ -253,14 +252,14 @@ export function deleteSprite(assetId: string): boolean {
       fs.unlinkSync(asset.texturePath);
     }
   } catch (e) {
-    console.error(`[AssetManager ${ts()}] Failed to delete file:`, e);
+    log.error('AssetManager', 'Failed to delete file:', e);
   }
 
   // Remove from manifest
   delete m.assets[assetId];
   saveManifest();
 
-  console.log(`[AssetManager ${ts()}] Deleted sprite: ${assetId}`);
+  log.info('AssetManager', `Deleted sprite: ${assetId}`);
   return true;
 }
 
@@ -276,7 +275,7 @@ export function getDefaultSpritePath(): string {
     const defaultSprite = generateDefaultSprite();
     ensureAssetsDir();
     fs.writeFileSync(defaultPath, defaultSprite);
-    console.log(`[AssetManager ${ts()}] Created default sprite`);
+    log.info('AssetManager', 'Created default sprite');
   }
 
   return defaultPath;
@@ -340,7 +339,7 @@ export function clearAllSprites(): void {
   manifest = { version: '1.0', assets: {} };
   saveManifest();
 
-  console.log(`[AssetManager ${ts()}] Cleared all sprites`);
+  log.info('AssetManager', 'Cleared all sprites');
 }
 
 /**

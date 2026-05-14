@@ -11,8 +11,7 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 /**
  * Get the shaders directory path.
@@ -66,7 +65,7 @@ export function loadTemplate(zoneName: string): string | null {
 
   const filename = ZONE_TEMPLATE_FILES[zoneName];
   if (!filename) {
-    console.warn(`[ShaderTemplates ${ts()}] Unknown zone: ${zoneName}`);
+    log.warn('ShaderTemplates', `Unknown zone: ${zoneName}`);
     return null;
   }
 
@@ -74,10 +73,10 @@ export function loadTemplate(zoneName: string): string | null {
   try {
     const content = fs.readFileSync(filepath, 'utf-8');
     templateCache.set(zoneName, content);
-    console.log(`[ShaderTemplates ${ts()}] Loaded template: ${filename}`);
+    log.info('ShaderTemplates', `Loaded template: ${filename}`);
     return content;
   } catch (e) {
-    console.error(`[ShaderTemplates ${ts()}] Failed to load template ${filename}:`, e);
+    log.error('ShaderTemplates', `Failed to load template ${filename}:`, e);
     return null;
   }
 }
@@ -187,5 +186,5 @@ export function getTemplateSnippetForTool(zoneName: string, maxLines: number = 3
  */
 export function clearTemplateCache(): void {
   templateCache.clear();
-  console.log(`[ShaderTemplates ${ts()}] Cache cleared`);
+  log.info('ShaderTemplates', 'Cache cleared');
 }

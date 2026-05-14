@@ -24,13 +24,12 @@ import type {
   FlipbookTestResult,
   SpriteFlipbookConfig,
 } from '../../shared/types';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 export function applyFlipbookConfig(config: SpriteFlipbookConfig): FlipbookTestResult {
-  console.log(
-    `[TestFlipbook ${ts()}] applyFlipbookConfig(${config.atlasCols}x${config.atlasRows} ` +
-    `frames=${config.frameCount} mode=${config.playbackMode} dur=${config.frameDuration} drive=${config.driveSource})`
+  log.info(
+    'TestFlipbook',
+    `applyFlipbookConfig(${config.atlasCols}x${config.atlasRows} frames=${config.frameCount} mode=${config.playbackMode} dur=${config.frameDuration} drive=${config.driveSource})`,
   );
   const pushed = pushFlipbookConfig(config);
   if (pushed) recordFlipbookConfigPush(config);

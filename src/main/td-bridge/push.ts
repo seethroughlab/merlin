@@ -11,15 +11,14 @@ import type { CastEnvelope } from '../merlin/types';
 import { validateGlslSnippet } from '../merlin/glsl-validator';
 import { validateZoneCode, ZoneValidationError, isValidZoneName } from '../merlin/zone-registry';
 import { zoneStateManager } from '../merlin/zone-state';
-
-const ts = () => new Date().toISOString().slice(11, 23);
+import { log } from '../logger';
 
 /**
  * Send a message with connection guard
  */
 function guardedSend(message: object, description: string): boolean {
   if (!isConnected()) {
-    console.log(`[TDBridge ${ts()}] Cannot ${description}: not connected`);
+    log.info('TDBridge', `Cannot ${description}: not connected`);
     return false;
   }
   return send(message);
@@ -97,7 +96,7 @@ export async function pushZoneUpdateWithValidation(
     return { success: false, error: 'Failed to send to TouchDesigner', warnings: syntaxResult.warnings };
   }
 
-  console.log(`[TDBridge ${ts()}] Zone '${zone}' sent for compilation`);
+  log.info('TDBridge', `Zone '${zone}' sent for compilation`);
 
   // 7. Wait for compile result
   const compiled = await zoneStateManager.waitForCompileResult(zone, timeoutMs);
@@ -114,9 +113,9 @@ export async function pushZoneUpdateWithValidation(
     const rollbackCode = previousCode !== null ? previousCode : '// reset to defaults';
     send({ type: 'zone_update', zone, zone_code: rollbackCode });
     if (previousCode !== null) {
-      console.log(`[TDBridge ${ts()}] Zone '${zone}' rolled back to previous code`);
+      log.info('TDBridge', `Zone '${zone}' rolled back to previous code`);
     } else {
-      console.log(`[TDBridge ${ts()}] Zone '${zone}' rolled back to NOOP (no previous code)`);
+      log.info('TDBridge', `Zone '${zone}' rolled back to NOOP (no previous code)`);
     }
 
     return { success: false, error, warnings: syntaxResult.warnings };
@@ -219,9 +218,7 @@ export function pushSpellCast(
   durationMs: number,
   envelope: CastEnvelope
 ): boolean {
-  console.log(
-    `[TDBridge ${ts()}] SPELL CAST! origin=${origin} duration=${durationMs}ms`
-  );
+  log.info('TDBridge', `SPELL CAST! origin=${origin} duration=${durationMs}ms`);
   return guardedSend(
     { type: 'spell_cast', origin, intensity, durationMs, envelope },
     'push spell cast'
@@ -235,9 +232,9 @@ export function pushSpellCast(
  * Set-and-forget per spell — does not need to be called every turn.
  */
 export function pushCastParams(params: CastParams): boolean {
-  console.log(
-    `[TDBridge ${ts()}] Pushing cast params: rise=${params.riseMs ?? '-'}ms ` +
-    `fall=${params.fallMs ?? '-'}ms peak=${params.peakEnergy ?? '-'}`
+  log.info(
+    'TDBridge',
+    `Pushing cast params: rise=${params.riseMs ?? '-'}ms fall=${params.fallMs ?? '-'}ms peak=${params.peakEnergy ?? '-'}`,
   );
   return guardedSend(
     { type: 'set_cast_params', ...params },
@@ -259,9 +256,7 @@ export function pushCastParams(params: CastParams): boolean {
 export function pushSpriteColors(color1: PaletteColor, color2: PaletteColor): boolean {
   const fmt = (c: PaletteColor) =>
     `(${c.r.toFixed(2)},${c.g.toFixed(2)},${c.b.toFixed(2)})`;
-  console.log(
-    `[TDBridge ${ts()}] Pushing sprite colors: primary=${fmt(color1)} accent=${fmt(color2)}`
-  );
+  log.info('TDBridge', `Pushing sprite colors: primary=${fmt(color1)} accent=${fmt(color2)}`);
   return guardedSend(
     { type: 'sprite_colors', color1, color2 },
     'push sprite colors'
@@ -277,11 +272,9 @@ export function pushSpriteColors(color1: PaletteColor, color2: PaletteColor): bo
  * BASELINE_PARTICLE_PARAMS.
  */
 export function pushParticleParams(params: ParticleParams): boolean {
-  console.log(
-    `[TDBridge ${ts()}] Pushing particle params: ` +
-    `count=${params.maxCount ?? '-'} life=${params.lifespan ?? '-'}s ` +
-    `rate=${params.emitRate ?? '-'}/s radius=${params.spawnRadius ?? '-'} ` +
-    `blend=${params.blendMode ?? '-'}`
+  log.info(
+    'TDBridge',
+    `Pushing particle params: count=${params.maxCount ?? '-'} life=${params.lifespan ?? '-'}s rate=${params.emitRate ?? '-'}/s radius=${params.spawnRadius ?? '-'} blend=${params.blendMode ?? '-'}`,
   );
   return guardedSend(
     { type: 'set_particle_params', ...params },
@@ -296,7 +289,7 @@ export function pushParticleParams(params: ParticleParams): boolean {
  * TD will load the texture from the specified path and apply it to particles.
  */
 export function pushSpriteTexture(assetId: string, texturePath: string): boolean {
-  console.log(`[TDBridge ${ts()}] Pushing sprite texture: ${assetId}`);
+  log.info('TDBridge', `Pushing sprite texture: ${assetId}`);
   return guardedSend(
     { type: 'sprite_texture', assetId, texturePath },
     'push sprite texture'
@@ -308,9 +301,9 @@ export function pushSpriteTexture(assetId: string, texturePath: string): boolean
  * This configures the atlas grid, playback mode, and frame timing.
  */
 export function pushFlipbookConfig(config: FlipbookConfigMessage): boolean {
-  console.log(
-    `[TDBridge ${ts()}] Pushing flipbook config: ${config.atlasCols}x${config.atlasRows} ` +
-    `(${config.frameCount} frames, ${config.playbackMode}, drive=${config.driveSource})`
+  log.info(
+    'TDBridge',
+    `Pushing flipbook config: ${config.atlasCols}x${config.atlasRows} (${config.frameCount} frames, ${config.playbackMode}, drive=${config.driveSource})`,
   );
   return guardedSend(
     { type: 'flipbook_config', config },
@@ -323,6 +316,6 @@ export function pushFlipbookConfig(config: FlipbookConfigMessage): boolean {
  * dot). Handled by handle_reset_sprite in ws_callbacks.py.
  */
 export function pushResetSprite(): boolean {
-  console.log(`[TDBridge ${ts()}] Pushing reset_sprite`);
+  log.info('TDBridge', 'Pushing reset_sprite');
   return guardedSend({ type: 'reset_sprite' }, 'push reset sprite');
 }
