@@ -1,15 +1,21 @@
 /**
- * Gemini Integration for Expression Analysis
+ * Gemini integration for one-shot multimodal analysis:
+ *   - micro-expression filmstrip → JSON
+ *   - body-language filmstrip → JSON
+ *   - voice-command transcript → JSON
  *
- * Uses Google's Gemini 2.0 Flash for analyzing micro-expressions
- * from face strip images.
+ * These are independent of the Merlin spell-casting flow (which lives in
+ * src/main/merlin/). Both paths use the @google/genai SDK; this module
+ * does the simple stateless generateContent calls, merlin/* does the
+ * stateful chat + tool dispatch.
  */
 
-import { GoogleGenerativeAI, Part } from '@google/generative-ai';
-import type { MicroExpressionAnalysis, BodyLanguageAnalysis, VoiceCommandResult, VoiceCommandAction } from '../shared/types';
+import { GoogleGenAI } from '@google/genai';
+import type { MicroExpressionAnalysis, BodyLanguageAnalysis, VoiceCommandResult } from '../shared/types';
 
-let genAI: GoogleGenerativeAI | null = null;
-let model: any = null;
+const MODEL = 'gemini-2.5-flash';
+
+let genAI: GoogleGenAI | null = null;
 
 const BODY_LANGUAGE_PROMPT = `You are an expert in body language and nonverbal communication.
 Analyze this filmstrip showing a person over approximately 5 seconds.
@@ -85,146 +91,6 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code blocks):
   "description": "<brief 1-2 sentence narrative description of what you observed>"
 }`;
 
-/**
- * Initialize the Gemini client
- */
-export function initGemini(): boolean {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    console.warn('GEMINI_API_KEY not set - LLM analysis disabled');
-    return false;
-  }
-
-  try {
-    genAI = new GoogleGenerativeAI(apiKey);
-    model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    console.log('Gemini initialized (gemini-2.5-flash)');
-    return true;
-  } catch (error) {
-    console.error('Failed to initialize Gemini:', error);
-    return false;
-  }
-}
-
-/**
- * Analyze a face strip image for micro-expressions
- */
-export async function analyzeMicroExpressions(
-  imageDataUrl: string
-): Promise<MicroExpressionAnalysis> {
-  if (!model) {
-    throw new Error('Gemini not initialized');
-  }
-
-  // Extract base64 data from data URL
-  const base64Match = imageDataUrl.match(/^data:image\/(.*?);base64,(.*)$/);
-  if (!base64Match) {
-    throw new Error('Invalid image data URL');
-  }
-
-  const mimeType = `image/${base64Match[1]}`;
-  const base64Data = base64Match[2];
-
-  // Create image part for Gemini
-  const imagePart: Part = {
-    inlineData: {
-      mimeType,
-      data: base64Data,
-    },
-  };
-
-  try {
-    const result = await model.generateContent([MICRO_EXPRESSION_PROMPT, imagePart]);
-    const response = result.response;
-    const text = response.text();
-
-    // Parse JSON response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('Failed to parse Gemini response:', text);
-      throw new Error('Invalid response format from Gemini');
-    }
-
-    const analysis = JSON.parse(jsonMatch[0]) as MicroExpressionAnalysis;
-    analysis.rawResponse = text;
-
-    return analysis;
-  } catch (error) {
-    console.error('Gemini analysis error:', error);
-    throw error;
-  }
-}
-
-/**
- * Analyze a skeleton strip image for body language
- */
-export async function analyzeBodyLanguage(
-  imageDataUrl: string
-): Promise<BodyLanguageAnalysis> {
-  if (!model) {
-    throw new Error('Gemini not initialized');
-  }
-
-  // Extract base64 data from data URL
-  const base64Match = imageDataUrl.match(/^data:image\/(.*?);base64,(.*)$/);
-  if (!base64Match) {
-    throw new Error('Invalid image data URL');
-  }
-
-  const mimeType = `image/${base64Match[1]}`;
-  const base64Data = base64Match[2];
-
-  // Create image part for Gemini
-  const imagePart: Part = {
-    inlineData: {
-      mimeType,
-      data: base64Data,
-    },
-  };
-
-  try {
-    const result = await model.generateContent([BODY_LANGUAGE_PROMPT, imagePart]);
-    const response = result.response;
-    const text = response.text();
-
-    // Parse JSON response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('Failed to parse Gemini body language response:', text);
-      throw new Error('Invalid response format from Gemini');
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    // Ensure all required fields have valid values with defaults
-    const analysis: BodyLanguageAnalysis = {
-      openness: typeof parsed.openness === 'number' ? parsed.openness : 0,
-      tension: typeof parsed.tension === 'number' ? parsed.tension : 0,
-      engagement: typeof parsed.engagement === 'number' ? parsed.engagement : 0,
-      primaryPosture: parsed.primaryPosture ?? 'unknown',
-      gestureTypes: Array.isArray(parsed.gestureTypes) ? parsed.gestureTypes : [],
-      movementLevel: typeof parsed.movementLevel === 'number' ? parsed.movementLevel : 0,
-      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
-      observations: Array.isArray(parsed.observations) ? parsed.observations : [],
-      description: parsed.description ?? 'No description available',
-      rawResponse: text,
-    };
-
-    return analysis;
-  } catch (error) {
-    console.error('Gemini body language analysis error:', error);
-    throw error;
-  }
-}
-
-/**
- * Check if Gemini is available
- */
-export function isGeminiAvailable(): boolean {
-  return model !== null;
-}
-
 const VOICE_COMMAND_PROMPT = `You are a voice command interpreter for Merlin, a motion capture application.
 The user has spoken a command. Interpret what they want and respond with a JSON action.
 
@@ -265,26 +131,97 @@ User: "turn on pose tracking" → {"understood":true,"action":{"type":"toggle_po
 User: "analyze my face" → {"understood":true,"action":{"type":"capture_face"},"response":"Capturing face expression","confidence":0.9}
 User: "what's the weather" → {"understood":false,"action":null,"response":"I can only control Merlin features","confidence":0.8}`;
 
-/**
- * Interpret a voice command transcript using Gemini
- */
-export async function interpretVoiceCommand(
-  transcript: string
-): Promise<VoiceCommandResult> {
-  if (!model) {
-    throw new Error('Gemini not initialized');
+export function initGemini(): boolean {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('GEMINI_API_KEY not set - LLM analysis disabled');
+    return false;
   }
-
-  const prompt = VOICE_COMMAND_PROMPT.replace('{transcript}', transcript);
-
   try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
+    genAI = new GoogleGenAI({ apiKey });
+    console.log(`Gemini initialized (${MODEL})`);
+    return true;
+  } catch (error) {
+    console.error('Failed to initialize Gemini:', error);
+    return false;
+  }
+}
 
-    // Parse JSON response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+export function isGeminiAvailable(): boolean {
+  return genAI !== null;
+}
+
+function parseDataUrl(imageDataUrl: string): { mimeType: string; data: string } {
+  const m = imageDataUrl.match(/^data:image\/(.*?);base64,(.*)$/);
+  if (!m) throw new Error('Invalid image data URL');
+  return { mimeType: `image/${m[1]}`, data: m[2] };
+}
+
+async function generateText(parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>): Promise<string> {
+  if (!genAI) throw new Error('Gemini not initialized');
+  const response = await genAI.models.generateContent({
+    model: MODEL,
+    contents: [{ role: 'user', parts }],
+  });
+  return response.text ?? '';
+}
+
+function extractJson(text: string): string {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('Invalid response format from Gemini');
+  return match[0];
+}
+
+export async function analyzeMicroExpressions(imageDataUrl: string): Promise<MicroExpressionAnalysis> {
+  const { mimeType, data } = parseDataUrl(imageDataUrl);
+  try {
+    const text = await generateText([
+      { text: MICRO_EXPRESSION_PROMPT },
+      { inlineData: { mimeType, data } },
+    ]);
+    const analysis = JSON.parse(extractJson(text)) as MicroExpressionAnalysis;
+    analysis.rawResponse = text;
+    return analysis;
+  } catch (error) {
+    console.error('Gemini analysis error:', error);
+    throw error;
+  }
+}
+
+export async function analyzeBodyLanguage(imageDataUrl: string): Promise<BodyLanguageAnalysis> {
+  const { mimeType, data } = parseDataUrl(imageDataUrl);
+  try {
+    const text = await generateText([
+      { text: BODY_LANGUAGE_PROMPT },
+      { inlineData: { mimeType, data } },
+    ]);
+    const parsed = JSON.parse(extractJson(text));
+    return {
+      openness: typeof parsed.openness === 'number' ? parsed.openness : 0,
+      tension: typeof parsed.tension === 'number' ? parsed.tension : 0,
+      engagement: typeof parsed.engagement === 'number' ? parsed.engagement : 0,
+      primaryPosture: parsed.primaryPosture ?? 'unknown',
+      gestureTypes: Array.isArray(parsed.gestureTypes) ? parsed.gestureTypes : [],
+      movementLevel: typeof parsed.movementLevel === 'number' ? parsed.movementLevel : 0,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+      observations: Array.isArray(parsed.observations) ? parsed.observations : [],
+      description: parsed.description ?? 'No description available',
+      rawResponse: text,
+    };
+  } catch (error) {
+    console.error('Gemini body language analysis error:', error);
+    throw error;
+  }
+}
+
+export async function interpretVoiceCommand(transcript: string): Promise<VoiceCommandResult> {
+  const prompt = VOICE_COMMAND_PROMPT.replace('{transcript}', transcript);
+  try {
+    const text = await generateText([{ text: prompt }]);
+    let parsed: { understood?: boolean; action?: unknown; response?: string; confidence?: number };
+    try {
+      parsed = JSON.parse(extractJson(text));
+    } catch {
       console.error('Failed to parse Gemini voice command response:', text);
       return {
         understood: false,
@@ -293,13 +230,10 @@ export async function interpretVoiceCommand(
         confidence: 0,
       };
     }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-
     return {
       understood: parsed.understood ?? false,
-      action: parsed.action ?? null,
-      response: parsed.response ?? "Command processed",
+      action: (parsed.action ?? null) as VoiceCommandResult['action'],
+      response: parsed.response ?? 'Command processed',
       confidence: parsed.confidence ?? 0,
     };
   } catch (error) {
