@@ -57,3 +57,6 @@ coverage/
 td/Backup
 td/*.*.toe
 vibe-agent
+
+# Personal study notes / scratch (not for git)
+notes/
