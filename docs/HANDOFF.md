@@ -41,7 +41,7 @@ You're inheriting Merlin Mirror. This document is the single entrypoint: read it
 | Item | Status | Where |
 |------|--------|-------|
 | Listening-stuck-closed bug | **Fixed.** Documented for context in `docs/conversation-flow.md`. |
-| Logger migration | **Partial.** Module exists; only new code uses it. ≈140 console sites in older code. Low-risk to migrate; bounded effort. |
+| Logger migration | **Done.** All console.* sites in `src/main/td-bridge/` and `src/main/merlin/` (~136 sites, 18 files) use `log.info/warn/error` from `src/main/logger.ts`. Two intentional exceptions in `turn-runner.ts` for the per-turn `[Gemini source turnId]` observability stream. |
 | ESLint warnings | 46 warnings, 0 errors. Unused-var cleanup in `src/renderer/main.ts` and `any` casts in `src/main/spout.ts` are the main ones. |
 | `background_environment` zone | **P1 / ready to ship.** Spec in [`docs/improvement-07-background-environment.md`](./improvement-07-background-environment.md). Estimated 4–6 hours TD setup + Electron integration. |
 | Session replay / persistence UI | **P2.** Persistence API exists (`src/main/merlin/state-persistence.ts`); renderer UI not built. |
