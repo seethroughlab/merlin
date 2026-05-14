@@ -1,2 +1,0 @@
-[ ] Merlin should have the option to choose different webcam resolution, as well as the resolution 
-[x] In Test Mode, I'd like to see what info is being sent to Gemini and Gemini's response in the sidebar, as if it was the actual conversation. I'd also like to see when Gemini is using tools -- basically the sidebar should be an accurate representation of the Gemini conversation regardless of whether it's through the test panel or through the full experience. If any of the shaders are invalid, Gemini shoudl try again, even in Test Mode. 
