@@ -86,8 +86,13 @@ class ZoneStateManager {
   /**
    * Wait for compile result from TouchDesigner
    * Returns true if compilation succeeded, false otherwise
+   *
+   * Default 5s gives TD's GLSL compiler comfortable headroom (compile
+   * itself is fast, but TD's _info DAT writeback can stall briefly
+   * after a heavy zone push). Earlier 3s default occasionally tripped
+   * on healthy compiles during scene load.
    */
-  async waitForCompileResult(zoneName: string, timeoutMs: number = 3000): Promise<boolean> {
+  async waitForCompileResult(zoneName: string, timeoutMs: number = 5000): Promise<boolean> {
     const state = this.zones.get(zoneName);
     if (!state) {
       console.warn(`[ZoneState] waitForCompileResult: Unknown zone: ${zoneName}`);

@@ -203,13 +203,17 @@ export function requestScreenshot(
  */
 export function waitForSpriteLoad(
   assetId: string,
-  timeoutMs: number = 5000
+  timeoutMs: number = 8000
 ): Promise<SpriteLoadResult> {
   return new Promise((resolve) => {
     // Cancel any previous wait for this assetId — only one consumer
-    // should be waiting per asset.
+    // should be waiting per asset. Logging here is critical: without
+    // it, a second concurrent waitForSpriteLoad for the same id
+    // silently invalidates the first and the original caller sees a
+    // failed result with no in-process signal that anything was wrong.
     const existing = pendingSpriteLoads.get(assetId);
     if (existing) {
+      console.warn(`[TDMetrics ${ts()}] waitForSpriteLoad(${assetId}) superseded by a newer wait — previous caller will see error="superseded by newer wait"`);
       clearTimeout(existing.timeoutId);
       existing.resolve({ success: false, error: 'superseded by newer wait' });
     }
