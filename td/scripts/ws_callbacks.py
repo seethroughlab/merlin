@@ -818,6 +818,17 @@ def handle_orientation_update(msg):
         glsl.par.vec0valuex = w
         glsl.par.vec0valuey = h
 
+    # Update render1 resolution so the particle render cooks at the
+    # current viewport's aspect. Without this, render1 stays at its
+    # landscape default and particles get stretched non-uniformly when
+    # the composite is displayed in portrait. uScreenResolution on
+    # glsl_billboard is expression-bound to render1.resolutionw/h, so
+    # it picks up the new size automatically.
+    render = op('/project1/render1')
+    if render:
+        render.par.resolutionw = w
+        render.par.resolutionh = h
+
 
 # Ring buffer for hand-gesture derivatives. Module-level so the state
 # survives across frames. Each entry is (timestamp, mid_x, mid_y, mid_z)
