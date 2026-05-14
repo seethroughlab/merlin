@@ -61,36 +61,28 @@ These are bound across the relevant zone ops by `_wire_spell_state_uniforms` and
 
 ## Body-tracking data flow
 
-```
-Electron renderer:                TD:
-  MediaPipe Pose  ──IPC──▶  ws_parlor (tracking_frame)
-                              │
-                              ▼
-                          landmark_table (Table DAT, 33 rows)
-                              │
-                              ▼
-                          body_positions (Script CHOP)
-                              │ chest_x/y/z, eyes_l/r, hands_l/r
-                              ▼
-                     ┌────────┴────────┐
-                     ▼                 ▼
-              pointgenerator1     glsl_force / glsl_velmod / etc.
-              .tx/ty/tz (chest)   uChestPos / uEyeLPos / ... uniforms
+```mermaid
+flowchart LR
+    MP["<b>MediaPipe Pose</b><br/>(Electron renderer)"] -- IPC<br/>tracking_frame --> WS["ws_parlor<br/>(WebSocket DAT)"]
+    WS --> LT["landmark_table<br/>Table DAT, 33 rows"]
+    LT --> BP["body_positions<br/>Script CHOP<br/>chest_x/y/z · eyes_l/r · hands_l/r"]
+    BP --> PG["pointgenerator1<br/>.tx/ty/tz = chest"]
+    BP --> GZ["glsl_force / glsl_velmod / ...<br/>uChestPos · uEyeLPos · uHand*Pos uniforms"]
 ```
 
 `body_positions_callbacks1` (the Script CHOP's callback DAT) implements visibility-aware holding: when a body part's `vis < 0.5`, the position is held at last-good for 3 seconds, then lerps back to chest. Avoids particles snapping to (0,0,0) on landmark loss.
 
 ## Render chain
 
-```
-syphonspoutin1 ──┐                  glsl_billboard (MAT)
-                 ▼                      │  (sprite atlas + flipbook + occlusion)
-            comp_chain  ──▶ render1 ──▶ glsl_postfx ──▶ out_final ──▶ Syphon/Spout
-                              ▲           │
-                              │           ▼
-                       pointgenerator1   uSpriteColor1/2, uVignette, ...
-                              │
-                              └─ glsl_force / glsl_velmod / etc.
+```mermaid
+flowchart LR
+    SY[syphonspoutin1<br/>webcam in] --> CC[comp_chain]
+    GZ[glsl_force<br/>glsl_velmod<br/>glsl_spawn / ...] --> PG[pointgenerator1]
+    GB["glsl_billboard (MAT)<br/>sprite atlas + flipbook + body occlusion"] --> R1
+    PG --> R1[render1]
+    CC --> R1
+    R1 --> PF[glsl_postfx<br/>uSpriteColor1/2 · uVignette · ...]
+    PF --> OF[out_final] --> SS[Syphon / Spout out]
 ```
 
 ## Outbound (Merlin → TD) and inbound (TD → Merlin) message types

@@ -4,120 +4,71 @@ A bird's-eye view of where things live and how they talk. For per-turn detail, s
 
 ## Process layout
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ Electron app                                                       │
-│                                                                    │
-│  ┌──────────────────┐         ┌────────────────────────────────┐   │
-│  │  Renderer        │         │  Main                          │   │
-│  │  (BrowserWindow) │         │                                │   │
-│  │                  │         │  • Gemini chat + Imagen        │   │
-│  │  • MediaPipe     │   IPC   │  • Merlin session orchestr.    │   │
-│  │  • Whisper STT   │ ◀─────▶ │  • TD bridge (WS server)       │   │
-│  │  • LiveTTS WS    │         │  • Asset manager (sprites)     │   │
-│  │  • UI / sidebar  │         │  • Settings persistence        │   │
-│  │  • Test panel    │         │  • Conversation-test HTTP      │   │
-│  └────────┬─────────┘         └────────────────┬───────────────┘   │
-│           │                                     │                  │
-└───────────┼─────────────────────────────────────┼──────────────────┘
-            │                                     │
-       Spout "Merlin Mask"            WebSocket localhost:8001
-       (body segmentation)                        │
-            │                                     ▼
-            ▼                            ┌─────────────────────┐
-┌──────────────────────────────────────▶│  TouchDesigner      │
-│  td/demo.toe                          │  (client)           │
-│                                       │                     │
-│  • ws_parlor → ws_callbacks.py        │                     │
-│  • body_positions ← landmark_table    │                     │
-│  • 5 POP zones + 1 TOP + billboard MAT│                     │
-│  • render1 → glsl_postfx → out_final  │                     │
-│  • Spout/Syphon out                   │                     │
-└───────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                       Display / projector
+```mermaid
+flowchart LR
+    subgraph Electron["Electron app"]
+        direction LR
+        Renderer["<b>Renderer</b> (BrowserWindow)<br/>MediaPipe · Whisper STT<br/>LiveTTS · UI · Test panel"]
+        Main["<b>Main</b><br/>Gemini chat + Imagen<br/>Merlin session orchestration<br/>TD bridge (WS server)<br/>Asset manager · Settings<br/>Conversation-test HTTP"]
+        Renderer <-- IPC --> Main
+    end
+    Renderer -- Spout 'Merlin Mask'<br/>(body segmentation) --> TD
+    Main -- WS localhost:8001 --> TD["<b>TouchDesigner</b> (client)<br/>td/demo.toe<br/>ws_parlor + ws_callbacks.py<br/>5 POPs + TOP + billboard MAT<br/>render1 → glsl_postfx → out_final"]
+    TD --> Display["Display / projector"]
 ```
 
 External services: **Gemini API** (chat, function calls, Imagen, TTS), **Anthropic API** (optional, Conversation Tester only).
 
 ## A user spell turn — full data flow
 
-The most useful trace to internalize. This is what happens between "user speaks" and "particles change".
+The most useful trace to internalize. This is what happens between "user speaks" and "particles change". Two paths fork at the magic-word check; the Gemini path is the common one.
 
-```
-1. User speaks
-   └─ renderer: Whisper STT → onTranscript → handleMerlinTranscript(text)
-                                                 │
-2. Magic-word check (LOCAL, no Gemini)           │
-   ├─ MATCH → fire merlin-trigger-cast IPC ──┐   │
-   │                                          ▼  │
-   │                              main: session.triggerCast()
-   │                                          │
-   │                                          ▼
-   │                              td-bridge: pushSpellCast(...)
-   │                                          │
-   │                                          ▼   (WS)
-   │                              TD: cast envelope tween
-   │                                          
-   └─ NO MATCH → fall through to Gemini turn ─┐
-                                              ▼
-3. merlinProcessSpeech IPC → main
-   └─ session.processUserSpeech(transcript, body, face)
-        │
-        ▼
-4. Chat turn through Gemini (runMerlinTurn)
-   ├─ initial response may carry text + tool calls
-   │  └─ onSpeakChunk fires → renderer: stopContinuousListening + speakWithStreaming
-   │
-   ├─ Tool dispatch loop (dispatchToolCalls)
-   │  ├─ generate_sprite       → Imagen ~25s → pushSpriteTexture → pushFlipbookConfig
-   │  │                          → wait for sprite_loaded ACK
-   │  ├─ set_zone_shader (×N)  → pushZoneUpdateWithValidation (validate → push → wait compile → rollback on fail)
-   │  ├─ request_visual_feedback → requestScreenshot + getLatestVisibility
-   │  │                            → return image + metrics to Gemini as a multimodal function response
-   │  ├─ register_effect_triggers, prepare_casting, get_posture/expression
-   │  │
-   │  └─ Loop: send results back → Gemini may emit more tool calls or final text
-   │
-   └─ Final text accumulated
-        │
-        ▼
-5. Response returned via IPC
-   └─ renderer: speak the remainder (if any) → resume mic on completion
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant R as Renderer
+    participant M as Main / Session
+    participant G as Gemini
+    participant T as TouchDesigner
+
+    U->>R: speaks
+    R->>R: Whisper STT → handleMerlinTranscript
+
+    alt magic word matched (LOCAL, no Gemini)
+        R->>M: merlin-trigger-cast IPC
+        M->>T: pushSpellCast (WS)
+        T-->>T: cast envelope tween
+    else no match — full Gemini turn
+        R->>M: merlinProcessSpeech IPC
+        M->>G: chat.sendMessage(transcript + context)
+        G-->>M: initial text + pending tool calls
+        M-->>R: onSpeakChunk (parallel TTS starts)
+        R->>R: stopContinuousListening
+        loop tool dispatch (up to 5 rounds)
+            Note over M: dispatchToolCalls<br/>generate_sprite · set_zone_shader<br/>request_visual_feedback · get_posture · ...
+            M->>T: WS pushes (sprite_texture, zone_update, request_screenshot, ...)
+            T-->>M: ACKs (sprite_loaded, compile_result, screenshot_result)
+            M->>G: chat.sendToolResults (multimodal: image parts + metrics)
+            G-->>M: more text or more tool calls
+        end
+        M-->>R: final response (text remainder)
+        R->>U: TTS remainder, resume mic
+    end
 ```
 
 ## Asset pipeline (sprite generation)
 
-```
-generate_sprite tool call
-    │
-    ▼
-sprite-generator: buildSpritePrompt → Imagen via @google/genai
-    │ (with withRetry: 3 attempts, exp backoff on 429/5xx)
-    ▼
-PNG bytes → validateSpriteImage (light-bg rejection, transparency check)
-    │
-    ▼
-asset-manager.saveSprite → /tmp/merlin-assets/sprite_<id>.png + manifest
-    │
-    ▼
-palette.extractPaletteFromFile → uSpriteColor1, uSpriteColor2 (vec3)
-    │
-    ▼
-td-bridge.pushSpriteTexture (WS sprite_texture message, fire-and-forget)
-td-bridge.pushFlipbookConfig (WS flipbook_config)
-    │
-    ▼ (back-channel)
-TD: load PNG into movieFileIn → cook glsl_billboard sampler → send sprite_loaded ACK
-    │
-    ▼
-metrics.waitForSpriteLoad(assetId, 8s) resolves
-    │
-    ▼
-turn-runner attaches the sprite PNG as part #2 in the function response
-(part #1 is a screenshot from request_visual_feedback) so Gemini can
-A/B compare what Imagen made vs. what's rendering.
+```mermaid
+flowchart TD
+    A["<b>generate_sprite</b> tool call"] --> B[sprite-generator.buildSpritePrompt]
+    B --> C["Imagen via @google/genai<br/>(withRetry: 3× exp backoff on 429/5xx)"]
+    C --> D["validateSpriteImage<br/>light-bg rejection · transparency check"]
+    D --> E["asset-manager.saveSprite<br/>/tmp/merlin-assets/sprite_id.png + manifest"]
+    E --> F["palette.extractPaletteFromFile<br/>→ uSpriteColor1, uSpriteColor2 (vec3)"]
+    F --> G["pushSpriteTexture + pushFlipbookConfig<br/>fire-and-forget over WS"]
+    G -. WS sprite_loaded ACK .-> H["TD: load PNG into movieFileIn<br/>cook glsl_billboard sampler"]
+    H --> I["metrics.waitForSpriteLoad(8s)<br/>resolves"]
+    I --> J["turn-runner attaches sprite PNG as part #2<br/>in function response (part #1 is screenshot)<br/>so Gemini A/Bs Imagen output vs. render"]
 ```
 
 ## Error paths
