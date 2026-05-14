@@ -162,9 +162,9 @@ The microphone (Whisper continuous-listening with VAD) is governed by `startCont
 | End-word match (during `play`) | Renderer fires `merlin-trigger-end` IPC → `session.closePlay('end-word')`. Outro Gemini turn runs. |
 | `stopMerlinMode()` | `stopContinuousListening()`, clears callbacks, fires `merlin-end` IPC, resets face HUD + armed words. |
 
-### Bug we've seen: listening stuck closed after turn 1
+### Listening stuck closed after turn 1 (fixed)
 
-The chunk path closes the mic with `stopContinuousListening()`. After the chunk's TTS finishes and `merlinProcessSpeech` returns, `handleMerlinTranscript`'s post-turn block has THREE branches:
+The chunk path closes the mic with `stopContinuousListening()`. After the chunk's TTS finishes and `merlinProcessSpeech` returns, `handleMerlinTranscript`'s post-turn block has three branches (see `src/renderer/main.ts:3335–3373`):
 
 ```ts
 if (ttsReady && response.spokenText) {
@@ -172,19 +172,16 @@ if (ttsReady && response.spokenText) {
   await speakWithStreaming(response.spokenText, 'wizard');
   if (merlinModeActive) await startContinuousListening(handleMerlinTranscript);
 } else if (inFlightSpeechPromise) {
-  // (B) chunk in flight, no remainder: await the chunk
+  // (B) chunk in flight, no remainder: await the chunk, THEN resume
   await inFlightSpeechPromise;
   inFlightSpeechPromise = null;
-  // ❌ Does NOT resume listening — but the chunk path stopped it!
+  if (merlinModeActive) await startContinuousListening(handleMerlinTranscript);
 } else {
-  // (C) nothing happening: log only
-  // ✓ Listening was never stopped
+  // (C) nothing happened: mic was never closed, log only
 }
 ```
 
-Branch (B) is the **common path** under the one-response-per-turn rule (chunk fires, spokenText is empty since everything streamed). The mic was stopped by the chunk handler but never restarted. The participant can speak but nothing reaches Whisper. This is the "stopped after 1 reaction" symptom.
-
-**Fix**: branch (B) must call `startContinuousListening(handleMerlinTranscript)` after the await.
+Branch (B) is the **common path** under the one-response-per-turn rule (chunk fires, spokenText is empty since everything streamed). Earlier versions missed the `startContinuousListening` call in this branch — the mic was stopped by the chunk handler and never restarted, producing the "stopped after 1 reaction" symptom. All three branches now correctly converge on a running mic when `merlinModeActive` is true.
 
 ---
 
