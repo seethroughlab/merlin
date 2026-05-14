@@ -8,8 +8,9 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { TDBridgeState, TDBridgeCallbacks } from './types';
 import { handleInbound } from './protocol';
+import { PORTS } from '../config';
 
-const DEFAULT_PORT = 8001;
+const DEFAULT_PORT = PORTS.TD_BRIDGE;
 const PING_INTERVAL_MS = 30000;
 const STALE_TIMEOUT_MS = 60000; // Consider connection stale if no message in 60s
 const PONG_TIMEOUT_MS = 10000; // Expect pong within 10s of ping
@@ -35,7 +36,7 @@ const ts = () => new Date().toISOString().slice(11, 23);
 /**
  * Start the WebSocket server
  */
-export function startServer(port = DEFAULT_PORT, cbs: TDBridgeCallbacks = {}): void {
+export function startServer(port: number = DEFAULT_PORT, cbs: TDBridgeCallbacks = {}): void {
   callbacks = cbs;
 
   wss = new WebSocketServer({ port });

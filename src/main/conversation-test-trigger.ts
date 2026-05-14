@@ -17,8 +17,9 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import type { BrowserWindow } from 'electron';
 import { ipcMain } from 'electron';
+import { PORTS } from './config';
 
-const PORT = Number(process.env.MERLIN_TEST_TRIGGER_PORT ?? 8765);
+const PORT = Number(process.env.MERLIN_TEST_TRIGGER_PORT ?? PORTS.CONVERSATION_TEST);
 const RUN_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface PendingRun {

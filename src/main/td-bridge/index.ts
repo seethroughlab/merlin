@@ -48,12 +48,13 @@ export type { MerlinStateUpdate, ZoneUpdateResult } from './push';
 
 import { startServer, stopServer } from './connection';
 import type { TDBridgeCallbacks } from './types';
+import { PORTS } from '../config';
 
 /**
  * Initialize the TD Bridge WebSocket server
  */
 export function initTDBridge(callbacks: TDBridgeCallbacks = {}): void {
-  startServer(8001, callbacks);
+  startServer(PORTS.TD_BRIDGE, callbacks);
 }
 
 /**

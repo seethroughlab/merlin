@@ -16,6 +16,7 @@ import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-even
 import { resetTDBaseline } from './merlin/reset-td';
 import { generateParticipantLine, isParticipantLLMAvailable, type ParticipantRequest } from './participant';
 import { startConversationTestTrigger } from './conversation-test-trigger';
+import { PORTS } from './config';
 import { saveSessionState, loadSessionState, applySessionState, listSavedSessions, deleteSession } from './merlin/state-persistence';
 import { pushFaceEvent, clearFaceEventBuffer } from './merlin/face-event-buffer';
 import {
@@ -481,7 +482,7 @@ ipcMain.handle('rename-spout-sender', async (_event, oldName: string, newName: s
 ipcMain.handle('get-bridge-stats', () => {
   return {
     connected: isTDConnected(),
-    port: 8001,
+    port: PORTS.TD_BRIDGE,
   };
 });
 
