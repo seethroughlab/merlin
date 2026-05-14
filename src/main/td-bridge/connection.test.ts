@@ -55,18 +55,22 @@ class MockWebSocketServer extends EventEmitter {
 
 let currentServer: MockWebSocketServer | null = null;
 
-vi.mock('ws', () => ({
-  WebSocketServer: class WrappedServer extends MockWebSocketServer {
-    constructor(opts: { port: number }) {
-      super(opts);
-      currentServer = this;
-    }
-  },
-  WebSocket: {
-    OPEN: 1,
-    CLOSED: 3,
-  },
-}));
+vi.mock('ws', () => {
+  return {
+    WebSocketServer: class WrappedServer extends MockWebSocketServer {
+      constructor(opts: { port: number }) {
+        super(opts);
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const self = this;
+        currentServer = self;
+      }
+    },
+    WebSocket: {
+      OPEN: 1,
+      CLOSED: 3,
+    },
+  };
+});
 
 // Stub the protocol dispatcher so handleInbound is observable here.
 const handleInboundMock = vi.fn();

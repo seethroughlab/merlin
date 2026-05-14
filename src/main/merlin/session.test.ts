@@ -130,31 +130,10 @@ describe('MerlinSession.processUserSpeech', () => {
     expect(response.text).toBe('reply');
   });
 
-  it('returns silently after a cast — no Gemini turn runs', async () => {
+  it('does not advance to play on a non-magic-word utterance', async () => {
     const { createMerlinSession } = await import('./session');
     const session = createMerlinSession();
     await session.startSession();
-    // Set up a spell with a known magic word, then mark it ready.
-    const spell = session.getSpell();
-    spell.magicWord = 'illuminate';
-    spell.castingOrigin = 'chest';
-    // Internal state surgery: cast trigger paths require castReady=true
-    // and isSpellReady() — set the bits directly through the state.
-    const st = session.getState();
-    st.castReady = true;
-    // The session's internal state object is a fresh copy from getState;
-    // mutate the real one via processUserSpeech path: easiest is to
-    // bypass the cast-ready guard by calling triggerCast directly.
-    // Instead, drive the public flow: the spell must be both `ready` and
-    // `castReady`. Use spell-state's contract by setting all spell fields.
-    // For simplicity, monkey-patch internal castReady via processUserSpeech
-    // path — feed a transcript that doesn't match, then directly set
-    // castReady through getState's mutability.
-    // Actually getState returns a shallow copy ({...this.state}). To set
-    // castReady, we need the original. The cleanest path is to just
-    // verify the silent-return branch by triggering cast via a known
-    // ready state. Skipping for now: cover this via the triggerCast()
-    // path test below.
     const reply = await session.processUserSpeech('hello', null, null);
     expect(reply.phase).not.toBe('play');
   });
@@ -169,7 +148,7 @@ describe('MerlinSession.processUserSpeech', () => {
     // method we can call directly via casting.
     // Easiest path: call session.triggerCast which already advances to
     // play if cast is ready. Set up the spell first.
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'glow';
     internalState.spell.endWord = 'thanks';
@@ -192,7 +171,7 @@ describe('MerlinSession.processUserSpeech', () => {
     const { createMerlinSession } = await import('./session');
     const session = createMerlinSession();
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'glow';
     internalState.spell.endWord = 'thanks';
@@ -213,7 +192,7 @@ describe('MerlinSession.markCastCompleted endWord validation', () => {
     const { createMerlinSession } = await import('./session');
     const session = createMerlinSession();
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'spark';
     internalState.spell.endWord = '   '; // whitespace-only — should fall back
@@ -239,7 +218,7 @@ describe('MerlinSession.endSession', () => {
     mockChatEndSession.mockResolvedValue('Goodbye.');
     const session = createMerlinSession({ onSessionComplete });
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'spark';
     internalState.spell.endWord = 'done';
@@ -261,7 +240,7 @@ describe('MerlinSession.endSession', () => {
     mockChatStartChat.mockResolvedValue({ text: 'Welcome', toolCalls: [], finishReason: 'STOP' });
     const session = createMerlinSession();
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'spark';
     internalState.spell.endWord = 'done';

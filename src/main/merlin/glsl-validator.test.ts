@@ -88,28 +88,28 @@ describe('glsl-validator', () => {
 
   describe('findUndefinedFunctions', () => {
     it('should not flag GLSL built-ins', () => {
-      const undefined = findUndefinedFunctions('float x = sin(y) + cos(z);');
-      expect(undefined).toHaveLength(0);
+      const result = findUndefinedFunctions('float x = sin(y) + cos(z);');
+      expect(result).toHaveLength(0);
     });
 
     it('should not flag TD helpers', () => {
-      const undefined = findUndefinedFunctions('uint idx = TDIndex();');
-      expect(undefined).toHaveLength(0);
+      const result = findUndefinedFunctions('uint idx = TDIndex();');
+      expect(result).toHaveLength(0);
     });
 
     it('should not flag type constructors', () => {
-      const undefined = findUndefinedFunctions('vec3 v = vec3(1.0, 2.0, 3.0);');
-      expect(undefined).toHaveLength(0);
+      const result = findUndefinedFunctions('vec3 v = vec3(1.0, 2.0, 3.0);');
+      expect(result).toHaveLength(0);
     });
 
     it('should flag unknown functions', () => {
-      const undefined = findUndefinedFunctions('float x = myCustomFunc(y);');
-      expect(undefined).toContain('myCustomFunc');
+      const result = findUndefinedFunctions('float x = myCustomFunc(y);');
+      expect(result).toContain('myCustomFunc');
     });
 
     it('should not flag main', () => {
-      const undefined = findUndefinedFunctions('void main() { }');
-      expect(undefined).not.toContain('main');
+      const result = findUndefinedFunctions('void main() { }');
+      expect(result).not.toContain('main');
     });
   });
 

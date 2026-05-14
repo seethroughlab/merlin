@@ -29,6 +29,7 @@
     "yaml": "^2.6.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.0",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
@@ -36,9 +37,11 @@
     "electron": "^41.3.0",
     "electron-builder": "^25.1.8",
     "electron-rebuild": "^3.2.9",
+    "eslint": "^10.3.0",
     "svg2img": "^1.0.0-beta.2",
     "to-ico": "^1.1.5",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.59.3",
     "vite": "^6.0.3",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6",

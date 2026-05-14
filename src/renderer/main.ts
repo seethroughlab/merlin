@@ -3461,7 +3461,7 @@ if (window.electronAPI) {
   window.electronAPI.onRequestAnalysis(async (data) => {
     console.log(`[Analysis ${new Date().toISOString().slice(11, 23)}] Main process requested fresh ${data.type} analysis`);
 
-    let result: unknown = null;
+    let result: unknown;
     if (data.type === 'face') {
       result = await captureQuickFaceAnalysis();
     } else {

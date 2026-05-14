@@ -218,7 +218,7 @@ export function checkSemicolons(code: string): string[] {
  * Find function calls that aren't recognized
  */
 export function findUndefinedFunctions(code: string): string[] {
-  const undefined: string[] = [];
+  const undefinedFns: string[] = [];
 
   // Match function calls: identifier followed by (
   const functionCallRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
@@ -243,12 +243,12 @@ export function findUndefinedFunctions(code: string): string[] {
     }
 
     // This might be an undefined function
-    if (!undefined.includes(funcName)) {
-      undefined.push(funcName);
+    if (!undefinedFns.includes(funcName)) {
+      undefinedFns.push(funcName);
     }
   }
 
-  return undefined;
+  return undefinedFns;
 }
 
 /**
