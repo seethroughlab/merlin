@@ -24,6 +24,7 @@ import {
   MERLIN_CLOSING_PROMPT,
 } from './prompts';
 import type { MerlinToolCall } from './types';
+import { withRetry } from '../retry';
 
 const MERLIN_MODEL = 'gemini-3-flash-preview';
 
@@ -149,7 +150,10 @@ export class MerlinChat {
       { text: INTRO_WITH_IMAGE_PROMPT },
     ];
 
-    const result = await this.chat.sendMessage({ message: messageParts });
+    const result = await withRetry(
+      () => this.chat!.sendMessage({ message: messageParts }),
+      { label: 'gemini:startChatWithImage' },
+    );
     const response = parseResult(result);
 
     this.history.push(
@@ -168,7 +172,10 @@ export class MerlinChat {
     this.mode = 'merlin';
     this.chat = buildChat(this.history);
 
-    const result = await this.chat.sendMessage({ message: INTRO_WITH_IMAGE_PROMPT });
+    const result = await withRetry(
+      () => this.chat!.sendMessage({ message: INTRO_WITH_IMAGE_PROMPT }),
+      { label: 'gemini:startChat' },
+    );
     const response = parseResult(result);
 
     this.history.push(
@@ -218,8 +225,11 @@ export class MerlinChat {
     const config = opts.allowedTools
       ? this.buildPerCallConfig(opts.allowedTools)
       : undefined;
-    const result = await this.chat.sendMessage(
-      config ? { message, config: config as never } : { message },
+    const result = await withRetry(
+      () => this.chat!.sendMessage(
+        config ? { message, config: config as never } : { message },
+      ),
+      { label: 'gemini:sendMessage' },
     );
     const response = parseResult(result);
 
@@ -289,8 +299,11 @@ export class MerlinChat {
     const config = opts.allowedTools
       ? this.buildPerCallConfig(opts.allowedTools)
       : undefined;
-    const result = await this.chat.sendMessage(
-      config ? { message: parts, config: config as never } : { message: parts },
+    const result = await withRetry(
+      () => this.chat!.sendMessage(
+        config ? { message: parts, config: config as never } : { message: parts },
+      ),
+      { label: 'gemini:sendToolResults' },
     );
     return parseResult(result);
   }
@@ -303,7 +316,10 @@ export class MerlinChat {
       return 'Session was not active.';
     }
 
-    const result = await this.chat.sendMessage({ message: MERLIN_CLOSING_PROMPT });
+    const result = await withRetry(
+      () => this.chat!.sendMessage({ message: MERLIN_CLOSING_PROMPT }),
+      { label: 'gemini:endSession' },
+    );
     const response = parseResult(result);
     this.chat = null;
 

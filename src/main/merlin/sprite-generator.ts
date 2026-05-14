@@ -17,6 +17,7 @@ import {
   type PlaybackMode,
   type DriveSource,
 } from './asset-manager';
+import { withRetry } from '../retry';
 
 const ts = () => new Date().toISOString().slice(11, 23);
 
@@ -27,6 +28,19 @@ const SPRITE_MIN_SIZE = 64;
 const SPRITE_MAX_SIZE = 1024;
 
 const FLIPBOOK_FRAME_SIZE = 256;
+
+// Hard cap on free-form caller-supplied strings (description, style,
+// intent, element) before they hit the Imagen prompt. A malformed or
+// runaway caller pushing 10k chars would otherwise build a giant
+// prompt that's slow to encode and gives Imagen nothing useful to work
+// with. 500 chars comfortably fits any real description.
+const PROMPT_INPUT_MAX_CHARS = 500;
+function clamp(input: string | undefined, label: string): string {
+  if (!input) return '';
+  if (input.length <= PROMPT_INPUT_MAX_CHARS) return input;
+  console.warn(`[SpriteGen] ${label} truncated from ${input.length} → ${PROMPT_INPUT_MAX_CHARS} chars`);
+  return input.slice(0, PROMPT_INPUT_MAX_CHARS);
+}
 
 // Validation thresholds
 const CENTER_BRIGHTNESS_MIN = 0.15;
@@ -87,12 +101,13 @@ export function buildSpritePrompt(
   style?: string,
   size: number = SPRITE_SIZE
 ): string {
-  const styleText = style || 'soft and glowing';
+  const safeDescription = clamp(description, 'description');
+  const styleText = clamp(style, 'style') || 'soft and glowing';
 
   return `Generate a ${size}x${size} pixel particle sprite on a PURE BLACK background.
 
 Visual description:
-- A single ${description} shape centered in the image
+- A single ${safeDescription} shape centered in the image
 - Style: ${styleText}
 - Bright/glowing in the center
 - Smoothly fades to pure black (RGB 0,0,0) at the edges
@@ -116,6 +131,8 @@ export function buildFlipbookPrompt(
   cols: number = 4,
   rows: number = 4
 ): string {
+  const safeDescription = clamp(description, 'description');
+  const safeStyle = clamp(style, 'style') || 'soft glowing';
   const totalWidth = cols * FLIPBOOK_FRAME_SIZE;
   const totalHeight = rows * FLIPBOOK_FRAME_SIZE;
 
@@ -126,8 +143,8 @@ Requirements:
 - ${frameCount} animation frames arranged in a grid (left-to-right, top-to-bottom)
 - Each frame: ${FLIPBOOK_FRAME_SIZE}x${FLIPBOOK_FRAME_SIZE} pixels
 - PURE BLACK background (RGB 0,0,0) - NOT transparent, NOT checkered
-- Each frame shows: ${description}
-- Style: ${style}
+- Each frame shows: ${safeDescription}
+- Style: ${safeStyle}
 - Each frame has bright content in center, fading to black at edges
 
 Animation progression:
@@ -578,13 +595,16 @@ export class SpriteGenerator {
       // Call Gemini image generation
       console.log(`[SpriteGen ${ts()}] Calling Gemini image generation...`);
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-image-preview',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          responseModalities: ['IMAGE', 'TEXT'],
-        },
-      });
+      const response = await withRetry(
+        () => ai.models.generateContent({
+          model: 'gemini-3.1-flash-image-preview',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            responseModalities: ['IMAGE', 'TEXT'],
+          },
+        }),
+        { label: 'imagen:sprite' },
+      );
 
       // Extract image from response
       let imageData: Buffer | null = null;
@@ -664,13 +684,16 @@ export class SpriteGenerator {
 
       console.log(`[SpriteGen ${ts()}] Calling Gemini for flipbook atlas...`);
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-image-preview',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          responseModalities: ['IMAGE', 'TEXT'],
-        },
-      });
+      const response = await withRetry(
+        () => ai.models.generateContent({
+          model: 'gemini-3.1-flash-image-preview',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            responseModalities: ['IMAGE', 'TEXT'],
+          },
+        }),
+        { label: 'imagen:flipbook' },
+      );
 
       // Extract image from response
       let imageData: Buffer | null = null;

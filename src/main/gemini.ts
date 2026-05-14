@@ -12,6 +12,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import type { MicroExpressionAnalysis, BodyLanguageAnalysis, VoiceCommandResult } from '../shared/types';
+import { withRetry } from './retry';
 
 const MODEL = 'gemini-2.5-flash';
 
@@ -159,10 +160,13 @@ function parseDataUrl(imageDataUrl: string): { mimeType: string; data: string } 
 
 async function generateText(parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>): Promise<string> {
   if (!genAI) throw new Error('Gemini not initialized');
-  const response = await genAI.models.generateContent({
-    model: MODEL,
-    contents: [{ role: 'user', parts }],
-  });
+  const response = await withRetry(
+    () => genAI!.models.generateContent({
+      model: MODEL,
+      contents: [{ role: 'user', parts }],
+    }),
+    { label: 'gemini:generateText' },
+  );
   return response.text ?? '';
 }
 
