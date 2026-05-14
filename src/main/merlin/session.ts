@@ -47,6 +47,23 @@ function getCastDuration(env: typeof DEFAULT_CAST_ENVELOPE): number {
 const PLAY_PHASE_MAX_MS = 60_000;
 const DEFAULT_END_WORD = 'farewell';
 
+// Cap on conversationHistory length. Each turn pushes 1–2 messages
+// (user + assistant); 200 entries covers ~100 turns which is well past
+// any realistic single session. Without a cap, long-running test
+// sessions accumulate forever.
+const MAX_HISTORY_MESSAGES = 200;
+
+// Invoke a config callback, logging any throw instead of letting it
+// propagate. Callbacks are owned by index.ts (IPC layer); a bad listener
+// must not be allowed to kill the in-progress session turn.
+function safeInvoke(label: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    console.error(`[MerlinSession] callback "${label}" threw:`, err);
+  }
+}
+
 
 /**
  * Callback for when spell state updates
@@ -138,6 +155,17 @@ export class MerlinSession {
     this.config = config;
     this.phaseConfig = { ...DEFAULT_PHASE_CONFIG, ...config.phaseConfig };
     this.state = this.createInitialState();
+  }
+
+  /**
+   * Append to conversation history and trim to MAX_HISTORY_MESSAGES so
+   * long-running sessions don't accumulate unbounded memory.
+   */
+  private pushHistory(message: ConversationMessage): void {
+    this.conversationHistory.push(message);
+    if (this.conversationHistory.length > MAX_HISTORY_MESSAGES) {
+      this.conversationHistory.splice(0, this.conversationHistory.length - MAX_HISTORY_MESSAGES);
+    }
   }
 
   /**
@@ -246,7 +274,7 @@ export class MerlinSession {
 
     // Add the full text to conversation history (everything Gemini said,
     // streamed + post-tool). The chat-bubble display reads from this.
-    this.conversationHistory.push({
+    this.pushHistory({
       role: 'assistant',
       content: introFullText,
       timestamp: Date.now(),
@@ -368,7 +396,7 @@ export class MerlinSession {
     }
 
     // Add user message to history
-    this.conversationHistory.push({
+    this.pushHistory({
       role: 'user',
       content: transcript,
       timestamp: Date.now(),
@@ -416,15 +444,19 @@ export class MerlinSession {
           this.effectTriggers.map(t => `"${t.word}"→${t.zone}`).join(', ')
         );
       },
-      onSpeakChunk: this.config.onSpeakChunk,
+      onSpeakChunk: this.config.onSpeakChunk
+        ? (text: string) => safeInvoke('onSpeakChunk', () => this.config.onSpeakChunk!(text))
+        : undefined,
       onCastArmed: ({ magicWord, gestureHint }) => {
         // Forward to the session config caller with the end-word
         // included so the renderer arms both at once. Default end-word
         // matches what closePlay/processUserSpeech expects.
-        this.config.onCastArmed?.({
-          magicWord,
-          endWord: this.endWord ?? DEFAULT_END_WORD,
-          gestureHint,
+        safeInvoke('onCastArmed', () => {
+          this.config.onCastArmed?.({
+            magicWord,
+            endWord: this.endWord ?? DEFAULT_END_WORD,
+            gestureHint,
+          });
         });
       },
     };
@@ -460,7 +492,7 @@ export class MerlinSession {
     emitGeminiTurn({ id: turnId, source: 'live', final: true });
 
     // Add assistant response to history
-    this.conversationHistory.push({
+    this.pushHistory({
       role: 'assistant',
       content: fullText,
       timestamp: Date.now(),
@@ -568,7 +600,12 @@ export class MerlinSession {
     this.previousPhase = 'play';
     // Lock in the end-word for local matching. For now uses the default;
     // a future Gemini extension to prepare_casting can override it.
-    this.endWord = (this.state.spell as { endWord?: string }).endWord ?? DEFAULT_END_WORD;
+    // Validate non-empty so a malformed spell can't make the session
+    // end on any utterance (every transcript contains "").
+    const candidateEndWord = (this.state.spell as { endWord?: string }).endWord;
+    this.endWord = candidateEndWord && candidateEndWord.trim().length > 0
+      ? candidateEndWord.trim()
+      : DEFAULT_END_WORD;
 
     if (this.playSafetyTimer) clearTimeout(this.playSafetyTimer);
     this.playSafetyTimer = setTimeout(() => {
@@ -617,6 +654,15 @@ export class MerlinSession {
    * End the session
    */
   async endSession(): Promise<MerlinResponse> {
+    // Clear the play-phase safety timer first. If endSession races with
+    // a timer fire (e.g. user-initiated stopMerlinMode while the 60s
+    // timer is about to expire), the timer's closePlay→onSessionComplete
+    // would double up with the renderer's own teardown path.
+    if (this.playSafetyTimer) {
+      clearTimeout(this.playSafetyTimer);
+      this.playSafetyTimer = null;
+    }
+
     if (!this.chat.isActive()) {
       return {
         text: 'Session was not active.',
@@ -649,7 +695,7 @@ export class MerlinSession {
     const outroText = await this.chat.endSession();
 
     // Add to conversation history
-    this.conversationHistory.push({
+    this.pushHistory({
       role: 'assistant',
       content: outroText,
       timestamp: Date.now(),
