@@ -4,7 +4,9 @@
 
 **Not built.** Merlin currently renders particles as billboards only. This document captures the research for a mesh-rendering path so a future maintainer can re-add it without rediscovering everything from scratch.
 
-In a follow-up commit, the orphaned UI surfaces (Render Mode toggle, `material_pixel` zone, `shaders/mat_pixel.glsl`) are pruned to reduce noise. If mesh mode is later re-added, that prune commit is the place to revert from.
+The orphaned UI surfaces (Render Mode toggle, `material_pixel` zone, `shaders/mat_pixel.glsl`) have been pruned from main. If mesh mode is later re-added, that prune commit is the place to revert from — search git log for "Prune mesh-mode" or look for the commit before the cleanup pass.
+
+> **Important when re-adding**: MCP-created TouchDesigner nodes (geometry COMPs, MAT ops, attribute SOPs, etc.) do **not** survive a TD restart unless `td/demo.toe` is saved. The `ws_callbacks.py` self-heal pattern wires expression bindings on connect, but it can't recreate nodes. Save the .toe within the minute of any MCP node-creation work. See [`../CLAUDE.md`](../CLAUDE.md#mcp-created-nodes-dont-survive-restart-unless-toe-is-saved).
 
 ## Why a mesh mode at all
 

@@ -4,6 +4,12 @@ Remaining features from vibe-agent that could still be ported to Merlin. Items a
 
 > Note: `shape_deform` and `material_lighting` are mesh-mode-dependent. Mesh mode was scoped out and pruned (see `docs/mesh-mode-pipeline.md`), so these are blocked until/unless mesh rendering returns.
 
+## Priorities for the next team
+
+- **P1 / ready to ship**: `background_environment` — spec is fully written in [`improvement-07-background-environment.md`](./improvement-07-background-environment.md). ~4–6 hours TD setup + Electron integration + testing.
+- **P2 / has prereq**: `Session replay` — persistence API exists (`src/main/merlin/state-persistence.ts`), renderer UI needs to be built.
+- **P3 / blocked**: `shape_deform`, `material_lighting`, `MAT parameter control` — all gated on mesh mode being unscoped. See `docs/mesh-mode-pipeline.md`.
+
 ---
 
 ## Shader Zones

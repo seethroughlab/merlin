@@ -2,6 +2,8 @@
 
 Interactive AR experience combining Electron, MediaPipe tracking, and TouchDesigner visuals.
 
+> **New here?** Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first. This file is a deep-dive architecture reference, not a starting point.
+
 ## Architecture
 
 - **Electron App** (`src/main/`, `src/renderer/`): Camera capture, AI chat, spell recognition

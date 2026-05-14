@@ -1,5 +1,7 @@
 # Improvement: Background Environment Zone
 
+> **Status:** Ready to implement. P1 priority per [`vibe-agent-features.md`](./vibe-agent-features.md). Estimated 4–6 hours for TD setup + Electron integration + testing. Spec below is fully fleshed out; no design open questions blocking implementation.
+
 ## Overview
 
 Add a `background_environment` zone that lets Gemini replace the background of the webcam image using the person segmentation mask. The person stays as-is from the webcam; behind them, Gemini's zone code fills the frame with any procedural pattern — gradients, animated noise, a void, a vortex, elemental environments, etc.

@@ -213,6 +213,8 @@ Gemini must return structured JSON conforming to this shape:
 
 * **Streaming (recommended) —** reduces perceived latency and enables early speech playback.
 
+**Implementation note:** Production uses `@google/genai` v1+ on `gemini-3-flash-preview` for chat (multimodal function responses, streaming, tool use) and Imagen for sprite generation. The shorter one-shot analysis paths in `src/main/gemini.ts` (micro-expression, body language, voice command) use `gemini-2.5-flash`. See [`../CLAUDE.md`](../CLAUDE.md#gemini-sdk) for SDK-level notes.
+
 # **7\. Spell System**
 
 The Spell System translates interpreted user intent into structured parameters that drive the visual system. Spells are generated within a bounded multidimensional space.
