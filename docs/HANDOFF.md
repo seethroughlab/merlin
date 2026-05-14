@@ -38,6 +38,8 @@ You're inheriting Merlin Mirror. This document is the single entrypoint: read it
 
 ## Known gaps and open work
 
+The short table below is a snapshot. The canonical priorities list — what to actually work on next, ranked — lives at [`roadmap.md`](./roadmap.md), and the full specs live under [`specs/`](./specs/).
+
 | Item | Status | Where |
 |------|--------|-------|
 | Listening-stuck-closed bug | **Fixed.** Documented for context in `docs/conversation-flow.md`. |

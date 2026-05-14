@@ -23,6 +23,7 @@ Trigger a live session with **Shift+M**, or open the test panel with **Shift+T**
 | [`docs/architecture.md`](./docs/architecture.md) | System block diagram, data flows, error paths |
 | [`docs/conversation-flow.md`](./docs/conversation-flow.md) | Per-turn execution: phase machine, IPC/WS events, listening lifecycle |
 | [`docs/PRD.md`](./docs/PRD.md) | Design intent and intended participant experience |
+| [`docs/roadmap.md`](./docs/roadmap.md) | P1/P2/P3 priorities; points at full specs under `docs/specs/` |
 | [`CLAUDE.md`](./CLAUDE.md) | Module-by-module architecture reference (used by Claude Code; safe for humans too) |
 | [`td/ARCHITECTURE.md`](./td/ARCHITECTURE.md) | TouchDesigner-side: COMP layout, GLSL zones, body-tracking flow |
 
