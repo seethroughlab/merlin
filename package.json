@@ -1,6 +1,6 @@
 {
   "name": "merlin",
-  "version": "0.1.0",
+  "version": "1.0.0-handoff",
   "description": "Merlin Mirror - AI-powered spell casting experience",
   "main": "dist/main/index.js",
   "scripts": {
