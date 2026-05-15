@@ -1,37 +1,50 @@
+/**
+ * Main-process bootstrap for the Merlin Mirror Electron app.
+ *
+ * Responsibilities (in roughly the order they run):
+ *   1. Load environment + check API keys.
+ *   2. Initialize Gemini TTS, Live TTS, and the TD WebSocket bridge.
+ *   3. Create the visible preview window (+ a hidden Spout window for
+ *      texture output; the mask window is currently dormant).
+ *   4. Build the MainContext that IPC modules use, then call
+ *      registerAllIPC() once to wire up every `ipcMain.handle/on`.
+ *
+ * Handler bodies live under `src/main/ipc/` (split topically into
+ * `system`, `merlin`, `merlin-test`, `tts`). The state they read or
+ * write — `mainWindow`, `merlinSession`, last analysis caches, the
+ * pending-analysis request map — is owned here and exposed to them via
+ * the `MainContext`. Single source of truth, no module-level
+ * singletons smuggling state across files.
+ */
+
 import { config } from 'dotenv';
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { join, dirname } from 'path';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-// OSC removed - all communication now via WebSocket (td-bridge)
-import { createSpoutSender, wireWindowToSender, closeSpout, resizeSpoutSender } from './spout';
-import { analyzeMicroExpressions, analyzeBodyLanguage, isGeminiAvailable } from './merlin/gemini-analysis';
-import { initTTS as initGeminiTTS, generateMerlinSpeech as generateSpeech, isTTSAvailable } from './tts';
-import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './tts-live';
+import { existsSync } from 'fs';
+import { createSpoutSender, wireWindowToSender, closeSpout } from './spout';
+import { isGeminiAvailable } from './merlin/gemini-analysis';
+import { initTTS as initGeminiTTS } from './tts';
+import { initLiveTTS, closeLiveTTS } from './tts-live';
 import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
-import { testShaderGeneration } from './merlin/test-shader';
-import { generateSpriteDirect, generateSpriteWithGemini } from './merlin/test-sprite';
-import { applyFlipbookConfig, getCurrentMirroredState } from './merlin/test-flipbook';
-import { testLiveSpell } from './merlin/test-live-spell';
 import { setMainWindow as setGeminiEventsMainWindow } from './merlin/gemini-events';
-import { resetTDBaseline } from './merlin/reset-td';
-import { generateParticipantLine, isParticipantLLMAvailable, type ParticipantRequest } from './participant';
 import { startConversationTestTrigger } from './conversation-test-trigger';
-import { PORTS } from './config';
-import { saveSessionState, loadSessionState, applySessionState, listSavedSessions, deleteSession } from './merlin/state-persistence';
-import { pushFaceEvent, clearFaceEventBuffer } from './merlin/face-event-buffer';
 import {
   initTDBridge,
   closeTDBridge,
-  isConnected as isTDConnected,
-  isTDReady,
   pushOrientationUpdate,
-  pushTrackingFrame,
   pushMerlinState,
-  pushZoneUpdateWithValidation,
-  state as tdState,
+  isConnected as isTDConnected,
 } from './td-bridge';
-import { store, getAllSettings, setSetting } from './settings';
-import type { TrackingFrame, BodyLanguageAnalysis, MicroExpressionAnalysis, MerlinUIUpdate, SpellState, TestShaderConfig, SpriteTestSpec, SpriteFlipbookConfig, LiveSpellTestInput } from '../shared/types';
+import { store } from './settings';
+import type {
+  BodyLanguageAnalysis,
+  MicroExpressionAnalysis,
+  MerlinUIUpdate,
+  SpellState,
+} from '../shared/types';
+import { registerAllIPC, type MainContext, type MainContextRefs } from './ipc';
+
+// ============ ENV ============
 
 // Load .env file - try multiple locations for dev vs production
 const envPaths = [
@@ -53,13 +66,14 @@ if (!process.env.GEMINI_API_KEY) {
   console.log('GEMINI_API_KEY not found. Place .env file next to Merlin.exe with: GEMINI_API_KEY=your_key');
 }
 
+// ============ STATE ============
+
 let mainWindow: BrowserWindow | null = null;
 let spoutWindow: BrowserWindow | null = null;
 let maskWindow: BrowserWindow | null = null;
 
-// OSC removed - all communication now via WebSocket (td-bridge)
-
-// Spout configuration
+// Spout configuration (referenced by createSpoutWindow + the mask
+// window creator). Static after startup.
 const spoutConfig = {
   enabled: true,
   senderName: 'Merlin',
@@ -68,26 +82,35 @@ const spoutConfig = {
   frameRate: 30,
 };
 
-// Merlin session (singleton)
-let merlinSession: MerlinSession | null = null;
+// Mutable refs shared with IPC handlers via the MainContext. Single
+// source of truth — both the bootstrap and the IPC modules read/write
+// through this bag instead of cloning let-bindings into closures.
+const refs: MainContextRefs = {
+  session: null,
+  lastBodyAnalysis: null,
+  lastFaceAnalysis: null,
+  pendingAnalysisRequests: new Map(),
+};
 
-// Cached analysis for Merlin session
-let lastBodyAnalysis: Partial<BodyLanguageAnalysis> | null = null;
-let lastFaceAnalysis: Partial<MicroExpressionAnalysis> | null = null;
+// ============ HELPERS ============
 
-// Pending analysis requests (for tool callbacks)
-const pendingAnalysisRequests = new Map<string, (result: unknown) => void>();
+/** Short timestamp helper (HH:MM:SS.mmm) used in log lines. */
+const ts = () => new Date().toISOString().slice(11, 23);
 
 /**
- * Request fresh analysis from the renderer
- * Used when Gemini's tools request updated body/face analysis
+ * Request fresh body or face analysis from the renderer. The renderer
+ * runs the actual MediaPipe → filmstrip → Gemini round-trip; the main
+ * process just brokers the request and returns the cached result if
+ * the renderer is slow or unavailable.
  */
 async function requestFreshAnalysis(
-  type: 'face' | 'body'
+  type: 'face' | 'body',
 ): Promise<BodyLanguageAnalysis | MicroExpressionAnalysis | null> {
   if (!mainWindow || mainWindow.isDestroyed()) {
     console.log(`[Analysis ${ts()}] No main window, returning cached`);
-    return type === 'body' ? lastBodyAnalysis as BodyLanguageAnalysis : lastFaceAnalysis as MicroExpressionAnalysis;
+    return type === 'body'
+      ? (refs.lastBodyAnalysis as BodyLanguageAnalysis | null)
+      : (refs.lastFaceAnalysis as MicroExpressionAnalysis | null);
   }
 
   return new Promise((resolve) => {
@@ -96,11 +119,15 @@ async function requestFreshAnalysis(
     // Set timeout to fall back to cached
     const timeout = setTimeout(() => {
       console.log(`[Analysis ${ts()}] Request timed out, returning cached`);
-      pendingAnalysisRequests.delete(requestId);
-      resolve(type === 'body' ? lastBodyAnalysis as BodyLanguageAnalysis : lastFaceAnalysis as MicroExpressionAnalysis);
+      refs.pendingAnalysisRequests.delete(requestId);
+      resolve(
+        type === 'body'
+          ? (refs.lastBodyAnalysis as BodyLanguageAnalysis | null)
+          : (refs.lastFaceAnalysis as MicroExpressionAnalysis | null),
+      );
     }, 5000);
 
-    pendingAnalysisRequests.set(requestId, (result) => {
+    refs.pendingAnalysisRequests.set(requestId, (result) => {
       clearTimeout(timeout);
       resolve(result as BodyLanguageAnalysis | MicroExpressionAnalysis | null);
     });
@@ -110,9 +137,7 @@ async function requestFreshAnalysis(
   });
 }
 
-/**
- * Send Merlin UI update to all windows
- */
+/** Send a Merlin UI update to every live BrowserWindow. */
 function broadcastMerlinUpdate(update: MerlinUIUpdate): void {
   const windows = [mainWindow, spoutWindow, maskWindow];
   for (const win of windows) {
@@ -123,13 +148,14 @@ function broadcastMerlinUpdate(update: MerlinUIUpdate): void {
 }
 
 /**
- * Create a MerlinSession with callbacks
+ * Build a MerlinSession with all the bootstrap-side callbacks wired
+ * up (spell/phase broadcasts, frame capture for the intro turn,
+ * speak-chunk forwarding, cast-armed signal, session-complete auto-end).
  */
 function createMerlinSession(): MerlinSession {
   return createMerlinSessionInstance({
     onSpellUpdate: (spell: SpellState) => {
       console.log(`[Merlin] Spell updated: intent=${spell.intent}, element=${spell.element}, confidence=${spell.confidence}`);
-      // WebSocket
       if (isTDConnected()) {
         pushMerlinState({
           active: true,
@@ -139,23 +165,20 @@ function createMerlinSession(): MerlinSession {
     },
     onPhaseChange: (phase) => {
       console.log(`[Merlin] Phase changed: ${phase}`);
-      // Broadcast phase change
-      if (merlinSession) {
+      if (refs.session) {
         broadcastMerlinUpdate({
           phase,
-          turnCount: merlinSession.getState().turnCount,
-          spell: merlinSession.getSpell(),
+          turnCount: refs.session.getState().turnCount,
+          spell: refs.session.getSpell(),
           isListening: false,
           isProcessing: false,
         });
       }
     },
     onRequestAnalysis: async (type, _focus) => {
-      // Request fresh analysis from renderer (or fall back to cached)
       return requestFreshAnalysis(type);
     },
     onCaptureFrame: async () => {
-      // Capture current camera frame as base64 for personalized intro
       if (!mainWindow || mainWindow.isDestroyed()) {
         return null;
       }
@@ -178,7 +201,6 @@ function createMerlinSession(): MerlinSession {
       }
     },
     onSessionComplete: () => {
-      // Session reached outro - notify renderer to end
       console.log(`[Merlin ${ts()}] Session complete (auto-end triggered)`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('merlin-auto-end');
@@ -195,10 +217,10 @@ function createMerlinSession(): MerlinSession {
       }
     },
     onCastArmed: (payload) => {
-      // The moment prepare_casting fires, ship the magic word + end word
-      // to the renderer so its background cast listener can match the
-      // participant's speech directly — no Gemini round-trip needed when
-      // they say the word.
+      // The moment prepare_casting fires, ship the magic word to the
+      // renderer so its background cast listener can match the
+      // participant's speech directly — no Gemini round-trip needed
+      // when they say the word.
       console.log(`[Merlin ${ts()}] Cast armed: magicWord="${payload.magicWord}"`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('merlin-cast-armed', payload);
@@ -207,8 +229,22 @@ function createMerlinSession(): MerlinSession {
   });
 }
 
+// ============ MAIN CONTEXT ============
+
+const ctx: MainContext = {
+  getMainWindow: () => mainWindow,
+  getSpoutWindow: () => spoutWindow,
+  getMaskWindow: () => maskWindow,
+  refs,
+  ts,
+  broadcastMerlinUpdate,
+  createMerlinSession,
+};
+
+// ============ WINDOWS ============
+
 /**
- * Create the main visible preview window
+ * Create the main visible preview window.
  */
 function createMainWindow(): void {
   const bounds = store.get('windowBounds');
@@ -289,16 +325,16 @@ function createMainWindow(): void {
 }
 
 /**
- * Create the hidden offscreen window for Spout video output
+ * Create the hidden offscreen window for Spout video output.
  */
 async function createSpoutWindow(): Promise<void> {
-  const spoutAvailable = await createSpoutSender({
+  const videoAvailable = await createSpoutSender({
     name: 'Merlin',
     width: spoutConfig.width,
     height: spoutConfig.height,
   });
-  if (!spoutAvailable) {
-    console.log('Spout not available, skipping Spout window');
+  if (!videoAvailable) {
+    console.log('Spout video sender not available, skipping spout window');
     return;
   }
 
@@ -306,24 +342,24 @@ async function createSpoutWindow(): Promise<void> {
     width: spoutConfig.width,
     height: spoutConfig.height,
     show: false,
-    title: 'Merlin - Spout Video',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      offscreen: { useSharedTexture: true },
+      backgroundThrottling: false,
+      offscreen: true,
     },
   });
 
-  wireWindowToSender(spoutWindow, 'Merlin', spoutConfig.frameRate);
-
+  // Load with ?spout=1 so the renderer mounts in spout-output mode
+  // (the canvas fills the window, no sidebar / chrome).
   if (process.env.VITE_DEV_SERVER_URL) {
     spoutWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?spout=1`);
   } else {
-    spoutWindow.loadFile(join(__dirname, '../renderer/index.html'), {
-      query: { spout: '1' },
-    });
+    spoutWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { spout: '1' } });
   }
+
+  wireWindowToSender(spoutWindow, 'Merlin', spoutConfig.frameRate);
 
   spoutWindow.on('closed', () => {
     spoutWindow = null;
@@ -333,8 +369,11 @@ async function createSpoutWindow(): Promise<void> {
 }
 
 /**
- * Create the hidden offscreen window for Spout mask output
+ * Create the hidden offscreen window for Spout mask output.
+ * Intentionally dormant — re-enable by uncommenting the createMaskWindow
+ * calls below (search this file for "uncommenting the createMaskWindow").
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function createMaskWindow(): Promise<void> {
   const maskAvailable = await createSpoutSender({
     name: 'Merlin Mask',
@@ -350,30 +389,22 @@ async function createMaskWindow(): Promise<void> {
     width: spoutConfig.width,
     height: spoutConfig.height,
     show: false,
-    title: 'Merlin - Spout Mask',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      offscreen: { useSharedTexture: true },
+      backgroundThrottling: false,
+      offscreen: true,
     },
   });
 
-  wireWindowToSender(maskWindow, 'Merlin Mask', spoutConfig.frameRate);
-
-  // Build URL with mask param
-  const maskUrl = process.env.VITE_DEV_SERVER_URL
-    ? new URL('/', process.env.VITE_DEV_SERVER_URL)
-    : null;
-
-  if (maskUrl) {
-    maskUrl.searchParams.set('mask', '1');
-    maskWindow.loadURL(maskUrl.toString());
+  if (process.env.VITE_DEV_SERVER_URL) {
+    maskWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?mask=1`);
   } else {
-    maskWindow.loadFile(join(__dirname, '../renderer/index.html'), {
-      query: { mask: '1' },
-    });
+    maskWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { mask: '1' } });
   }
+
+  wireWindowToSender(maskWindow, 'Merlin Mask', spoutConfig.frameRate);
 
   maskWindow.on('closed', () => {
     maskWindow = null;
@@ -382,548 +413,14 @@ async function createMaskWindow(): Promise<void> {
   console.log('Spout mask window created');
 }
 
-// IPC handlers for tracking data - only accept from main window (not Spout window)
-ipcMain.on('tracking-frame', (event, data: TrackingFrame) => {
-  // Only process tracking data from the main preview window
-  if (mainWindow && event.sender.id === mainWindow.webContents.id) {
-    // Send via WebSocket (unified protocol)
-    if (isTDConnected()) {
-      pushTrackingFrame(data);
-    }
-  }
-});
+// ============ IPC REGISTRATION ============
 
-// Face-gesture trigger events (mouth_open, smile, brow_raise, eye_closed).
-// Renderer-only signal — not pushed to TD yet. For now we just log so
-// the pipeline can be verified end-to-end. Future hookups: route to
-// spell-effect triggers, expose to Gemini via tool, etc.
-ipcMain.on('face-gesture', (event, evt: { kind: string; edge: 'start' | 'end'; score: number; timestamp: number }) => {
-  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) return;
-  console.log(`[FaceGesture ${ts()}] ${evt.kind} ${evt.edge} score=${evt.score.toFixed(2)}`);
-  // Buffer the event so Gemini can query recent activity via the
-  // `get_face_events` tool, and so buildSessionContext can inject a
-  // brief summary into the per-turn context.
-  pushFaceEvent(evt.kind, evt.edge, evt.score);
-});
+// All ipcMain.handle/on registrations live in src/main/ipc/* and are
+// wired up here once. Handler bodies access shared state through the
+// MainContext built above.
+registerAllIPC(ctx);
 
-// IPC handler for face strip analysis (micro-expressions)
-ipcMain.handle('analyze-face-strip', async (_event, imageDataUrl: string) => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log('Analyzing face strip...');
-  const startTime = Date.now();
-
-  try {
-    const analysis = await analyzeMicroExpressions(imageDataUrl);
-    console.log(`Face analysis complete in ${Date.now() - startTime}ms`);
-    console.log('Result:', JSON.stringify(analysis, null, 2));
-    return analysis;
-  } catch (error) {
-    console.error('Face strip analysis failed:', error);
-    throw error;
-  }
-});
-
-// IPC handler for skeleton strip analysis (body language)
-ipcMain.handle('analyze-skeleton-strip', async (_event, imageDataUrl: string) => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log('Analyzing skeleton strip for body language...');
-  const startTime = Date.now();
-
-  try {
-    const analysis = await analyzeBodyLanguage(imageDataUrl);
-    console.log(`Body language analysis complete in ${Date.now() - startTime}ms`);
-    console.log('Result:', JSON.stringify(analysis, null, 2));
-    return analysis;
-  } catch (error) {
-    console.error('Skeleton strip analysis failed:', error);
-    throw error;
-  }
-});
-
-// IPC handler for renaming Spout senders
-ipcMain.handle('rename-spout-sender', async (_event, oldName: string, newName: string) => {
-  console.log(`Renaming Spout sender: ${oldName} -> ${newName}`);
-  try {
-    const { renameSpoutSender } = await import('./spout');
-    return renameSpoutSender(oldName, newName);
-  } catch (error) {
-    console.error('Failed to rename Spout sender:', error);
-    return false;
-  }
-});
-
-// IPC handler for connection stats (TD Bridge)
-ipcMain.handle('get-bridge-stats', () => {
-  return {
-    connected: isTDConnected(),
-    port: PORTS.TD_BRIDGE,
-  };
-});
-
-// IPC handlers for settings persistence
-ipcMain.handle('get-settings', () => {
-  return getAllSettings();
-});
-
-ipcMain.handle('save-setting', (_event, key: string, value: unknown) => {
-  setSetting(key as keyof ReturnType<typeof getAllSettings>, value as never);
-  return true;
-});
-
-// Claude-as-participant — Conversation Tester asks main to generate the
-// next participant utterance from the conversation so far. Returns null
-// if no ANTHROPIC_API_KEY is set, so the renderer can fall back to the
-// preset's canned script.
-ipcMain.handle('generate-participant-line', async (_event, req: ParticipantRequest) => {
-  try {
-    const line = await generateParticipantLine(req);
-    return { ok: true, line, available: isParticipantLLMAvailable() };
-  } catch (err) {
-    console.error('[Participant] generate failed:', err);
-    return { ok: false, error: String(err), available: isParticipantLLMAvailable() };
-  }
-});
-
-ipcMain.handle('participant-llm-available', () => {
-  return isParticipantLLMAvailable();
-});
-
-// Persist a Conversation Tester transcript to disk so Claude can read
-// it without the dev having to copy/paste from the browser console.
-// Files land in <repo>/logs/conversation-test-<timestamp>.json.
-ipcMain.handle('save-conversation-transcript', (_event, payload: { id: string; json: string }) => {
-  try {
-    const logsDir = join(process.cwd(), 'logs');
-    if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
-    const safeId = (payload.id || 'unnamed').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const path = join(logsDir, `conversation-test-${stamp}-${safeId}.json`);
-    writeFileSync(path, payload.json, 'utf8');
-    console.log(`[ConversationTest] Transcript saved: ${path}`);
-    return { ok: true, path };
-  } catch (err) {
-    console.error('[ConversationTest] Failed to save transcript:', err);
-    return { ok: false, error: String(err) };
-  }
-});
-
-// IPC handler for portrait mode - broadcast to all windows and resize Spout
-ipcMain.on('set-portrait-mode', async (_event, portrait: boolean) => {
-  console.log(`Portrait mode: ${portrait}`);
-
-  // Calculate new dimensions
-  const width = portrait ? 720 : 1280;
-  const height = portrait ? 1280 : 720;
-
-  // Resize Spout senders
-  await resizeSpoutSender('Merlin', width, height);
-  await resizeSpoutSender('Merlin Mask', width, height);
-
-  // Resize Spout windows
-  if (spoutWindow && !spoutWindow.isDestroyed()) {
-    spoutWindow.setSize(width, height);
-    // Re-wire the window to the new sender
-    wireWindowToSender(spoutWindow, 'Merlin', 30);
-  }
-  if (maskWindow && !maskWindow.isDestroyed()) {
-    maskWindow.setSize(width, height);
-    wireWindowToSender(maskWindow, 'Merlin Mask', 30);
-  }
-
-  // Broadcast to all windows
-  const windows = [mainWindow, spoutWindow, maskWindow];
-  for (const win of windows) {
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('portrait-mode-changed', portrait);
-    }
-  }
-
-  // Send orientation update to TouchDesigner
-  if (isTDConnected()) {
-    pushOrientationUpdate(portrait, width, height);
-    console.log(`Sent orientation to TD: ${portrait ? 'portrait' : 'landscape'} ${width}x${height}`);
-  }
-});
-
-// Helper for timestamped logs
-const ts = () => new Date().toISOString().slice(11, 23);
-
-// Receive analysis result from renderer (response to request-analysis)
-ipcMain.on('analysis-result', (_event, data: { requestId: string; result: unknown }) => {
-  const resolver = pendingAnalysisRequests.get(data.requestId);
-  if (resolver) {
-    console.log(`[Analysis ${ts()}] Received result for ${data.requestId}`);
-    pendingAnalysisRequests.delete(data.requestId);
-    resolver(data.result);
-  }
-});
-
-// ============ MERLIN IPC HANDLERS ============
-
-// Start a Merlin session
-ipcMain.handle('merlin-start', async () => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log(`[Merlin ${ts()}] Starting session...`);
-  // Drop any stale face events from a previous participant before the
-  // new session starts emitting its own.
-  clearFaceEventBuffer();
-  merlinSession = createMerlinSession();
-
-  try {
-    const response = await merlinSession.startSession();
-
-    // WebSocket
-    if (isTDConnected()) {
-      pushMerlinState({
-        active: true,
-        phase: response.phase,
-        spell: response.spell,
-      });
-    }
-
-    // Broadcast UI update
-    broadcastMerlinUpdate({
-      phase: response.phase,
-      turnCount: 0,
-      spell: response.spell,
-      isListening: false,
-      isProcessing: false,
-    });
-
-    return response;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Failed to start session:`, error);
-    merlinSession = null;
-    throw error;
-  }
-});
-
-// Process user speech in Merlin session
-ipcMain.handle('merlin-process-speech', async (_event, transcript: string) => {
-  if (!merlinSession || !merlinSession.isActive()) {
-    throw new Error('Merlin session not active');
-  }
-
-  console.log(`[Merlin ${ts()}] Processing: "${transcript}"`);
-
-  try {
-    const response = await merlinSession.processUserSpeech(
-      transcript,
-      lastBodyAnalysis,
-      lastFaceAnalysis
-    );
-
-    const state = merlinSession.getState();
-
-    // WebSocket
-    if (isTDConnected()) {
-      pushMerlinState({
-        active: true,
-        phase: response.phase,
-        spell: response.spell,
-      });
-    }
-
-    // Broadcast UI update
-    broadcastMerlinUpdate({
-      phase: response.phase,
-      turnCount: state.turnCount,
-      spell: response.spell,
-      isListening: false,
-      isProcessing: false,
-    });
-
-    return response;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Failed to process speech:`, error);
-    throw error;
-  }
-});
-
-// Background cast trigger — fired by the renderer when its independent
-// listener matches the magic word in a transcript. Bypasses the
-// Gemini conversation pipeline entirely; just fires the visual cast
-// and advances phase. The renderer arms this listener via
-// `merlin-cast-armed` when prepare_casting dispatches.
-ipcMain.handle('merlin-trigger-cast', async () => {
-  if (!merlinSession || !merlinSession.isActive()) {
-    return { ok: false, reason: 'session not active' };
-  }
-  console.log(`[Merlin ${ts()}] Background cast trigger fired`);
-  merlinSession.triggerCast();
-  const spell = merlinSession.getSpell();
-  const state = merlinSession.getState();
-  // Mirror what processUserSpeech would have broadcast — keeps the
-  // sidebar / TD bridge in sync without going through the Gemini turn.
-  if (isTDConnected()) {
-    pushMerlinState({ active: true, phase: state.phase, spell });
-  }
-  broadcastMerlinUpdate({
-    phase: state.phase,
-    turnCount: state.turnCount,
-    spell,
-    isListening: false,
-    isProcessing: false,
-  });
-  return { ok: true, phase: state.phase };
-});
-
-
-// End Merlin session
-ipcMain.handle('merlin-end', async () => {
-  if (!merlinSession) {
-    return { text: 'Session was not active.', phase: 'idle', spell: null };
-  }
-
-  console.log(`[Merlin ${ts()}] Ending session...`);
-
-  try {
-    const response = await merlinSession.endSession();
-
-    // WebSocket
-    if (isTDConnected()) {
-      pushMerlinState({
-        active: false,
-        phase: 'idle',
-      });
-    }
-
-    // Broadcast final UI update
-    broadcastMerlinUpdate({
-      phase: 'idle',
-      turnCount: 0,
-      spell: response.spell,
-      isListening: false,
-      isProcessing: false,
-    });
-
-    merlinSession = null;
-    return response;
-  } catch (error) {
-    console.error('[Merlin] Failed to end session:', error);
-    merlinSession = null;
-    throw error;
-  }
-});
-
-// Get Merlin session state
-ipcMain.handle('merlin-get-state', () => {
-  if (!merlinSession) {
-    return null;
-  }
-  return {
-    state: merlinSession.getState(),
-    spell: merlinSession.getSpell(),
-    history: merlinSession.getConversationHistory(),
-    isActive: merlinSession.isActive(),
-  };
-});
-
-// Update cached analysis for Merlin
-ipcMain.on('merlin-update-analysis', (_event, data: {
-  body?: Partial<BodyLanguageAnalysis>;
-  face?: Partial<MicroExpressionAnalysis>;
-}) => {
-  if (data.body) {
-    lastBodyAnalysis = data.body;
-  }
-  if (data.face) {
-    lastFaceAnalysis = data.face;
-  }
-});
-
-// Test shader generation (Shift+T debug mode)
-ipcMain.handle('merlin-test-shader', async (_event, config: TestShaderConfig) => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log(`[Merlin ${ts()}] Test shader: prompt="${config.prompt.slice(0, 60)}${config.prompt.length > 60 ? '…' : ''}" zones=${config.zones?.join(',') ?? 'all'}`);
-  const startTime = Date.now();
-
-  try {
-    const result = await testShaderGeneration(config);
-    console.log(`[Merlin ${ts()}] Test shader complete in ${Date.now() - startTime}ms, ${result.zones.length} zones`);
-    return result;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Test shader failed:`, error);
-    throw error;
-  }
-});
-
-// Test sprite generation - direct spec (Shift+T Sprites tab)
-ipcMain.handle('merlin-test-sprite-direct', async (_event, spec: SpriteTestSpec) => {
-  console.log(`[Merlin ${ts()}] Test sprite (direct): "${spec.description}"`);
-  const startTime = Date.now();
-
-  try {
-    const result = await generateSpriteDirect(spec);
-    console.log(`[Merlin ${ts()}] Test sprite (direct) complete in ${Date.now() - startTime}ms, success=${result.success}`);
-    return result;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Test sprite (direct) failed:`, error);
-    throw error;
-  }
-});
-
-// Test sprite generation - Gemini interpretation (Shift+T Sprites tab)
-ipcMain.handle('merlin-test-sprite-gemini', async (_event, prompt: string) => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log(`[Merlin ${ts()}] Test sprite (gemini): "${prompt}"`);
-  const startTime = Date.now();
-
-  try {
-    const result = await generateSpriteWithGemini(prompt);
-    console.log(`[Merlin ${ts()}] Test sprite (gemini) complete in ${Date.now() - startTime}ms, success=${result.success}`);
-    return result;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Test sprite (gemini) failed:`, error);
-    throw error;
-  }
-});
-
-// Test flipbook re-config without regenerating texture (Shift+T Flipbook tab)
-ipcMain.handle('merlin-test-flipbook-config', async (_event, config: SpriteFlipbookConfig) => {
-  console.log(`[Merlin ${ts()}] Test flipbook config: ${JSON.stringify(config)}`);
-  return applyFlipbookConfig(config);
-});
-
-// Get the current mirrored TD state (last-pushed snapshot)
-ipcMain.handle('merlin-test-get-mirrored-state', async () => {
-  return getCurrentMirroredState();
-});
-
-// Reset TD shaders / sprite / render mode / flipbook / spell program to baseline
-ipcMain.handle('merlin-reset-td-baseline', async () => {
-  console.log(`[Merlin ${ts()}] Reset TD baseline`);
-  const startTime = Date.now();
-  try {
-    const result = await resetTDBaseline();
-    const failed = result.steps.filter(s => s.status === 'error').length;
-    const skipped = result.steps.filter(s => s.status === 'skipped').length;
-    console.log(`[Merlin ${ts()}] Reset complete in ${Date.now() - startTime}ms (${failed} failed, ${skipped} skipped)`);
-    return result;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Reset failed:`, error);
-    throw error;
-  }
-});
-
-// ============ SESSION PERSISTENCE IPC HANDLERS ============
-
-ipcMain.handle('merlin-list-sessions', async () => {
-  return listSavedSessions();
-});
-
-ipcMain.handle('merlin-save-session', async (_event, name?: string) => {
-  const state = merlinSession?.getState();
-  if (!state) return { success: false, error: 'No active session' };
-  const id = `session_${Date.now()}`;
-  const ok = saveSessionState(id, state.spell, name ? { name } : undefined);
-  return { success: ok, sessionId: id };
-});
-
-ipcMain.handle('merlin-load-session', async (_event, sessionId: string) => {
-  const state = loadSessionState(sessionId);
-  if (!state) return { success: false, error: 'Session not found' };
-  applySessionState(state);
-  const zoneResults: Record<string, boolean> = {};
-  for (const [zone, code] of Object.entries(state.zones)) {
-    if (code) {
-      const result = await pushZoneUpdateWithValidation(zone, code);
-      zoneResults[zone] = result.success;
-    }
-  }
-  return { success: true, spell: state.spell, zoneResults };
-});
-
-ipcMain.handle('merlin-delete-session', async (_event, sessionId: string) => {
-  return { success: deleteSession(sessionId) };
-});
-
-// Test live spell - end-to-end Gemini creative process (Shift+T Live Spell tab)
-ipcMain.handle('merlin-test-live-spell', async (_event, input: LiveSpellTestInput) => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log(`[Merlin ${ts()}] Test live spell: prompt="${input.prompt}"`);
-  const startTime = Date.now();
-
-  try {
-    const result = await testLiveSpell(input);
-    console.log(`[Merlin ${ts()}] Test live spell complete in ${Date.now() - startTime}ms, success=${result.success} toolCalls=${result.toolCallCount}`);
-    return result;
-  } catch (error) {
-    console.error(`[Merlin ${ts()}] Test live spell failed:`, error);
-    throw error;
-  }
-});
-
-// ============ TTS IPC HANDLERS ============
-
-// Generate speech using Gemini TTS (batch mode)
-ipcMain.handle('generate-speech', async (_event, text: string, mood?: string) => {
-  if (!isTTSAvailable()) {
-    throw new Error('Gemini TTS not available - check GEMINI_API_KEY');
-  }
-
-  const timestamp = new Date().toISOString().slice(11, 23);
-  console.log(`[TTS ${timestamp}] Generating speech for mood "${mood || 'mysterious'}"...`);
-  const startTime = Date.now();
-
-  try {
-    const result = await generateSpeech(
-      text,
-      (mood as 'mysterious' | 'warm' | 'intense' | 'playful') || 'mysterious'
-    );
-    const endTimestamp = new Date().toISOString().slice(11, 23);
-    console.log(`[TTS ${endTimestamp}] IPC complete in ${Date.now() - startTime}ms`);
-    return result;
-  } catch (error) {
-    console.error('[TTS] Generation failed:', error);
-    throw error;
-  }
-});
-
-// Stream speech using Gemini Live API (streaming mode).
-// Called by the renderer for both the parallel-TTS chunk path (onSpeakChunk
-// forwards text to renderer via merlin-speak-chunk, renderer gates on its
-// own ttsReady/testModeMuteTts/inFlightSpeechPromise state, then calls back
-// here) and the spokenText path (post-tool remainder). The round-trip exists
-// so all "should we speak?" decisions stay renderer-side, co-located with the
-// Web Audio scheduling and continuous-listening state they depend on.
-ipcMain.on('stream-speech', (_event, text: string, mood?: string) => {
-  const timestamp = new Date().toISOString().slice(11, 23);
-  console.log(`[LiveTTS ${timestamp}] Stream request for mood "${mood || 'mysterious'}"...`);
-
-  if (!isLiveTTSConnected()) {
-    console.log(`[LiveTTS ${timestamp}] Not connected, request will be queued`);
-  }
-
-  streamSpeech(text, mood || 'mysterious');
-});
-
-// ============ TD BRIDGE IPC HANDLERS ============
-
-// Get TD connection status
-ipcMain.handle('td-get-status', () => ({
-  connected: isTDConnected(),
-  ready: isTDReady(),
-  capabilities: tdState.capabilities,
-}));
+// ============ APP LIFECYCLE ============
 
 app.whenReady().then(async () => {
   console.log('=== Merlin Starting ===');
@@ -939,8 +436,6 @@ app.whenReady().then(async () => {
   } else {
     console.log('Gemini TTS not available');
   }
-
-  // OSC removed - all communication now via WebSocket (td-bridge)
 
   // Initialize TD Bridge (WebSocket server for TouchDesigner)
   initTDBridge({
