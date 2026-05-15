@@ -109,9 +109,11 @@ jobs:
           }
           # Rename to "Merlin" so users extracting the zip see a single
           # top-level folder named after the app rather than
-          # "win-unpacked".
+          # "win-unpacked". Rename-Item's second arg is a name, not a
+          # path — passing "release/Merlin" trips a "represents a path
+          # or device name" error.
+          Rename-Item $dist.FullName "Merlin"
           $renamed = Join-Path release "Merlin"
-          Rename-Item $dist.FullName $renamed
           $zipPath = "release/${{ steps.artifact.outputs.name }}.zip"
           Compress-Archive -Path $renamed -DestinationPath $zipPath -Force
           Write-Host "Created $zipPath"
