@@ -14,7 +14,6 @@ let isCurrentlySpeaking = false;
 let useStreamingMode = true; // Enable streaming via Gemini Live API
 
 // Streaming state
-let streamingQueue: AudioBuffer[] = [];
 let isStreamingActive = false;
 let streamingResolve: (() => void) | null = null;
 let nextPlayTime = 0;
@@ -326,7 +325,6 @@ function finishStreaming(): void {
   isCurrentlySpeaking = false;
   notifySpeakingChange(false);
   updateStatus({ state: 'ready', message: 'TTS ready' });
-  streamingQueue = [];
 
   if (streamingResolve) {
     streamingResolve();
@@ -380,7 +378,6 @@ export async function speakStreaming(text: string, mood: string = 'mysterious'):
  */
 export function stopStreaming(): void {
   isStreamingActive = false;
-  streamingQueue = [];
   nextPlayTime = 0;
 
   if (streamingResolve) {

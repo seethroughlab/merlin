@@ -1,8 +1,40 @@
 /**
- * Merlin - Renderer Process
+ * Merlin — Renderer Process entrypoint.
  *
- * Handles camera capture, MediaPipe processing, and canvas rendering.
+ * Wires the browser-side of the app: camera capture, MediaPipe (pose +
+ * face landmarks), Whisper STT, LiveTTS playback, on-screen drawing,
+ * sidebar UI, keyboard shortcuts, and the Merlin-mode interactive flow.
+ *
+ * The file is large because it is the bridge between many fairly
+ * independent subsystems. The intentional reading order is:
+ *
+ *   ~1-100    Imports + URL-flag parsing (`?spout`, `?mask`).
+ *   ~100-160  Module-level state (toggles, ready flags, in-flight
+ *             promises, the armed magic word).
+ *   ~160-310  TTS helper (`speakWithStreaming`) and camera setup
+ *             (`buildVideoConstraints` / `acquireCameraStream` /
+ *             `initCamera` / `switchCamera`).
+ *   ~310-480  The main render loop (`renderLoop`): MediaPipe detects,
+ *             canvas draws, tracking frame push, Spout/mask send.
+ *   ~480-630  Quick analysis captures (face / body language) +
+ *             settings I/O.
+ *   ~630-960  UI plumbing: sidebar, TD reset button, device choosers,
+ *             stats poll, analysis bubbles.
+ *   ~960-1050 Keyboard shortcuts + MediaPipe + speech init.
+ *   ~1050+    MERLIN MODE — wake-phrase detection, startMerlinMode /
+ *             stopMerlinMode, the `handleMerlinTranscript` loop with
+ *             its three-branch post-turn TTS/listening handler.
+ *   ~1380+    `main()` bootstrap and `onMerlinSpeakChunk` IPC listener.
+ *
+ * If you are touching the conversation flow specifically, read
+ * `docs/conversation-flow.md` first — its IPC/WS event glossary and
+ * the "Listening lifecycle" section are the canonical reference.
  */
+
+// Side-effect import: Vite bundles the renderer stylesheet and injects
+// it into the document. Keeps index.html lean (just markup) and lets
+// the CSS travel with the renderer entry's dependency graph.
+import './styles.css';
 
 import {
   initAllMediaPipe,
@@ -22,8 +54,8 @@ import {
   resetFaceGestureState,
   updateFaceGestures,
 } from './mediapipe';
-import { captureFaceStrip } from './faceStrip';
-import { captureSkeletonStrip } from './skeletonStrip';
+import { captureFaceStrip } from './face-strip';
+import { captureSkeletonStrip } from './skeleton-strip';
 import {
   initWhisper,
   startContinuousListening,
@@ -33,10 +65,8 @@ import {
 import {
   initTTS,
   speak,
-  stop as stopTTS,
   isSpeaking,
   onSpeakingStateChange,
-  isTTSReady,
   initStreamingTTS,
   speakStreaming,
   isStreamingEnabled,
@@ -134,7 +164,6 @@ let ttsReady = false;
 // Merlin mode state
 let merlinModeActive = false;
 let merlinIsListening = false;
-let merlinIsProcessing = false;
 
 // Background cast listener state. Armed by main via `merlin-cast-armed`
 // the moment prepare_casting dispatches. When the participant says the
@@ -1049,23 +1078,6 @@ async function initSpeech(): Promise<void> {
 
 // ============ MERLIN MODE ============
 
-/**
- * Wake phrase patterns for Merlin activation
- */
-const MERLIN_WAKE_PATTERNS = [
-  /hello\s*merlin/i,
-  /hey\s*merlin/i,
-  /hi\s*merlin/i,
-];
-
-/**
- * Detect Merlin wake phrase in transcript
- */
-function detectMerlinWakePhrase(transcript: string): boolean {
-  const normalized = transcript.toLowerCase().trim();
-  return MERLIN_WAKE_PATTERNS.some(p => p.test(normalized));
-}
-
 // updateMerlinUI, updateMerlinSpellUI, addMerlinMessage → imported from ./merlin-ui
 // Gemini sidebar functions → imported from ./gemini-sidebar
 /**
@@ -1250,7 +1262,6 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
   addMerlinMessage('user', transcript);
 
   // Update UI to show processing
-  merlinIsProcessing = true;
   const voiceStatus = document.getElementById('merlin-voice-status');
   if (voiceStatus) {
     voiceStatus.textContent = 'Processing...';
@@ -1366,7 +1377,6 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     if (statusDisplay) statusDisplay.textContent = `Merlin error: ${error}`;
   } finally {
     isProcessingMerlinTranscript = false;
-    merlinIsProcessing = false;
 
     // Resume listening indicator
     if (voiceStatus && merlinModeActive) {

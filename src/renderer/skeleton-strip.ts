@@ -17,7 +17,7 @@
 
 import { PoseLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
 import { getLastPoseResults } from './mediapipe';
-import type { FrameSourceGetter } from './faceStrip';
+import type { FrameSourceGetter } from './face-strip';
 
 interface SkeletonStripConfig {
   frameCount: number;      // Number of frames to capture (default: 8)
