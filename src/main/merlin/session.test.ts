@@ -138,76 +138,45 @@ describe('MerlinSession.processUserSpeech', () => {
     expect(reply.phase).not.toBe('play');
   });
 
-  it('runs Gemini outro when end-word matches during play', async () => {
+  it('runs Gemini on first cast to produce a welcome line', async () => {
     const { createMerlinSession } = await import('./session');
     const session = createMerlinSession();
     await session.startSession();
-    // Force the session into play phase by calling triggerCast manually
-    // after setting the gating bits. We do this through the state mirror
-    // pattern: getState returns a copy but markCastCompleted is a public
-    // method we can call directly via casting.
-    // Easiest path: call session.triggerCast which already advances to
-    // play if cast is ready. Set up the spell first.
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'glow';
-    internalState.spell.endWord = 'thanks';
     internalState.spell.element = 'fire';
     internalState.spell.intent = 'confidence';
     internalState.spell.castingOrigin = 'hands';
     internalState.spell.confidence = 0.8;
-    // First utterance: triggerCast → enters play silently.
+    mockRunMerlinTurn.mockResolvedValueOnce(defaultRunMerlinTurnResult({ finalText: 'Your spell is alive.' }));
     const cast = await session.processUserSpeech('glow', null, null);
-    expect(cast.text).toBe('');
+    expect(cast.text).toBe('Your spell is alive.');
     expect(cast.phase).toBe('play');
-    // Second utterance: end-word triggers outro Gemini turn.
-    mockRunMerlinTurn.mockResolvedValueOnce(defaultRunMerlinTurnResult({ finalText: 'Farewell.' }));
-    const farewell = await session.processUserSpeech('thanks', null, null);
-    expect(farewell.text).toBe('Farewell.');
     expect(mockRunMerlinTurn).toHaveBeenCalled();
   });
 
-  it('stays silent during play on non-end-word utterances', async () => {
+  it('stays silent during play after the welcome line', async () => {
     const { createMerlinSession } = await import('./session');
     const session = createMerlinSession();
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'glow';
-    internalState.spell.endWord = 'thanks';
     internalState.spell.element = 'fire';
     internalState.spell.intent = 'confidence';
     internalState.spell.castingOrigin = 'hands';
     internalState.spell.confidence = 0.8;
+    // First cast: Gemini runs for welcome line
     await session.processUserSpeech('glow', null, null);
     mockRunMerlinTurn.mockClear();
+    // Subsequent speech in play is silent — no Gemini
     const reply = await session.processUserSpeech('hello there', null, null);
     expect(reply.text).toBe('');
     expect(mockRunMerlinTurn).not.toHaveBeenCalled();
   });
 });
 
-describe('MerlinSession.markCastCompleted endWord validation', () => {
-  it('falls back to the default end-word when spell endWord is empty', async () => {
-    const { createMerlinSession } = await import('./session');
-    const session = createMerlinSession();
-    await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
-    internalState.castReady = true;
-    internalState.spell.magicWord = 'spark';
-    internalState.spell.endWord = '   '; // whitespace-only — should fall back
-    internalState.spell.element = 'fire';
-    internalState.spell.intent = 'confidence';
-    internalState.spell.castingOrigin = 'hands';
-    internalState.spell.confidence = 0.8;
-    await session.processUserSpeech('spark', null, null);
-    // "farewell" is the documented default — any utterance containing
-    // the default ends the play phase; any other utterance stays silent.
-    mockRunMerlinTurn.mockResolvedValueOnce(defaultRunMerlinTurnResult({ finalText: 'Goodbye.' }));
-    const outro = await session.processUserSpeech('farewell', null, null);
-    expect(outro.text).toBe('Goodbye.');
-  });
-});
 
 describe('MerlinSession.endSession', () => {
   it('clears the play-safety timer so it cannot fire after end', async () => {
@@ -218,16 +187,15 @@ describe('MerlinSession.endSession', () => {
     mockChatEndSession.mockResolvedValue('Goodbye.');
     const session = createMerlinSession({ onSessionComplete });
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'spark';
-    internalState.spell.endWord = 'done';
     internalState.spell.element = 'fire';
     internalState.spell.intent = 'confidence';
     internalState.spell.castingOrigin = 'hands';
     internalState.spell.confidence = 0.8;
     await session.processUserSpeech('spark', null, null);
-    // Now in play with a 60s safety timer running.
+    // Now in play with a 60s inactivity timer running.
     await session.endSession();
     // Fast-forward past the timer; onSessionComplete must NOT fire from
     // a leftover timeout because we cleared it in endSession.
@@ -240,10 +208,9 @@ describe('MerlinSession.endSession', () => {
     mockChatStartChat.mockResolvedValue({ text: 'Welcome', toolCalls: [], finishReason: 'STOP' });
     const session = createMerlinSession();
     await session.startSession();
-    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; endWord?: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
+    const internalState = (session as unknown as { state: { castReady: boolean; spell: { magicWord: string; element?: string; intent?: string; castingOrigin?: string; confidence: number } } }).state;
     internalState.castReady = true;
     internalState.spell.magicWord = 'spark';
-    internalState.spell.endWord = 'done';
     internalState.spell.element = 'fire';
     internalState.spell.intent = 'confidence';
     internalState.spell.castingOrigin = 'hands';

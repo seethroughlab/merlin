@@ -20,7 +20,6 @@
  *
  * Special script lines:
  * - `[CAST]` fires `merlinTriggerCast` directly (skips Gemini).
- * - `[END]`  fires `merlinTriggerEnd`.
  */
 
 import type { ConversationTestPreset } from './types';

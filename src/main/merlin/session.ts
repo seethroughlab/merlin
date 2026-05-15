@@ -5,7 +5,7 @@
  */
 
 import { MerlinChat } from './gemini-chat';
-import { createTurnContext } from './prompts';
+import { createTurnContext } from './session-context';
 import type {
   MerlinPhase,
   SpellState,
@@ -42,11 +42,9 @@ function getCastDuration(env: typeof DEFAULT_CAST_ENVELOPE): number {
 }
 
 // After the cast, the participant enters PLAY mode to inhabit the spell.
-// They end the experience by speaking the end-word (heard locally — no
-// Gemini round-trip). If they wander off and never say it, the safety
-// timer auto-advances to outro so the session doesn't hang.
+// Re-speaking the magic word resets the inactivity timer. If they wander
+// off and never re-cast, the safety timer auto-closes the session.
 const PLAY_PHASE_MAX_MS = 60_000;
-const DEFAULT_END_WORD = 'farewell';
 
 // Cap on conversationHistory length. Each turn pushes 1–2 messages
 // (user + assistant); 200 entries covers ~100 turns which is well past
@@ -129,7 +127,7 @@ export interface MerlinSessionConfig {
    * background cast listener so the cast trigger is decoupled from the
    * Gemini conversation pipeline.
    */
-  onCastArmed?: (payload: { magicWord: string; endWord: string; gestureHint?: string }) => void;
+  onCastArmed?: (payload: { magicWord: string; gestureHint?: string }) => void;
   phaseConfig?: Partial<MerlinPhaseConfig>;
 }
 
@@ -144,7 +142,6 @@ export class MerlinSession {
   private phaseConfig: MerlinPhaseConfig;
   private previousPhase: MerlinPhase = 'idle';
   private playSafetyTimer: NodeJS.Timeout | null = null;
-  private endWord: string | null = null;
   // Effect-trigger words registered by Gemini via register_effect_triggers.
   // Matched locally in processUserSpeech BEFORE the magic-word check, so
   // utterances like "rise" fire the registered GLSL in ~400ms instead of
@@ -305,9 +302,8 @@ export class MerlinSession {
     this.state.lastUserInput = transcript;
 
     // Snapshot the entry phase. Play-phase logic below keys off this:
-    // - phaseAtEntry === 'play' AND end-word matches → end play, run Gemini outro turn
-    // - phaseAtEntry === 'play' AND end-word doesn't match → silent (no Gemini)
-    // - phaseAtEntry !== 'play' AND magic-word matches → first cast, silent (no Gemini)
+    // - phaseAtEntry !== 'play' AND magic-word matches → first cast; run Gemini for welcome line
+    // - phaseAtEntry === 'play' → all speech is silent (magic-word visual + timer reset handled above)
     const phaseAtEntry = this.state.phase;
 
     // Local effect-trigger match (registered via register_effect_triggers).
@@ -321,9 +317,8 @@ export class MerlinSession {
         `Effect trigger "${trigger.word}" matched in "${transcript}" — firing ${trigger.zone}`,
       );
       void pushZoneUpdateWithValidation(trigger.zone, trigger.glslCode);
-      // Don't return — magic-word and end-word checks should still run
-      // on the same utterance, since "rise" + "{magic word}" in one
-      // breath is a legitimate combination.
+      // Don't return — the magic-word check should still run on the same
+      // utterance, since "rise" + "{magic word}" in one breath is valid.
     }
 
     // Magic-word cast trigger. Fire BEFORE the Gemini turn so the cast
@@ -341,37 +336,15 @@ export class MerlinSession {
       this.triggerCast();
     }
 
-    // First cast: triggerCast just moved us to 'play'. Skip Gemini entirely
-    // for this turn — the farewell waits for the end-word (or safety
-    // timer). No narration during play.
-    if (phaseAtEntry !== 'play' && this.state.phase === 'play') {
-      log.info('MerlinSession', 'Cast fired — entering PLAY phase silently');
+    // Already in play: all speech is silent. Magic-word visual and timer
+    // reset are already handled above by triggerCast(); nothing more to do.
+    if (phaseAtEntry === 'play') {
       return {
         text: '',
         phase: this.state.phase,
         spell: this.state.spell,
         spokenText: '',
       };
-    }
-
-    // Already in play: end-word match closes the session with a farewell;
-    // anything else (including re-casts) stays silent.
-    if (phaseAtEntry === 'play') {
-      if (this.endWord && transcriptContains(transcript, this.endWord)) {
-        log.info('MerlinSession', `End-word "${this.endWord}" matched — closing play phase`);
-        this.closePlay('end-word');
-        // Fall through to the Gemini turn — phase is now 'outro' and the
-        // outro rules will produce the farewell.
-      } else {
-        // Re-cast visual already handled above (if magicMatched); nothing
-        // else to do this turn.
-        return {
-          text: '',
-          phase: this.state.phase,
-          spell: this.state.spell,
-          spokenText: '',
-        };
-      }
     }
 
     // Update perception state
@@ -451,15 +424,8 @@ export class MerlinSession {
         ? (text: string) => safeInvoke('onSpeakChunk', () => this.config.onSpeakChunk!(text))
         : undefined,
       onCastArmed: ({ magicWord, gestureHint }) => {
-        // Forward to the session config caller with the end-word
-        // included so the renderer arms both at once. Default end-word
-        // matches what closePlay/processUserSpeech expects.
         safeInvoke('onCastArmed', () => {
-          this.config.onCastArmed?.({
-            magicWord,
-            endWord: this.endWord ?? DEFAULT_END_WORD,
-            gestureHint,
-          });
+          this.config.onCastArmed?.({ magicWord, gestureHint });
         });
       },
     };
@@ -558,7 +524,9 @@ export class MerlinSession {
     } else if (this.state.castReady && !this.state.castCompleted) {
       newPhase = 'ready_to_cast';
     } else if (this.state.castCompleted) {
-      newPhase = 'outro';
+      // Stay in 'play' while the participant inhabits the spell; closePlay()
+      // explicitly sets 'outro' when the timer fires.
+      newPhase = this.state.phase === 'play' ? 'play' : 'outro';
     } else {
       // Still in formation if cast not ready
       newPhase = 'formation';
@@ -593,49 +561,33 @@ export class MerlinSession {
   }
 
   /**
-   * Mark the spell as cast and enter PLAY phase. The participant now
-   * inhabits the cast spell silently; Merlin says nothing until the
-   * end-word is spoken (or the safety timer expires).
+   * Mark the spell as cast and enter PLAY phase. Gemini speaks a brief
+   * welcome line on the same turn, then goes silent. The 60-second
+   * inactivity timer resets every time the magic word is detected.
    */
   markCastCompleted(): void {
     this.state.castCompleted = true;
     this.state.phase = 'play';
     this.previousPhase = 'play';
-    // Lock in the end-word for local matching. For now uses the default;
-    // a future Gemini extension to prepare_casting can override it.
-    // Validate non-empty so a malformed spell can't make the session
-    // end on any utterance (every transcript contains "").
-    const candidateEndWord = (this.state.spell as { endWord?: string }).endWord;
-    this.endWord = candidateEndWord && candidateEndWord.trim().length > 0
-      ? candidateEndWord.trim()
-      : DEFAULT_END_WORD;
-
-    if (this.playSafetyTimer) clearTimeout(this.playSafetyTimer);
-    this.playSafetyTimer = setTimeout(() => {
-      log.info('MerlinSession', `Play phase safety timer expired (${PLAY_PHASE_MAX_MS}ms) — closing session`);
-      this.closePlay('timeout');
-    }, PLAY_PHASE_MAX_MS);
-
+    this.resetPlayTimer();
     if (this.config.onPhaseChange) {
       this.config.onPhaseChange('play');
     }
   }
 
+  private resetPlayTimer(): void {
+    if (this.playSafetyTimer) clearTimeout(this.playSafetyTimer);
+    this.playSafetyTimer = setTimeout(() => {
+      log.info('MerlinSession', `Play phase inactivity timer expired (${PLAY_PHASE_MAX_MS}ms) — closing session`);
+      this.closePlay();
+    }, PLAY_PHASE_MAX_MS);
+  }
+
   /**
-   * Exit PLAY phase. On 'end-word' reason, the caller (processUserSpeech)
-   * proceeds with the Gemini turn so phase=outro produces the farewell
-   * narration. On 'timeout', there's no further user input so we fire
-   * onSessionComplete directly — the renderer tears down without a final
-   * spoken line.
+   * Close the PLAY phase on inactivity timeout. Idempotent — calling
+   * twice is safe (the timer is cleared on first call).
    */
-  /**
-   * Close the PLAY phase. Public so the renderer-side background cast
-   * listener can fire it via IPC (`merlin-trigger-end`) without going
-   * through the Gemini conversation pipeline. Idempotent — calling twice
-   * is safe (the timer is cleared on first call; subsequent calls see
-   * the cleared state).
-   */
-  closePlay(reason: 'end-word' | 'timeout'): void {
+  private closePlay(): void {
     if (this.playSafetyTimer) {
       clearTimeout(this.playSafetyTimer);
       this.playSafetyTimer = null;
@@ -645,10 +597,8 @@ export class MerlinSession {
     if (this.config.onPhaseChange) {
       this.config.onPhaseChange('outro');
     }
-    // Reset TD zones to baseline (used to fire from updatePhase when
-    // phase transitioned to outro; now that transition happens here).
     void resetTDBaseline();
-    if (reason === 'timeout' && this.config.onSessionComplete) {
+    if (this.config.onSessionComplete) {
       this.config.onSessionComplete();
     }
   }
@@ -776,13 +726,14 @@ export class MerlinSession {
     // elapses since cast_start_time. Robust to Node disconnects.
     // See ws_callbacks.py:check_cast_decay.
 
-    // Mark the cast completed only on the FIRST cast — markCastCompleted
-    // advances the phase to 'outro' and fires onSessionComplete. The
-    // visual cast envelope is allowed to re-fire on subsequent magic-word
-    // utterances (the participant can play with the spell), but the
-    // conversational + phase machinery has done its one-shot work.
+    // First cast: markCastCompleted sets phase to 'play' and starts the
+    // inactivity timer. Subsequent casts during play reset the timer so
+    // active participants get a full 60s from their last magic-word utterance.
     if (!this.state.castCompleted) {
       this.markCastCompleted();
+    } else if (this.state.phase === 'play') {
+      log.info('MerlinSession', 'Re-cast during play — resetting inactivity timer');
+      this.resetPlayTimer();
     }
   }
 }
