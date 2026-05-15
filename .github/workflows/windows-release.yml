@@ -1,0 +1,123 @@
+# Windows release build for Merlin Mirror.
+#
+# Triggers
+#   - `workflow_dispatch`: manual button in the Actions UI. Useful for
+#     smoke-testing the workflow and for ad-hoc builds off any branch.
+#   - Push of a `v*` tag (e.g. `v1.0.0`): builds + creates a GitHub
+#     Release with the zip attached.
+#
+# What it produces
+#   `release/Merlin-<version>-win.zip` containing the unpacked
+#   electron-builder output (a `Merlin/` folder with `Merlin.exe` and
+#   resources). package.json's electron-builder config currently uses
+#   `target: "dir"`, so this is an unpacked distribution, not an NSIS
+#   installer. Switch the target in package.json (`win.target: "nsis"`)
+#   if you want an installer .exe — the rest of this workflow keeps
+#   working either way; it just zips whatever ends up under release/.
+#
+# What's intentionally NOT here
+#   Code signing. No certificate is configured; we set
+#   CSC_IDENTITY_AUTO_DISCOVERY=false to keep electron-builder from
+#   probing for one and emitting warnings. Add code-signing steps when
+#   you have a cert.
+
+name: Windows Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  # softprops/action-gh-release needs this to create the GitHub Release
+  # when triggered by a tag push. workflow_dispatch runs only upload
+  # the artifact to the workflow run, which doesn't need this.
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows distribution
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build Windows distribution
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Compute artifact name
+        id: artifact
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            name="Merlin-${tag}-win"
+          else
+            sha_short=${GITHUB_SHA::7}
+            name="Merlin-${version}-${sha_short}-win"
+          fi
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Package as zip
+        shell: pwsh
+        run: |
+          # electron-builder names the output something like
+          # release/win-unpacked or release/win-ia32-unpacked depending
+          # on arch. Match either; bail loud if we got something
+          # unexpected so future config changes are obvious.
+          $dist = Get-ChildItem -Path release -Directory `
+            | Where-Object { $_.Name -like 'win-*unpacked*' } `
+            | Select-Object -First 1
+          if (-not $dist) {
+            Write-Error "No unpacked Windows build found under release/"
+            Get-ChildItem release | Format-Table
+            exit 1
+          }
+          # Rename to "Merlin" so users extracting the zip see a single
+          # top-level folder named after the app rather than
+          # "win-unpacked".
+          $renamed = Join-Path release "Merlin"
+          Rename-Item $dist.FullName $renamed
+          $zipPath = "release/${{ steps.artifact.outputs.name }}.zip"
+          Compress-Archive -Path $renamed -DestinationPath $zipPath -Force
+          Write-Host "Created $zipPath"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: release/${{ steps.artifact.outputs.name }}.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/${{ steps.artifact.outputs.name }}.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
