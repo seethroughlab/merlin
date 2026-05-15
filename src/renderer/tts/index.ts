@@ -132,7 +132,7 @@ function playAudioBuffer(buffer: AudioBuffer): Promise<void> {
 /**
  * Speak text aloud using Gemini TTS
  * @param text Text to speak
- * @param mood Mentalist mood for voice selection (mysterious, warm, tension, revelation, contemplative)
+ * @param mood Merlin mood for voice selection (mysterious, warm, tension, revelation, contemplative)
  * @returns Promise that resolves when speech completes
  */
 export async function speak(

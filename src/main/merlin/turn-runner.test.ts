@@ -73,8 +73,8 @@ vi.mock('./gemini-events', () => ({
   emitGeminiTurn: vi.fn(),
 }));
 
-// prompts.ts pulls shader templates from disk via electron.app at module
-// load. Stub it so the static import of prompts (for ALLOWED_TOOLS_PER_PHASE)
+// system-prompts.ts pulls shader templates from disk via electron.app at module
+// load. Stub it so the static import of session-context (for ALLOWED_TOOLS_PER_PHASE)
 // doesn't crash under vitest where `electron.app` is undefined.
 vi.mock('./shader-templates', () => ({
   formatTemplatesForSystemPrompt: () => '',

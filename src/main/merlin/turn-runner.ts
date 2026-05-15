@@ -16,7 +16,7 @@ import type { MerlinChat, ChatTurnResult } from './gemini-chat';
 import { mergeSpellUpdate, defaultOriginForIntent } from './spell-state';
 import { pushZoneUpdateWithValidation } from '../td-bridge';
 import { emitGeminiTurn } from './gemini-events';
-import { ALLOWED_TOOLS_PER_PHASE } from './prompts';
+import { ALLOWED_TOOLS_PER_PHASE } from './session-context';
 import { log } from '../logger';
 import type {
   SpellState,

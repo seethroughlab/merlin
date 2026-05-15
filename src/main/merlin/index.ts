@@ -42,4 +42,5 @@ export {
 } from './spell-state';
 
 // Prompts (for reference/testing)
-export { MERLIN_SYSTEM_PROMPT, MERLIN_TOOLS } from './prompts';
+export { MERLIN_SYSTEM_PROMPT } from './system-prompts';
+export { MERLIN_TOOLS } from './tool-definitions';

@@ -14,7 +14,7 @@ let ai: GoogleGenAI | null = null;
  * Each has distinct characteristics suited for different personas
  */
 export const VOICES = {
-  // Dramatic/mysterious voices (good for mentalist)
+  // Dramatic/mysterious voices
   charon: 'Charon',     // Deep, mysterious
   kore: 'Kore',         // Expressive, warm
   fenrir: 'Fenrir',     // Dark, intense
@@ -35,7 +35,7 @@ export const VOICES = {
 
 export type VoiceName = typeof VOICES[keyof typeof VOICES];
 
-// Default voice for mentalist - mysterious and theatrical
+// Default voice - mysterious and theatrical
 const DEFAULT_VOICE: VoiceName = 'Charon';
 
 /**
@@ -136,14 +136,14 @@ export async function generateSpeech(
 }
 
 /**
- * Generate theatrical mentalist speech
+ * Generate theatrical Merlin speech
  * Selects voice based on mood (no audio tags for faster generation)
  */
-export async function generateMentalistSpeech(
+export async function generateMerlinSpeech(
   text: string,
   mood: string = 'mysterious'
 ): Promise<TTSResult> {
-  // Select voice based on mentalist mood
+  // Select voice based on mood
   let voice: VoiceName;
 
   switch (mood) {

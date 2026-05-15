@@ -29,8 +29,8 @@ vi.mock('../td-bridge', () => ({
   pushZoneUpdateWithValidation: mockPushZoneUpdateWithValidation,
 }));
 
-// prompts.ts pulls shader templates from disk via electron.app at module
-// load. Stub it so static imports of prompts (for ALLOWED_TOOLS_PER_PHASE)
+// system-prompts.ts pulls shader templates from disk via electron.app at module
+// load. Stub it so static imports of session-context (for ALLOWED_TOOLS_PER_PHASE)
 // don't crash under vitest where `electron.app` is undefined.
 vi.mock('./shader-templates', () => ({
   formatTemplatesForSystemPrompt: () => '',

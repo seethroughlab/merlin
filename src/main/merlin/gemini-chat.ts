@@ -17,12 +17,14 @@ import {
 } from '@google/genai';
 import {
   MERLIN_SYSTEM_PROMPT,
-  MERLIN_TOOLS,
   MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT,
-  MERLIN_VISUAL_AUTHOR_TOOLS,
   INTRO_WITH_IMAGE_PROMPT,
   MERLIN_CLOSING_PROMPT,
-} from './prompts';
+} from './system-prompts';
+import {
+  MERLIN_TOOLS,
+  MERLIN_VISUAL_AUTHOR_TOOLS,
+} from './tool-definitions';
 import type { MerlinToolCall } from './types';
 import { withRetry } from '../retry';
 import { log } from '../logger';

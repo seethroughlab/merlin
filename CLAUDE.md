@@ -10,16 +10,18 @@ Interactive AR experience combining Electron, MediaPipe tracking, and TouchDesig
 - **TouchDesigner** (`td/demo.toe`): Real-time particle systems, shaders, compositing
 - **Bridge**: WebSocket on port 8001 for Electron↔TD communication
 
-Gemini SDK: **`@google/genai` v1+** is the only SDK in use. The live Merlin chat (`gemini-chat.ts`) and sprite generation (`sprite-generator.ts`) use it for streaming + multimodal + tool calls; the standalone analysis paths in `gemini.ts` (expression/body language/voice command) use it for one-shot `generateContent`. Default model for chat is `gemini-3-flash-preview`; `gemini.ts` uses `gemini-2.5-flash` for the lighter-weight analysis calls.
+Gemini SDK: **`@google/genai` v1+** is the only SDK in use. The live Merlin chat (`gemini-chat.ts`) and sprite generation (`sprite-generator.ts`) use it for streaming + multimodal + tool calls; the standalone analysis paths in `gemini-analysis.ts` (expression/body language/voice command) use it for one-shot `generateContent`. All paths use `gemini-3-flash-preview`.
 
 ## Key Modules
 
 ### src/main/merlin/
 - `session.ts` - Live Merlin session orchestration (chat, tool calls, spell flow)
 - `spell-state.ts` - Spell detection state machine
-- `prompts.ts` - Two system prompts + two tool registries:
-  - `MERLIN_SYSTEM_PROMPT` + `MERLIN_TOOLS` for live experience (full character, all 7 tools)
-  - `MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT` + `MERLIN_VISUAL_AUTHOR_TOOLS` for the Live Spell test (stripped — no Merlin character, only `set_zone_shader` / `generate_sprite` / `request_visual_feedback`)
+- `system-prompts.ts` - Static prompt text: persona, tone rules, ethics, GLSL authorship guidance, motion recipes, and the two cached system prompt exports (`MERLIN_SYSTEM_PROMPT`, `MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT`). Also owns the short helper prompts (`INTRO_WITH_IMAGE_PROMPT`, `MERLIN_CLOSING_PROMPT`).
+- `session-context.ts` - Per-turn runtime context injection: `createTurnContext` / `buildSessionContext`, phase story framing, `formatBodyContext` / `formatFaceContext`, and `ALLOWED_TOOLS_PER_PHASE`.
+- `tool-definitions.ts` - All `FunctionDeclaration` schemas and the two tool arrays:
+  - `MERLIN_TOOLS` — all 11 tools for the live experience (full character)
+  - `MERLIN_VISUAL_AUTHOR_TOOLS` — 5-tool subset for the Live Spell test (visual authoring only)
 - `gemini-chat.ts` - Chat wrapper. `MerlinChat.initChat({mode})` selects `'merlin' | 'visual-author'`; defaults to visual-author since the only caller is Live Spell.
 - `turn-runner.ts` - Shared dispatch loop for tool calls. `runMerlinTurn` + `dispatchToolCalls` are the single path used by both live session and Live Spell test. Mirrors Gemini's free-text and tool-call summary to stdout (`[Gemini <source> <id>] …`) for dev-console visibility.
 - `asset-manager.ts` - Sprite/flipbook asset storage

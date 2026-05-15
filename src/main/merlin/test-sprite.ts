@@ -16,7 +16,7 @@
  */
 
 import { readFileSync } from 'fs';
-import { GENERATE_SPRITE_TOOL } from './prompts';
+import { GENERATE_SPRITE_TOOL } from './tool-definitions';
 import { getSpriteGenerator } from './sprite-generator';
 import { getFlipbookConfig } from './asset-manager';
 import { pushSpriteTexture, pushFlipbookConfig } from '../td-bridge';

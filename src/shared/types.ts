@@ -125,40 +125,6 @@ export interface BridgeStats {
   port: number;
 }
 
-/**
- * Voice command result from Gemini
- */
-export interface VoiceCommandResult {
-  /** Whether a valid command was recognized */
-  understood: boolean;
-  /** The action to perform */
-  action: VoiceCommandAction | null;
-  /** Human-readable response to show the user */
-  response: string;
-  /** Confidence in the interpretation (0 to 1) */
-  confidence: number;
-}
-
-/**
- * Possible voice command actions
- */
-export type VoiceCommandAction =
-  | { type: 'toggle_pose'; enabled: boolean }
-  | { type: 'toggle_face'; enabled: boolean }
-  | { type: 'toggle_segmentation'; enabled: boolean }
-  | { type: 'toggle_pose_overlay'; enabled: boolean }
-  | { type: 'toggle_face_overlay'; enabled: boolean }
-  | { type: 'toggle_segmentation_overlay'; enabled: boolean }
-  | { type: 'set_orientation'; portrait: boolean }
-  | { type: 'capture_face' }
-  | { type: 'capture_body' }
-  | { type: 'start_auto_face'; intervalSeconds?: number }
-  | { type: 'stop_auto_face' }
-  | { type: 'start_auto_body'; intervalSeconds?: number }
-  | { type: 'stop_auto_body' }
-  | { type: 'set_face_interval'; seconds: number }
-  | { type: 'set_body_interval'; seconds: number };
-
 // ============ MERLIN TYPES ============
 
 /**
@@ -331,7 +297,6 @@ export interface LiveSpellTestPreset {
  *
  * Special script line markers:
  * - `[CAST]` fires `merlinTriggerCast` directly.
- * - `[END]`  fires `merlinTriggerEnd`.
  */
 export interface ConversationTestPreset {
   id: string;
@@ -366,8 +331,8 @@ export interface ConversationTurnSnapshot {
   spell: SpellState;
   faceActivity: string | null;
   durationMs: number;
-  /** True when the line was a `[CAST]` or `[END]` marker (no Gemini round-trip). */
-  marker?: 'cast' | 'end';
+  /** True when the line was a `[CAST]` marker (no Gemini round-trip). */
+  marker?: 'cast';
 }
 
 /**

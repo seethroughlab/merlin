@@ -1,22 +1,23 @@
-/**
- * Gemini integration for one-shot multimodal analysis:
- *   - micro-expression filmstrip → JSON
- *   - body-language filmstrip → JSON
- *   - voice-command transcript → JSON
- *
- * These are independent of the Merlin spell-casting flow (which lives in
- * src/main/merlin/). Both paths use the @google/genai SDK; this module
- * does the simple stateless generateContent calls, merlin/* does the
- * stateful chat + tool dispatch.
- */
-
 import { GoogleGenAI } from '@google/genai';
-import type { MicroExpressionAnalysis, BodyLanguageAnalysis, VoiceCommandResult } from '../shared/types';
-import { withRetry } from './retry';
+import type { MicroExpressionAnalysis, BodyLanguageAnalysis } from '../../shared/types';
+import { withRetry } from '../retry';
 
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3-flash-preview';
 
 let genAI: GoogleGenAI | null = null;
+
+function ensureGenAI(): GoogleGenAI {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
+
+export function isGeminiAvailable(): boolean {
+  return !!process.env.GEMINI_API_KEY;
+}
 
 const BODY_LANGUAGE_PROMPT = `You are an expert in body language and nonverbal communication.
 Analyze this filmstrip showing a person over approximately 5 seconds.
@@ -92,66 +93,6 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code blocks):
   "description": "<brief 1-2 sentence narrative description of what you observed>"
 }`;
 
-const VOICE_COMMAND_PROMPT = `You are a voice command interpreter for Merlin, a motion capture application.
-The user has spoken a command. Interpret what they want and respond with a JSON action.
-
-Available commands and their actions:
-- "start pose tracking" / "enable pose" / "turn on pose" → toggle_pose enabled:true
-- "stop pose tracking" / "disable pose" / "turn off pose" → toggle_pose enabled:false
-- "start face detection" / "enable face" / "turn on face" → toggle_face enabled:true
-- "stop face detection" / "disable face" / "turn off face" → toggle_face enabled:false
-- "start segmentation" / "enable segmentation" / "turn on segmentation" → toggle_segmentation enabled:true
-- "stop segmentation" / "disable segmentation" / "turn off segmentation" → toggle_segmentation enabled:false
-- "show pose overlay" / "show skeleton" → toggle_pose_overlay enabled:true
-- "hide pose overlay" / "hide skeleton" → toggle_pose_overlay enabled:false
-- "show face overlay" / "show face boxes" → toggle_face_overlay enabled:true
-- "hide face overlay" / "hide face boxes" → toggle_face_overlay enabled:false
-- "portrait mode" / "switch to portrait" → set_orientation portrait:true
-- "landscape mode" / "switch to landscape" → set_orientation portrait:false
-- "capture face" / "analyze face" / "read my expression" → capture_face
-- "capture body" / "analyze body" / "read my body language" → capture_body
-- "start auto face analysis" / "auto analyze face every X seconds" → start_auto_face (with optional intervalSeconds)
-- "stop auto face analysis" → stop_auto_face
-- "start auto body analysis" / "auto analyze body every X seconds" → start_auto_body (with optional intervalSeconds)
-- "stop auto body analysis" → stop_auto_body
-- "set face interval to X seconds" → set_face_interval seconds:X
-- "set body interval to X seconds" → set_body_interval seconds:X
-
-User said: "{transcript}"
-
-Respond with ONLY valid JSON (no markdown, no code blocks):
-{
-  "understood": <true if you recognized a command, false otherwise>,
-  "action": <the action object if understood, null otherwise>,
-  "response": "<brief human-readable response to speak back>",
-  "confidence": <0 to 1>
-}
-
-Examples:
-User: "turn on pose tracking" → {"understood":true,"action":{"type":"toggle_pose","enabled":true},"response":"Pose tracking enabled","confidence":0.95}
-User: "analyze my face" → {"understood":true,"action":{"type":"capture_face"},"response":"Capturing face expression","confidence":0.9}
-User: "what's the weather" → {"understood":false,"action":null,"response":"I can only control Merlin features","confidence":0.8}`;
-
-export function initGemini(): boolean {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.warn('GEMINI_API_KEY not set - LLM analysis disabled');
-    return false;
-  }
-  try {
-    genAI = new GoogleGenAI({ apiKey });
-    console.log(`Gemini initialized (${MODEL})`);
-    return true;
-  } catch (error) {
-    console.error('Failed to initialize Gemini:', error);
-    return false;
-  }
-}
-
-export function isGeminiAvailable(): boolean {
-  return genAI !== null;
-}
-
 function parseDataUrl(imageDataUrl: string): { mimeType: string; data: string } {
   const m = imageDataUrl.match(/^data:image\/(.*?);base64,(.*)$/);
   if (!m) throw new Error('Invalid image data URL');
@@ -159,9 +100,9 @@ function parseDataUrl(imageDataUrl: string): { mimeType: string; data: string } 
 }
 
 async function generateText(parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>): Promise<string> {
-  if (!genAI) throw new Error('Gemini not initialized');
+  const ai = ensureGenAI();
   const response = await withRetry(
-    () => genAI!.models.generateContent({
+    () => ai.models.generateContent({
       model: MODEL,
       contents: [{ role: 'user', parts }],
     }),
@@ -218,35 +159,3 @@ export async function analyzeBodyLanguage(imageDataUrl: string): Promise<BodyLan
   }
 }
 
-export async function interpretVoiceCommand(transcript: string): Promise<VoiceCommandResult> {
-  const prompt = VOICE_COMMAND_PROMPT.replace('{transcript}', transcript);
-  try {
-    const text = await generateText([{ text: prompt }]);
-    let parsed: { understood?: boolean; action?: unknown; response?: string; confidence?: number };
-    try {
-      parsed = JSON.parse(extractJson(text));
-    } catch {
-      console.error('Failed to parse Gemini voice command response:', text);
-      return {
-        understood: false,
-        action: null,
-        response: "I didn't understand that command",
-        confidence: 0,
-      };
-    }
-    return {
-      understood: parsed.understood ?? false,
-      action: (parsed.action ?? null) as VoiceCommandResult['action'],
-      response: parsed.response ?? 'Command processed',
-      confidence: parsed.confidence ?? 0,
-    };
-  } catch (error) {
-    console.error('Voice command interpretation error:', error);
-    return {
-      understood: false,
-      action: null,
-      response: `Error: ${error}`,
-      confidence: 0,
-    };
-  }
-}

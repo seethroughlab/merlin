@@ -4,7 +4,6 @@ import type {
   MicroExpressionAnalysis,
   BodyLanguageAnalysis,
   BridgeStats,
-  VoiceCommandResult,
   MerlinResponse,
   MerlinUIUpdate,
   TTSResult,
@@ -47,11 +46,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Analyze skeleton strip with Gemini (body language)
   analyzeSkeletonStrip: (imageDataUrl: string): Promise<BodyLanguageAnalysis> => {
     return ipcRenderer.invoke('analyze-skeleton-strip', imageDataUrl);
-  },
-
-  // Interpret voice command with Gemini
-  interpretVoiceCommand: (transcript: string): Promise<VoiceCommandResult> => {
-    return ipcRenderer.invoke('interpret-voice-command', transcript);
   },
 
   // Rename a Spout sender
@@ -153,27 +147,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Background cast listener support. Main pushes `merlin-cast-armed`
-  // the moment prepare_casting fires, carrying the magic word + end
-  // word. The renderer arms a local matcher that watches every
-  // transcript and fires `merlin-trigger-cast` / `merlin-trigger-end`
-  // the instant a match lands — bypassing the Gemini conversation
-  // pipeline entirely so the cast is responsive even before the
-  // post-speech `merlin-process-speech` round-trip would have started.
+  // the moment prepare_casting fires, carrying the magic word. The
+  // renderer arms a local matcher that watches every transcript and fires
+  // `merlin-trigger-cast` the instant a match lands — bypassing the
+  // Gemini conversation pipeline for instant cast response.
   onMerlinCastArmed: (
-    callback: (payload: { magicWord: string; endWord: string; gestureHint?: string }) => void,
+    callback: (payload: { magicWord: string; gestureHint?: string }) => void,
   ) => {
     ipcRenderer.on(
       'merlin-cast-armed',
-      (_event, payload: { magicWord: string; endWord: string; gestureHint?: string }) => {
+      (_event, payload: { magicWord: string; gestureHint?: string }) => {
         callback(payload);
       },
     );
   },
   merlinTriggerCast: (): Promise<{ ok: boolean; phase?: string; reason?: string }> => {
     return ipcRenderer.invoke('merlin-trigger-cast');
-  },
-  merlinTriggerEnd: (): Promise<{ ok: boolean; phase?: string; reason?: string }> => {
-    return ipcRenderer.invoke('merlin-trigger-end');
   },
 
   // Test shader generation (Shift+T debug mode)
@@ -334,7 +323,6 @@ declare global {
       sendFaceGesture: (evt: { kind: string; edge: 'start' | 'end'; score: number; timestamp: number }) => void;
       analyzeFaceStrip: (imageDataUrl: string) => Promise<MicroExpressionAnalysis>;
       analyzeSkeletonStrip: (imageDataUrl: string) => Promise<BodyLanguageAnalysis>;
-      interpretVoiceCommand: (transcript: string) => Promise<VoiceCommandResult>;
       renameSpoutSender: (oldName: string, newName: string) => Promise<boolean>;
       getBridgeStats: () => Promise<BridgeStats>;
       getSettings: () => Promise<Record<string, unknown>>;
@@ -357,10 +345,9 @@ declare global {
       onMerlinAutoEnd: (callback: () => void) => void;
       onMerlinSpeakChunk: (callback: (text: string) => void) => void;
       onMerlinCastArmed: (
-        callback: (payload: { magicWord: string; endWord: string; gestureHint?: string }) => void,
+        callback: (payload: { magicWord: string; gestureHint?: string }) => void,
       ) => void;
       merlinTriggerCast: () => Promise<{ ok: boolean; phase?: string; reason?: string }>;
-      merlinTriggerEnd: () => Promise<{ ok: boolean; phase?: string; reason?: string }>;
       merlinTestShader: (config: TestShaderConfig) => Promise<TestShaderResult>;
       merlinTestSpriteDirect: (spec: SpriteTestSpec) => Promise<SpriteTestResult>;
       merlinTestSpriteGemini: (prompt: string) => Promise<SpriteTestResult>;

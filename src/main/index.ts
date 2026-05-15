@@ -4,8 +4,8 @@ import { join, dirname } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 // OSC removed - all communication now via WebSocket (td-bridge)
 import { createSpoutSender, wireWindowToSender, closeSpout, resizeSpoutSender } from './spout';
-import { initGemini, analyzeMicroExpressions, analyzeBodyLanguage, interpretVoiceCommand, isGeminiAvailable } from './gemini';
-import { initTTS as initGeminiTTS, generateMentalistSpeech as generateSpeech, isTTSAvailable } from './tts';
+import { analyzeMicroExpressions, analyzeBodyLanguage, isGeminiAvailable } from './merlin/gemini-analysis';
+import { initTTS as initGeminiTTS, generateMerlinSpeech as generateSpeech, isTTSAvailable } from './tts';
 import { initLiveTTS, streamSpeech, isLiveTTSConnected, closeLiveTTS } from './tts-live';
 import { MerlinSession, createMerlinSession as createMerlinSessionInstance } from './merlin';
 import { testShaderGeneration } from './merlin/test-shader';
@@ -71,7 +71,7 @@ const spoutConfig = {
 // Merlin session (singleton)
 let merlinSession: MerlinSession | null = null;
 
-// Cached analysis for mentalist/merlin mode
+// Cached analysis for Merlin session
 let lastBodyAnalysis: Partial<BodyLanguageAnalysis> | null = null;
 let lastFaceAnalysis: Partial<MicroExpressionAnalysis> | null = null;
 
@@ -199,7 +199,7 @@ function createMerlinSession(): MerlinSession {
       // to the renderer so its background cast listener can match the
       // participant's speech directly — no Gemini round-trip needed when
       // they say the word.
-      console.log(`[Merlin ${ts()}] Cast armed: magicWord="${payload.magicWord}" endWord="${payload.endWord}"`);
+      console.log(`[Merlin ${ts()}] Cast armed: magicWord="${payload.magicWord}"`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('merlin-cast-armed', payload);
       }
@@ -446,26 +446,6 @@ ipcMain.handle('analyze-skeleton-strip', async (_event, imageDataUrl: string) =>
   }
 });
 
-// IPC handler for voice command interpretation
-ipcMain.handle('interpret-voice-command', async (_event, transcript: string) => {
-  if (!isGeminiAvailable()) {
-    throw new Error('Gemini not available - check GEMINI_API_KEY');
-  }
-
-  console.log(`Interpreting voice command: "${transcript}"`);
-  const startTime = Date.now();
-
-  try {
-    const result = await interpretVoiceCommand(transcript);
-    console.log(`Voice command interpreted in ${Date.now() - startTime}ms`);
-    console.log('Result:', JSON.stringify(result, null, 2));
-    return result;
-  } catch (error) {
-    console.error('Voice command interpretation failed:', error);
-    throw error;
-  }
-});
-
 // IPC handler for renaming Spout senders
 ipcMain.handle('rename-spout-sender', async (_event, oldName: string, newName: string) => {
   console.log(`Renaming Spout sender: ${oldName} -> ${newName}`);
@@ -697,26 +677,6 @@ ipcMain.handle('merlin-trigger-cast', async () => {
   return { ok: true, phase: state.phase };
 });
 
-// Background play-end trigger — fired by the renderer when its
-// independent listener matches the end-word in a transcript during
-// play phase. Closes play, advances to outro. The renderer is
-// responsible for any final TTS narration (or skipping it).
-ipcMain.handle('merlin-trigger-end', async () => {
-  if (!merlinSession || !merlinSession.isActive()) {
-    return { ok: false, reason: 'session not active' };
-  }
-  console.log(`[Merlin ${ts()}] Background end-word trigger fired`);
-  merlinSession.closePlay('end-word');
-  const state = merlinSession.getState();
-  broadcastMerlinUpdate({
-    phase: state.phase,
-    turnCount: state.turnCount,
-    spell: merlinSession.getSpell(),
-    isListening: false,
-    isProcessing: false,
-  });
-  return { ok: true, phase: state.phase };
-});
 
 // End Merlin session
 ipcMain.handle('merlin-end', async () => {
@@ -768,7 +728,7 @@ ipcMain.handle('merlin-get-state', () => {
   };
 });
 
-// Update cached analysis for Merlin (same handler as mentalist)
+// Update cached analysis for Merlin
 ipcMain.on('merlin-update-analysis', (_event, data: {
   body?: Partial<BodyLanguageAnalysis>;
   face?: Partial<MicroExpressionAnalysis>;
@@ -938,7 +898,13 @@ ipcMain.handle('generate-speech', async (_event, text: string, mood?: string) =>
   }
 });
 
-// Stream speech using Gemini Live API (streaming mode)
+// Stream speech using Gemini Live API (streaming mode).
+// Called by the renderer for both the parallel-TTS chunk path (onSpeakChunk
+// forwards text to renderer via merlin-speak-chunk, renderer gates on its
+// own ttsReady/testModeMuteTts/inFlightSpeechPromise state, then calls back
+// here) and the spokenText path (post-tool remainder). The round-trip exists
+// so all "should we speak?" decisions stay renderer-side, co-located with the
+// Web Audio scheduling and continuous-listening state they depend on.
 ipcMain.on('stream-speech', (_event, text: string, mood?: string) => {
   const timestamp = new Date().toISOString().slice(11, 23);
   console.log(`[LiveTTS ${timestamp}] Stream request for mood "${mood || 'mysterious'}"...`);
@@ -962,11 +928,7 @@ ipcMain.handle('td-get-status', () => ({
 app.whenReady().then(async () => {
   console.log('=== Merlin Starting ===');
 
-  // Initialize Gemini (for LLM analysis)
-  const geminiReady = initGemini();
-  if (geminiReady) {
-    console.log('Gemini initialized');
-  } else {
+  if (!isGeminiAvailable()) {
     console.log('Gemini not available (set GEMINI_API_KEY to enable)');
   }
 
