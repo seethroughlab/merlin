@@ -515,18 +515,18 @@ export class MerlinSession {
     const formationEnd = discoveryEnd + formationTurns;
 
     let newPhase: MerlinPhase;
-    if (turn <= introEnd) {
+    if (this.state.castCompleted) {
+      // Cast already happened — stay in 'play' regardless of turn count;
+      // closePlay() explicitly sets 'outro' when the safety timer fires.
+      newPhase = this.state.phase === 'play' ? 'play' : 'outro';
+    } else if (turn <= introEnd) {
       newPhase = 'intro';
     } else if (turn <= discoveryEnd) {
       newPhase = 'discovery';
     } else if (turn <= formationEnd) {
       newPhase = 'formation';
-    } else if (this.state.castReady && !this.state.castCompleted) {
+    } else if (this.state.castReady) {
       newPhase = 'ready_to_cast';
-    } else if (this.state.castCompleted) {
-      // Stay in 'play' while the participant inhabits the spell; closePlay()
-      // explicitly sets 'outro' when the timer fires.
-      newPhase = this.state.phase === 'play' ? 'play' : 'outro';
     } else {
       // Still in formation if cast not ready
       newPhase = 'formation';

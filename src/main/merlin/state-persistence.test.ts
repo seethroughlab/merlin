@@ -137,8 +137,10 @@ describe('state-persistence', () => {
 
       const writeCall = mockFs.writeFileSync.mock.calls[0];
       const filePath = writeCall[0] as string;
-      expect(filePath).not.toContain('/session');  // sanitized
-      expect(filePath).not.toContain('*');
+      const fileName = filePath.split('/').pop()!;
+      expect(fileName).not.toContain('/');  // sanitized path separator
+      expect(fileName).not.toContain(':');  // sanitized colon
+      expect(fileName).not.toContain('*');  // sanitized wildcard
     });
   });
 

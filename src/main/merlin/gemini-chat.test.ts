@@ -17,13 +17,20 @@ vi.mock('@google/genai', () => ({
   Type: { STRING: 'STRING', OBJECT: 'OBJECT', NUMBER: 'NUMBER', INTEGER: 'INTEGER', BOOLEAN: 'BOOLEAN', ARRAY: 'ARRAY' },
 }));
 
-vi.mock('./prompts', () => ({
+vi.mock('electron', () => ({
+  app: { getAppPath: () => '/mock/app' },
+}));
+
+vi.mock('./system-prompts', () => ({
   MERLIN_SYSTEM_PROMPT: 'merlin-system',
   MERLIN_VISUAL_AUTHOR_SYSTEM_PROMPT: 'visual-author-system',
-  MERLIN_TOOLS: [{ name: 'set_zone_shader' }],
-  MERLIN_VISUAL_AUTHOR_TOOLS: [{ name: 'set_zone_shader' }, { name: 'generate_sprite' }, { name: 'request_visual_feedback' }],
   INTRO_WITH_IMAGE_PROMPT: 'intro-prompt',
   MERLIN_CLOSING_PROMPT: 'closing-prompt',
+}));
+
+vi.mock('./tool-definitions', () => ({
+  MERLIN_TOOLS: [{ name: 'set_zone_shader' }],
+  MERLIN_VISUAL_AUTHOR_TOOLS: [{ name: 'set_zone_shader' }, { name: 'generate_sprite' }, { name: 'request_visual_feedback' }],
 }));
 
 // === Helpers ===
