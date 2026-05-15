@@ -103,7 +103,9 @@ flowchart TD
 | `.env` | API keys (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`), `MERLIN_LOG_LEVEL`, `MERLIN_TEST_TRIGGER_PORT` |
 | `src/main/config.ts` | Ports (8001 TD bridge, 8765 trigger), timeouts (screenshot 5s, sprite-load 8s, compile 5s), retry counts (3, 1s base, 10s cap) |
 | `src/main/merlin/zone-registry.ts` | Per-zone validation contracts (modifies, vars, uniforms, banned keywords, max lines) |
-| `src/main/merlin/prompts.ts` | All system prompts + Gemini tool function declarations |
+| `src/main/merlin/system-prompts.ts` | Static prompt text (persona, tone rules, GLSL guidance, the two cached system prompts) |
+| `src/main/merlin/session-context.ts` | Per-turn runtime context, phase framing, `ALLOWED_TOOLS_PER_PHASE` |
+| `src/main/merlin/tool-definitions.ts` | Gemini tool `FunctionDeclaration` schemas + tool arrays (`MERLIN_TOOLS`, `MERLIN_VISUAL_AUTHOR_TOOLS`) |
 | `td/scripts/ws_callbacks.py` | TD-side zone/uniform/sampler wiring and message dispatch |
 
 ## Where the magic actually happens
@@ -112,7 +114,7 @@ If you only have time to read four files, read these in this order:
 
 1. `src/main/merlin/session.ts` — phase machine + lifecycle
 2. `src/main/merlin/turn-runner.ts` — tool dispatch + screenshot eval
-3. `src/main/merlin/prompts.ts` — the system prompt is **long**; the tool list is the contract surface
+3. `src/main/merlin/system-prompts.ts` (long, the persona/tone/GLSL contract) + `src/main/merlin/tool-definitions.ts` (the tool contract surface). `session-context.ts` is the per-turn glue if you need it.
 4. `td/scripts/ws_callbacks.py` — TD-side everything
 
 Then `docs/conversation-flow.md` ties them together turn-by-turn.

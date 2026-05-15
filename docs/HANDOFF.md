@@ -17,7 +17,7 @@ You're inheriting Merlin Mirror. This document is the single entrypoint: read it
 
 | Task | Start here |
 |------|------------|
-| Add or change a Gemini tool | `src/main/merlin/prompts.ts` (registry + system prompt), then `src/main/merlin/turn-runner.ts` (dispatch + tool handlers) |
+| Add or change a Gemini tool | `src/main/merlin/tool-definitions.ts` (FunctionDeclaration schemas + tool arrays). If allow-list per phase changes: `src/main/merlin/session-context.ts` (`ALLOWED_TOOLS_PER_PHASE`). Prompt text describing the tool: `src/main/merlin/system-prompts.ts`. Then `src/main/merlin/turn-runner.ts` (dispatch + handlers) |
 | Session lifecycle, phase machine | `src/main/merlin/session.ts`, then `docs/conversation-flow.md` |
 | Touch the conversation flow (mic, TTS, IPC) | `src/renderer/main.ts` (`handleMerlinTranscript`, chunk handler), then `docs/conversation-flow.md` |
 | Push something new to TD | `src/main/td-bridge/push.ts`, register the message type in `td/scripts/ws_callbacks.py`, document in `CLAUDE.md` |
@@ -30,11 +30,12 @@ You're inheriting Merlin Mirror. This document is the single entrypoint: read it
 ## Workflow notes
 
 - **Tests**: `npm test` runs Vitest (414+ tests, ~1s). All highest-risk modules have coverage; `src/main/merlin/test-shader.test.ts` is the most representative example of the project's mocking style (`@google/genai` chat-class mock, hoisted vi.fn refs, td-bridge stubs).
-- **Lint**: `npm run lint`. Zero errors at handoff; 46 warnings (mostly unused vars in older renderer code and `any` in native bindings) — fix as you touch.
-- **Type check**: `npx tsc --noEmit`. Strict mode is on; the codebase is clean.
+- **Lint**: `npm run lint`. Zero errors at handoff; low double-digit warnings (mostly unused vars in older renderer code and `any` in native bindings under `src/main/spout.ts`) — fix as you touch.
+- **Type check**: `npm run typecheck`. Strict mode is on; the codebase is clean.
 - **Logger**: new code should import from `src/main/logger.ts` (`log.info('Module', ...)`). Older modules still use `console.*` — migrate incrementally when you touch a file.
 - **Config**: ports / timeouts / retry counts live in `src/main/config.ts`. Add new magic numbers there before sprinkling them.
 - **Retry**: external API calls (Gemini, Imagen) go through `withRetry()` from `src/main/retry.ts` (3 attempts, 1s/2s/4s, retries 429/5xx/network only).
+- **No CI / pre-commit**: there is no GitHub Actions workflow and no husky/lint-staged. Run `npm run lint && npm run typecheck && npm test` before pushing. Adding a minimal PR-gate workflow is a fast follow-up if you want it.
 
 ## Known gaps and open work
 
@@ -58,7 +59,7 @@ The short table below is a snapshot. The canonical priorities list — what to a
 
 3. **Sprite-load race.** `pushSpriteTexture` is fire-and-forget. Always pair it with `waitForSpriteLoad(assetId, 8000)` before taking a screenshot or reading the texture, or you'll capture the previous spell's sprite. The `request_visual_feedback` handler enforces this.
 
-4. **The chunk-TTS path stops the mic.** When Gemini's first reply carries text + tool calls, the renderer's `onMerlinSpeakChunk` listener calls `stopContinuousListening()` immediately to avoid TTS feedback. The post-turn handler at `src/renderer/main.ts:3335–3373` is responsible for restarting the mic; all three branches do, but if you refactor the handler, **don't drop the resume call** or the session "stops after one reaction." See `docs/conversation-flow.md` § "Listening stuck closed after turn 1".
+4. **The chunk-TTS path stops the mic.** When Gemini's first reply carries text + tool calls, the renderer's `onMerlinSpeakChunk` listener (`src/renderer/main.ts` around line 1478) calls `stopContinuousListening()` immediately to avoid TTS feedback. The post-turn handler (the three-branch `if/else if/else` block ending around line 1362) is responsible for restarting the mic; all three branches do, but if you refactor the handler, **don't drop the resume call** or the session "stops after one reaction." See `docs/conversation-flow.md` § "Listening stuck closed after turn 1".
 
 5. **`vis` on MediaPipe Pose is effectively binary for face/torso landmarks.** Don't try to use eye visibility as a meaningful signal. Hand visibility genuinely fluctuates and is OK. The prompt warns Gemini about this; don't pull it out.
 
@@ -73,12 +74,12 @@ Open the **test panel** with **Shift+T**:
 - **Live Spell tab**: highest-scope test. Type a spell description → Gemini drives sprite gen + zone shaders + screenshot evaluation end-to-end. This is the closest thing to a real session without TTS / mic.
 - **Conversation tab**: scripted multi-turn participant for testing the full session flow without speaking. Optionally Claude-driven (needs `ANTHROPIC_API_KEY`).
 
-Live session: **Shift+M** starts the real flow with mic, TTS, and phase machine. Speak naturally; speak the magic word to cast; speak the end-word (default "farewell") to end.
+Live session: **Shift+M** starts the real flow with mic, TTS, and phase machine. Speak naturally; speak the magic word to cast. After the cast Gemini delivers a short welcome line ("Your spell is alive — step into it.") and then goes silent. The play phase ends on its own after 60 seconds of inactivity (re-casting the magic word resets the timer). There is no spoken end-word — the previous "farewell" trigger was removed in cab764a.
 
 ## When you're stuck
 
 Follow the data:
-- A spell doesn't render → `session.ts` (state) → `turn-runner.ts` (dispatch) → `prompts.ts` (Gemini context) → `td-bridge/push.ts` (wire) → `td/scripts/ws_callbacks.py` (TD side).
+- A spell doesn't render → `session.ts` (state) → `turn-runner.ts` (dispatch) → `session-context.ts` (per-turn context + tool gating) → `td-bridge/push.ts` (wire) → `td/scripts/ws_callbacks.py` (TD side).
 - A shader doesn't compile → check TD's textport, then `glsl-validator.ts` (server-side check), then `_check_glsl_compile` in `ws_callbacks.py`.
 - A screenshot is wrong → look at `td-bridge/metrics.ts:requestScreenshot` and the `screenshot_result` handler in `protocol.ts`.
 - The mic stops working → `docs/conversation-flow.md` § "Listening lifecycle" + the three branches in `handleMerlinTranscript`.

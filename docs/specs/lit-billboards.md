@@ -9,7 +9,7 @@ Two billboard techniques address this without adding mesh geometry:
 1. **Normal-mapped sprites** — bake a surface normal into the sprite texture and apply directional shading in `billboard_pixel`
 2. **View-dependent orientation fading** — shrink particles that are edge-on to the camera, reducing the "flat wall of dots" look in dense fields
 
-Both techniques work with the existing billboard/flipbook pipeline and are suitable additions to `VISUAL_TECHNIQUES` in `prompts.ts`.
+Both techniques work with the existing billboard/flipbook pipeline and are suitable additions to `VISUAL_TECHNIQUES` in `system-prompts.ts`.
 
 ---
 
@@ -32,7 +32,7 @@ brightness *= NdotL * (1.0 - ambient) + ambient;  // 25% ambient floor
 
 A sphere sprite with a baked normal map responds to the key light identically to a mesh sphere. Crystal shards baked from faceted geometry respond with hard terminator lines between lit and shadowed facets — giving the particle its perceived shape, not just its silhouette.
 
-**Add as VISUAL_TECHNIQUES #9 in `prompts.ts`.**
+**Add as VISUAL_TECHNIQUES #9 in `system-prompts.ts`.**
 
 ### Sprite generation pipeline changes
 
@@ -77,13 +77,13 @@ finalScale *= 0.15 + facing * 0.85;  // edge-on = 15% size, facing = 100%
 
 The effect is subtle in sparse fields, prominent in dense ones. It pairs well with `blendMode: 'alpha'` (from improvement-03): alpha-blended particles that are nearly edge-on contribute almost nothing to coverage, so fading their scale removes them cleanly rather than leaving a ghost contribution.
 
-**Add as VISUAL_TECHNIQUES #10 in `prompts.ts`.**
+**Add as VISUAL_TECHNIQUES #10 in `system-prompts.ts`.**
 
 ### Prerequisites
 
 None. The `camIdx` uniform is already available in `billboard_vertex` (documented in the zone contract). This is a pure GLSL pattern — no TD changes, no protocol changes.
 
-**Priority: Low (immediate).** Only requires adding the technique to `VISUAL_TECHNIQUES` in `prompts.ts`. Gemini can start using it on the next deploy.
+**Priority: Low (immediate).** Only requires adding the technique to `VISUAL_TECHNIQUES` in `system-prompts.ts`. Gemini can start using it on the next deploy.
 
 ---
 

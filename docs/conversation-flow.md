@@ -37,8 +37,7 @@ IPC goes Main ⇄ Renderer; WS goes Main ⇄ TD.
 | `state.castCompleted` | Set true when `triggerCast()` fires (magic word matched). Once true, the participant can keep re-casting visually but the conversational layer is done. |
 | `state.lastPosture`, `state.lastExpression` | Cached body-language + face-expression analysis from `get_posture` / `get_expression` tools. |
 | `conversationHistory` | Local copy of all turns (role + content) — informs Gemini context display, not the model's memory (Gemini chat keeps its own history). |
-| `endWord` (private) | Word the participant says to end the play phase. Defaults to `'farewell'`. |
-| `playSafetyTimer` (private) | 60-second timer that auto-advances `play` → `outro` if the participant never speaks the end-word. |
+| `playSafetyTimer` (private) | 60-second inactivity timer that auto-advances `play` → `outro`. Reset every time the magic word is re-detected; on expiry, `closePlay()` runs and the session closes silently. |
 | `effectTriggers` (private) | Words Gemini registered via `register_effect_triggers` — matched locally to fire instant zone updates with no Gemini round-trip. |
 
 The Gemini SDK chat object (`this.chat`) keeps its own conversation
@@ -62,7 +61,7 @@ earlier.
 | `merlinModeActive` | `true` while a session is running. Listening + IPC handlers gate on this. |
 | `isProcessingMerlinTranscript` | Lock to prevent concurrent processing if the user speaks again while a turn is in flight. |
 | `inFlightSpeechPromise` | Promise for the in-flight chunk-path TTS. The post-turn spokenText path awaits this before its own `speakWithStreaming` to avoid two parallel TTS requests interleaving at the LiveTTS server. |
-| `armedMagicWord`, `armedEndWord` | Set when main pushes `merlin-cast-armed` (after `prepare_casting`). The transcript callback matches these locally and fires the cast / end via direct IPC, bypassing Gemini. |
+| `armedMagicWord` | Set when main pushes `merlin-cast-armed` (after `prepare_casting`). The transcript callback matches it locally and fires the cast via direct IPC, bypassing Gemini. |
 | Face HUD state (`faceHudActive`, `faceHudRecent`) | UI for the live face-gesture pills + recent-events feed. |
 
 ---
@@ -87,13 +86,14 @@ outroTurns: 1,         // closing
 | `1 ≤ turnCount ≤ 3` | `discovery` |
 | `turnCount == 4` | `formation` |
 | `castReady && !castCompleted` | `ready_to_cast` |
-| `castCompleted` | `outro` (via `markCastCompleted` → `'play'`, then `closePlay` → `'outro'`) |
+| `castCompleted` | locked to `'play'` (via `markCastCompleted` → `'play'`); the 60s inactivity timer is what eventually advances `'play'` → `'outro'` |
 | else | stays in `formation` until cast |
 
 Once `markCastCompleted()` fires:
 - `state.phase` jumps to `'play'` (not `outro` directly)
-- `playSafetyTimer` starts (60s)
-- `closePlay('end-word' | 'timeout')` advances to `outro` and runs the closing Gemini turn
+- Gemini runs a brief play-phase turn that delivers a warm welcome line ("Your spell is alive — step into it.") and then goes silent.
+- `playSafetyTimer` starts (60s). Re-speaking the magic word during play resets the timer.
+- On timer expiry, the private `closePlay()` advances to `outro` and closes the session silently via `onSessionComplete` (no closing Gemini turn — the cast welcome line was the closing flourish).
 
 The intro narration (Merlin's opening line) is fired by `startSession` *before* any user-speech turn — it does NOT increment `turnCount`. The first user reply lands in `discovery`.
 
@@ -101,7 +101,7 @@ The intro narration (Merlin's opening line) is fired by `startSession` *before* 
 
 ## When tools run
 
-Tools are allowed per phase via `ALLOWED_TOOLS_PER_PHASE` in `prompts.ts`. The dispatcher in `turn-runner.ts` (`dispatchToolCalls`) silently drops any call whose name isn't in the current phase's set, replying with a synthetic error so Gemini learns the constraint:
+Tools are allowed per phase via `ALLOWED_TOOLS_PER_PHASE` in `session-context.ts`. The dispatcher in `turn-runner.ts` (`dispatchToolCalls`) silently drops any call whose name isn't in the current phase's set, replying with a synthetic error so Gemini learns the constraint:
 
 | Phase | Allowed tools |
 |---|---|
@@ -158,13 +158,13 @@ The microphone (Whisper continuous-listening with VAD) is governed by `startCont
 | Chunk path fires (initial Gemini text + tools) | Renderer's `onMerlinSpeakChunk` handler calls `stopContinuousListening()` then `speakWithStreaming(text)`. Mic closed. |
 | `merlinProcessSpeech` returns | Renderer awaits any in-flight chunk TTS. If `response.spokenText` is non-empty (rare with one-response-per-turn), speak it too. |
 | Speech finishes | `startContinuousListening(handleMerlinTranscript)` re-opens the mic. |
-| Magic word match | Renderer fires `merlin-trigger-cast` IPC → main's `session.triggerCast()` runs directly. Cast envelope sent to TD. **No Gemini round-trip.** |
-| End-word match (during `play`) | Renderer fires `merlin-trigger-end` IPC → `session.closePlay('end-word')`. Outro Gemini turn runs. |
+| Magic word match | Renderer fires `merlin-trigger-cast` IPC → main's `session.triggerCast()` runs directly. Cast envelope sent to TD. **No Gemini round-trip.** On the *first* cast, Gemini also runs a brief play-phase turn to deliver the welcome line. On re-casts during `play`, the inactivity timer resets and nothing else happens. |
+| 60s of inactivity in `play` | `playSafetyTimer` fires → `closePlay()` advances to `outro` and closes the session silently (no closing Gemini turn). |
 | `stopMerlinMode()` | `stopContinuousListening()`, clears callbacks, fires `merlin-end` IPC, resets face HUD + armed words. |
 
 ### Listening stuck closed after turn 1 (fixed)
 
-The chunk path closes the mic with `stopContinuousListening()`. After the chunk's TTS finishes and `merlinProcessSpeech` returns, `handleMerlinTranscript`'s post-turn block has three branches (see `src/renderer/main.ts:3335–3373`):
+The chunk path closes the mic with `stopContinuousListening()`. After the chunk's TTS finishes and `merlinProcessSpeech` returns, `handleMerlinTranscript`'s post-turn block has three branches (the `if (ttsReady && response.spokenText) { … } else if (inFlightSpeechPromise) { … } else { … }` block in `src/renderer/main.ts` ending around line 1362):
 
 ```ts
 if (ttsReady && response.spokenText) {
@@ -194,8 +194,7 @@ Branch (B) is the **common path** under the one-response-per-turn rule (chunk fi
 | `merlin-start` | Begin a session. Returns the intro response. |
 | `merlin-process-speech` | Send a transcript for processing. Returns `{ text, phase, spell, spokenText }`. |
 | `merlin-end` | Tear down the session. |
-| `merlin-trigger-cast` | Fired by renderer's background magic-word matcher. Calls `session.triggerCast()` directly. |
-| `merlin-trigger-end` | Fired by renderer's end-word matcher during play phase. Calls `session.closePlay('end-word')`. |
+| `merlin-trigger-cast` | Fired by renderer's background magic-word matcher. Calls `session.triggerCast()` directly. Re-firing during the `play` phase resets the inactivity timer. |
 | `tracking-frame` | Pose + face landmark data, ~30 fps. |
 | `face-gesture` | Single edge-triggered face event (smile start, mouth open end, etc.) — pushed into the face-event ring buffer. |
 
@@ -206,7 +205,7 @@ Branch (B) is the **common path** under the one-response-per-turn rule (chunk fi
 | `merlin-update` | Broadcast session state changes (phase, spell, etc.) for UI sync. |
 | `merlin-auto-end` | Session naturally completed (turnCount ≥ totalTurns); renderer tears down. |
 | `merlin-speak-chunk` | Parallel-TTS: forward Gemini's initial text to the renderer's TTS while tools run. |
-| `merlin-cast-armed` | When `prepare_casting` dispatches, push magic word + end word so the renderer arms its local matcher. |
+| `merlin-cast-armed` | When `prepare_casting` dispatches, push the magic word so the renderer arms its local matcher. |
 | `gemini-conversation` | Per-turn LIVE-card events: system prompt, user prompt, response text, tool calls, push results, face activity, kind label. |
 
 ### Main ↔ TD WebSocket (port 8001)
@@ -227,8 +226,8 @@ Inbound (TD → main): `td_ready`, `compile_result`, `metrics`, `visibility`, `s
 | 3 | User: *"…"* | `discovery` | `discovery` | Same shape. |
 | 4 | User: *"…"* | `discovery` | `formation` | turnCount = 4 → formation. Gemini calls `prepare_casting` with a magic word. State: `castReady = true`. `onCastArmed` fires → renderer arms its background matcher. |
 | 5 | User stays silent (or speaks softly) | `formation` | `ready_to_cast` | Phase advances because `castReady && !castCompleted`. Tools restricted to perception only. |
-| — | User speaks the magic word | `ready_to_cast` | `play` | Renderer's local matcher fires `merlin-trigger-cast` BEFORE merlinProcessSpeech. `triggerCast()` → cast envelope pushed to TD, `markCastCompleted()` runs, phase=`play`, 60s safety timer starts. |
-| — | User speaks the end word (or 60s elapse) | `play` | `outro` | `closePlay('end-word')` runs. Gemini outro turn produces farewell. TTS plays it. Session ends. |
+| — | User speaks the magic word | `ready_to_cast` | `play` | Renderer's local matcher fires `merlin-trigger-cast` BEFORE merlinProcessSpeech. `triggerCast()` → cast envelope pushed to TD, `markCastCompleted()` runs, phase=`play`, 60s inactivity timer starts. Gemini runs a brief play-phase turn delivering the welcome line ("Your spell is alive — step into it."). |
+| — | 60s of inactivity in `play` | `play` | `outro` | `playSafetyTimer` fires → private `closePlay()` advances to `outro` and closes the session silently via `onSessionComplete`. (The previous spoken "end-word" trigger was removed in cab764a.) |
 
 ---
 
@@ -238,7 +237,9 @@ Inbound (TD → main): `td_ready`, `compile_result`, `metrics`, `visibility`, `s
 |---|---|
 | `src/main/merlin/session.ts` | `MerlinSession`, phase machine, processUserSpeech orchestrator. |
 | `src/main/merlin/turn-runner.ts` | `runMerlinTurn`, `dispatchToolCalls`, chunk path, post-tool drop, retry cap. |
-| `src/main/merlin/prompts.ts` | Persona, tone constraints, phase rules, tool definitions, ALLOWED_TOOLS_PER_PHASE. |
+| `src/main/merlin/system-prompts.ts` | Persona, tone constraints, GLSL authorship guidance, the two cached system prompts. |
+| `src/main/merlin/session-context.ts` | Per-turn context builder, phase-story framing, `ALLOWED_TOOLS_PER_PHASE`. |
+| `src/main/merlin/tool-definitions.ts` | Gemini `FunctionDeclaration` schemas + `MERLIN_TOOLS` / `MERLIN_VISUAL_AUTHOR_TOOLS`. |
 | `src/renderer/main.ts` | `handleMerlinTranscript`, listening lifecycle, chunk listener, IPC wiring, face HUD. |
 | `src/renderer/whisper/index.ts` | Continuous listening + VAD. |
 | `src/renderer/tts/index.ts` | LiveTTS playback (chunk + remainder, WebAudio scheduling). |

@@ -59,8 +59,8 @@ The renderer's BrowserWindow gets a `--spout` flag; the Spout sender publishes a
 6. **Live session**
    - **Shift+M** starts a Merlin session (intro narration via TTS, then continuous listening).
    - Speak — Merlin responds and pushes spell visuals to TD.
-   - Speak the magic word Merlin gave you → cast fires.
-   - Speak the end-word (default "farewell") → outro plays.
+   - Speak the magic word Merlin gave you → cast fires. Merlin says a short welcome line, then goes silent.
+   - The session closes on its own after 60 seconds of inactivity (re-speaking the magic word during play resets the timer).
 
 ## Troubleshooting
 

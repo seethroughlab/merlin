@@ -123,11 +123,11 @@ Add to the zone-name → TD node mapping:
 
 Add `glsl_background_info` to compile-detection (same pattern as `glsl_postfx_info`).
 
-### `src/main/merlin/prompts.ts`
+### `src/main/merlin/tool-definitions.ts` + `system-prompts.ts`
 
-Add `background_environment` to `MERLIN_VISUAL_AUTHOR_TOOLS` and `MERLIN_TOOLS`.
+Add `background_environment` to `MERLIN_VISUAL_AUTHOR_TOOLS` and `MERLIN_TOOLS` in `tool-definitions.ts`.
 
-Update `SHADER_AUTHORSHIP` with zone description and example patterns:
+In `system-prompts.ts`, update `SHADER_AUTHORSHIP` with zone description and example patterns:
 - Dark void: `color = vec3(0.0);` (pure black background)
 - Deep space: `color = vec3(0.02, 0.01, 0.05) + hash31(uv.x * 100.0 + uv.y * 200.0) * 0.03;`
 - Vortex: animated polar coordinate pattern
