@@ -6,6 +6,14 @@
  * call site imports it instead of inlining the number — making
  * "what port does X use?" answerable with a single grep.
  *
+ * Convention: this file holds cross-module knobs (anything touched by
+ * more than one file, anything a deployer or operator would tune).
+ * Module-local timings that have strong contextual meaning — e.g.
+ * `PLAY_PHASE_MAX_MS` and `DEFAULT_CAST_ENVELOPE` in `merlin/session.ts`
+ * — stay near their callers where the rationale is documented in
+ * context. When in doubt: if a new contributor would have to read two
+ * files to understand what the number does, put it here.
+ *
  * Note: `scripts/kill-stale-merlin.cjs` keeps its own literal because
  * predev runs before the TS build. Keep the two in sync.
  */
