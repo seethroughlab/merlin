@@ -331,7 +331,7 @@ export function clearAllSprites(): void {
       if (fs.existsSync(asset.texturePath)) {
         fs.unlinkSync(asset.texturePath);
       }
-    } catch (e) {
+    } catch {
       // Continue clearing
     }
   }

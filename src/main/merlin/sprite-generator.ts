@@ -6,7 +6,6 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import * as fs from 'fs';
 import {
   saveSprite,
   getDefaultSpritePath,
@@ -23,8 +22,6 @@ import { log } from '../logger';
 // ============ CONFIGURATION ============
 
 const SPRITE_SIZE = 512;
-const SPRITE_MIN_SIZE = 64;
-const SPRITE_MAX_SIZE = 1024;
 
 const FLIPBOOK_FRAME_SIZE = 256;
 
@@ -40,11 +37,6 @@ function clamp(input: string | undefined, label: string): string {
   log.warn('SpriteGen', `${label} truncated from ${input.length} → ${PROMPT_INPUT_MAX_CHARS} chars`);
   return input.slice(0, PROMPT_INPUT_MAX_CHARS);
 }
-
-// Validation thresholds
-const CENTER_BRIGHTNESS_MIN = 0.15;
-const EDGE_TRANSPARENCY_MAX = 0.3;
-const FLIPBOOK_CELL_MIN_CONTENT = 0.05;
 
 // ============ TYPES ============
 
@@ -191,82 +183,6 @@ export function buildSpritePromptFromSpell(
 
   const description = `${elementStyle}, ${intentStyle}`;
   return buildSpritePrompt(description, style);
-}
-
-// ============ VALIDATION ============
-
-/**
- * Calculate average brightness of a region
- */
-function getRegionBrightness(
-  pixels: Uint8Array,
-  width: number,
-  startX: number,
-  startY: number,
-  regionWidth: number,
-  regionHeight: number
-): number {
-  let sum = 0;
-  let count = 0;
-
-  for (let y = startY; y < startY + regionHeight; y++) {
-    for (let x = startX; x < startX + regionWidth; x++) {
-      const idx = (y * width + x) * 4;
-      // Average RGB
-      const brightness = (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
-      sum += brightness;
-      count++;
-    }
-  }
-
-  return count > 0 ? sum / (count * 255) : 0;
-}
-
-/**
- * Calculate average alpha of edge regions
- */
-function getEdgeAlpha(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-  edgeWidth: number
-): number {
-  let sum = 0;
-  let count = 0;
-
-  // Top edge
-  for (let y = 0; y < edgeWidth; y++) {
-    for (let x = 0; x < width; x++) {
-      sum += pixels[(y * width + x) * 4 + 3];
-      count++;
-    }
-  }
-
-  // Bottom edge
-  for (let y = height - edgeWidth; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      sum += pixels[(y * width + x) * 4 + 3];
-      count++;
-    }
-  }
-
-  // Left edge (excluding corners already counted)
-  for (let y = edgeWidth; y < height - edgeWidth; y++) {
-    for (let x = 0; x < edgeWidth; x++) {
-      sum += pixels[(y * width + x) * 4 + 3];
-      count++;
-    }
-  }
-
-  // Right edge (excluding corners already counted)
-  for (let y = edgeWidth; y < height - edgeWidth; y++) {
-    for (let x = width - edgeWidth; x < width; x++) {
-      sum += pixels[(y * width + x) * 4 + 3];
-      count++;
-    }
-  }
-
-  return count > 0 ? sum / (count * 255) : 0;
 }
 
 /**
@@ -509,7 +425,7 @@ export class SpriteGenerator {
     description: string,
     options: FlipbookOptions
   ): Promise<SpriteAsset> {
-    const { frameCount, animation, style, playbackMode, frameDuration, driveSource } = options;
+    const { frameCount, animation, style } = options;
 
     // Get layout for frame count
     const layout = FLIPBOOK_LAYOUTS[frameCount];

@@ -7,7 +7,7 @@
  * Handles async compile results from TouchDesigner and supports rollback.
  */
 
-import { ZONE_NAMES, type ZoneName } from './zone-registry';
+import { ZONE_NAMES } from './zone-registry';
 import { log } from '../logger';
 
 /**

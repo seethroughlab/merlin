@@ -17,32 +17,6 @@ import { summarizeRecentFaceActivity } from './face-event-buffer';
 // ============ LAYER 2: SESSION CONTEXT ============
 
 /**
- * Map phase to human-readable stage name
- */
-function mapPhaseToStage(phase: MerlinPhase): string {
-  switch (phase) {
-    case 'idle':
-      return 'Not started';
-    case 'wake':
-      return 'Awakening';
-    case 'intro':
-      return 'Introduction - make first observation';
-    case 'discovery':
-      return 'Discovery - observe and refine';
-    case 'formation':
-      return 'Formation - crystallize the spell';
-    case 'ready_to_cast':
-      return 'Ready - guide them to cast';
-    case 'casting':
-      return 'Casting - the spell is being cast';
-    case 'outro':
-      return 'Closing - warm farewell';
-    default:
-      return phase;
-  }
-}
-
-/**
  * Format spell state for LLM context
  */
 function formatSpellState(spell: SpellState): string {

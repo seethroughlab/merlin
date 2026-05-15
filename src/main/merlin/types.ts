@@ -23,7 +23,6 @@ export type {
 import type {
   MerlinPhase,
   SpellState,
-  MerlinConversationMessage,
 } from '../../shared/types';
 
 /**

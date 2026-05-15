@@ -152,7 +152,7 @@ function handleMessage(raw: string): void {
     }
 
     handleInbound(message, state, callbacks);
-  } catch (error) {
+  } catch {
     log.error('TDBridge', 'Failed to parse message:', raw);
   }
 }

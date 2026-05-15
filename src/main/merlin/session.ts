@@ -10,7 +10,6 @@ import type {
   MerlinPhase,
   SpellState,
   MerlinResponse,
-  MerlinConversationMessage,
 } from '../../shared/types';
 import type {
   MerlinSessionState,
@@ -534,7 +533,6 @@ export class MerlinSession {
 
     // Trigger phase change callback if phase changed
     if (newPhase !== this.previousPhase) {
-      const wasDiscovery = this.previousPhase === 'discovery';
       this.previousPhase = newPhase;
 
       if (this.config.onPhaseChange) {

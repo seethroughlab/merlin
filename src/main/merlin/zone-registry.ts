@@ -178,33 +178,6 @@ export function extractIdentifiers(code: string): Set<string> {
 }
 
 /**
- * GLSL built-in types and keywords to ignore during variable checking
- */
-const GLSL_TYPES_AND_KEYWORDS = new Set([
-  // Types
-  'void', 'bool', 'int', 'uint', 'float', 'double',
-  'vec2', 'vec3', 'vec4', 'ivec2', 'ivec3', 'ivec4',
-  'uvec2', 'uvec3', 'uvec4', 'bvec2', 'bvec3', 'bvec4',
-  'mat2', 'mat3', 'mat4', 'mat2x2', 'mat2x3', 'mat2x4',
-  'mat3x2', 'mat3x3', 'mat3x4', 'mat4x2', 'mat4x3', 'mat4x4',
-  'sampler2D', 'sampler3D', 'samplerCube',
-  // Keywords
-  'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
-  'break', 'continue', 'return', 'discard',
-  'const', 'uniform', 'in', 'out', 'inout', 'struct',
-  'true', 'false',
-  // Common functions
-  'sin', 'cos', 'tan', 'asin', 'acos', 'atan',
-  'pow', 'exp', 'log', 'sqrt', 'abs', 'sign',
-  'floor', 'ceil', 'fract', 'mod', 'min', 'max', 'clamp',
-  'mix', 'step', 'smoothstep', 'length', 'distance', 'dot', 'cross',
-  'normalize', 'reflect', 'refract',
-  // Vector components
-  'x', 'y', 'z', 'w', 'r', 'g', 'b', 'a', 's', 't', 'p', 'q',
-  'xy', 'xyz', 'xyzw', 'rgb', 'rgba',
-]);
-
-/**
  * Validate zone code against its contract
  * Throws ZoneValidationError if validation fails
  */
