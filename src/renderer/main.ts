@@ -1021,6 +1021,21 @@ function setupKeyboardHandlers(): void {
     }
   });
 
+  // Sidebar "Start Merlin / End session" button — same effect as Shift+M.
+  // Mirrors the FSM state so the label flips with the session.
+  const toggleBtn = document.getElementById('merlin-toggle') as HTMLButtonElement | null;
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      if (!voiceReady) return;
+      void toggleMerlinMode();
+    });
+    subscribeTurnState((state) => {
+      const active = state !== 'idle';
+      toggleBtn.textContent = active ? 'End session' : 'Start Merlin';
+      toggleBtn.classList.toggle('active', active);
+    });
+  }
+
   console.log('Keyboard handlers ready (Shift+M = Merlin, Shift+T = Test Shaders)');
 }
 

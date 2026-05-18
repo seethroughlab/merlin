@@ -326,6 +326,8 @@ input[type="checkbox"]:disabled {
 /* WebSocket info panel */
 .ws-info {
   font-size: 13px;
+  /* Breathing room before the Reset-to-Baseline button below. */
+  margin-bottom: 10px;
 }
 
 .ws-row {
@@ -447,15 +449,27 @@ input[type="checkbox"]:disabled {
 
 /* ============ MERLIN MODE ============ */
 
-/* Merlin panel (hidden by default) */
+/* Merlin panel — always visible so the Start button is reachable
+   before a session begins. `.active` makes it fill the sidebar (other
+   sections are hidden by the merlin-active rule below). */
 #merlin-panel {
-  display: none;
+  display: flex;
+  flex-direction: column;
 }
 
 #merlin-panel.active {
-  display: flex;
-  flex-direction: column;
   height: 100%;
+}
+
+/* Hide noisy data rows + conversation before the session starts.
+   They're empty placeholders (- / neutral / empty conversation) and
+   compete for attention with the Start button. The voice-status and
+   the button are what the user needs to see. */
+#merlin-panel:not(.active) .merlin-status-row,
+#merlin-panel:not(.active) .merlin-spell,
+#merlin-panel:not(.active) .merlin-face-hud,
+#merlin-panel:not(.active) .merlin-conversation {
+  display: none;
 }
 
 /* Hide normal sidebar when Merlin is active */
@@ -678,6 +692,40 @@ input[type="checkbox"]:disabled {
 
 .merlin-voice-status.speaking::before {
   content: "✨ ";
+}
+
+.merlin-toggle-btn {
+  display: inline-block;
+  margin: 8px 0 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: linear-gradient(180deg, #4a3b6b 0%, #2e2547 100%);
+  border: 1px solid #5d4a85;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.merlin-toggle-btn:hover {
+  background: linear-gradient(180deg, #5d4a85 0%, #3a2e5a 100%);
+  border-color: #7a64a8;
+}
+
+.merlin-toggle-btn:active {
+  background: linear-gradient(180deg, #2e2547 0%, #4a3b6b 100%);
+}
+
+.merlin-toggle-btn.active {
+  background: linear-gradient(180deg, #6b3a4a 0%, #47252e 100%);
+  border-color: #855d6a;
+}
+
+.merlin-toggle-btn.active:hover {
+  background: linear-gradient(180deg, #855d6a 0%, #5a3a47 100%);
+  border-color: #a8647e;
 }
 
 .merlin-hint {
