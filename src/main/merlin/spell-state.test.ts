@@ -61,6 +61,58 @@ describe('transcriptMatchesMagicWord', () => {
     expect(transcriptMatchesMagicWord('   incinerate   ', 'incinerate')).toBe(true);
     expect(transcriptMatchesMagicWord('incinerate', '  incinerate  ')).toBe(true);
   });
+
+  describe('fuzzy match for Whisper mishears', () => {
+    it('matches a 1-edit substitution at 5-char length (peach → peace)', () => {
+      // Real case from a live session: Whisper transcribed the
+      // participant's "Peach" as "Peace." (h→e). The cast should
+      // still fire.
+      expect(transcriptMatchesMagicWord('Peace.', 'PEACH')).toBe(true);
+    });
+
+    it('matches a 1-edit deletion at 5-char length (peach → each)', () => {
+      // Same session, different turn: Whisper dropped the leading P.
+      expect(transcriptMatchesMagicWord('each', 'PEACH')).toBe(true);
+    });
+
+    it('matches a 1-edit substitution at 5-char length (peach → perch)', () => {
+      expect(transcriptMatchesMagicWord('perch', 'PEACH')).toBe(true);
+    });
+
+    it('matches the fuzzy variant inside a longer utterance', () => {
+      expect(transcriptMatchesMagicWord("I'll say peace!", 'PEACH')).toBe(true);
+    });
+
+    it('does NOT fuzzy-match short magic words (under 5 chars)', () => {
+      // "GO" is too short to fuzzy-match safely — would catch "no",
+      // "do", "so", etc. Require exact match for short words.
+      expect(transcriptMatchesMagicWord('no', 'GO')).toBe(false);
+      expect(transcriptMatchesMagicWord('NO!', 'GO')).toBe(false);
+    });
+
+    it('allows 2 edits for longer magic words (9+ chars)', () => {
+      // For a 10-char magic word, 2 edits is a 20% tolerance.
+      // 'illuminat' = 1 edit (drop trailing e).
+      expect(transcriptMatchesMagicWord('illuminat', 'ILLUMINATE')).toBe(true);
+      // 'illustrate' = 3 edits (s→m, t→i, r→n); above budget.
+      expect(transcriptMatchesMagicWord('illustrate', 'ILLUMINATE')).toBe(false);
+    });
+
+    it('does NOT fuzzy-match longer derived words', () => {
+      // 'incinerated' is 1 edit from 'incinerate' (insert 'd') but
+      // is a genuinely different word. The length-LE-magic-word
+      // guard rejects it.
+      expect(transcriptMatchesMagicWord('incinerated', 'incinerate')).toBe(false);
+      expect(transcriptMatchesMagicWord('incinerator', 'incinerate')).toBe(false);
+      expect(transcriptMatchesMagicWord('preacher', 'PEACH')).toBe(false);
+    });
+
+    it('does NOT fuzzy-match completely different words', () => {
+      // 3-edit gap on a 5-char magic word should not match.
+      expect(transcriptMatchesMagicWord('apple', 'PEACH')).toBe(false);
+      expect(transcriptMatchesMagicWord('hello', 'PEACH')).toBe(false);
+    });
+  });
 });
 
 describe('transcriptContains', () => {
