@@ -151,10 +151,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // tool-dispatch loop finishes. Lets the renderer start TTS in parallel
   // with slow tool calls (Imagen sprite generation, etc.) so the
   // participant hears Merlin sooner.
-  onMerlinSpeakChunk: (callback: (text: string) => void) => {
-    ipcRenderer.on('merlin-speak-chunk', (_event, text: string) => {
-      callback(text);
-    });
+  //
+  // Payload carries `expectRemainder`: false for a real chunk (post-tool
+  // text is dropped, mic can re-open as soon as this audio ends), true
+  // for a filler chunk (post-tool real ack is coming, keep mic closed).
+  onMerlinSpeakChunk: (
+    callback: (payload: { text: string; expectRemainder: boolean }) => void,
+  ) => {
+    ipcRenderer.on(
+      'merlin-speak-chunk',
+      (_event, payload: { text: string; expectRemainder: boolean }) => {
+        callback(payload);
+      },
+    );
   },
 
   // Background cast listener support. Main pushes `merlin-cast-armed`
@@ -354,7 +363,9 @@ declare global {
       }) => void;
       onMerlinUpdate: (callback: (update: MerlinUIUpdate) => void) => void;
       onMerlinAutoEnd: (callback: () => void) => void;
-      onMerlinSpeakChunk: (callback: (text: string) => void) => void;
+      onMerlinSpeakChunk: (
+        callback: (payload: { text: string; expectRemainder: boolean }) => void,
+      ) => void;
       onMerlinCastArmed: (
         callback: (payload: { magicWord: string; gestureHint?: string }) => void,
       ) => void;

@@ -206,14 +206,20 @@ function createMerlinSession(): MerlinSession {
         mainWindow.webContents.send('merlin-auto-end');
       }
     },
-    onSpeakChunk: (text: string) => {
+    onSpeakChunk: (text: string, expectRemainder: boolean) => {
       // Parallel TTS: forward the chunk to the renderer so LiveTTS starts
       // playing while the tool-dispatch loop (often a 25s Imagen call)
       // continues running in main. The turn-runner has already excluded
       // this text from the final response, so the renderer won't
       // double-speak it when processUserSpeech eventually resolves.
+      //
+      // expectRemainder tells the renderer whether to keep the mic
+      // closed after this chunk's audio ends. false (real chunk) lets
+      // the FSM go chunk_speaking → resuming → listening immediately
+      // so the participant can respond mid-dispatch-loop. true (filler)
+      // keeps the FSM in working until the real ack arrives post-tool.
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('merlin-speak-chunk', text);
+        mainWindow.webContents.send('merlin-speak-chunk', { text, expectRemainder });
       }
     },
     onCastArmed: (payload) => {

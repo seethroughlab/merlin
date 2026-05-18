@@ -92,7 +92,7 @@ import type {
   GeminiTurnSource,
 } from '../shared/types';
 import { CONVERSATION_TEST_PRESETS } from '../shared/conversation-test-presets';
-import { transcriptContains } from '../shared/transcript-match';
+import { transcriptMatchesMagicWord } from '../shared/transcript-match';
 import { updateFaceHud, resetFaceHud } from './face-hud';
 import { appendGeminiTurn } from './gemini-sidebar';
 import {
@@ -101,7 +101,6 @@ import {
   updateMerlinSpellUI,
   addMerlinMessage,
   clearMerlinUI,
-  updateMerlinSpeakingIndicator,
 } from './merlin-ui';
 import {
   initTestPanel,
@@ -110,6 +109,14 @@ import {
   handleZoneCompileResult,
   runConversationTest,
 } from './test-panel';
+import {
+  dispatch as dispatchTurnEvent,
+  subscribe as subscribeTurnState,
+  getState as getTurnState,
+  MIC_OPEN_IN,
+  STATE_LABEL,
+  STATE_CSS_CLASS,
+} from './turn-state';
 
 // DOM Elements
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -161,9 +168,11 @@ let voiceReady = false;
 // TTS state
 let ttsReady = false;
 
-// Merlin mode state
+// Merlin mode state. merlinModeActive tracks "user has activated
+// Merlin (Shift+M)". The per-turn lifecycle (mic open, speaking,
+// thinking, etc.) is owned by the turn-state FSM in ./turn-state.ts;
+// no need for a separate merlinIsListening flag here.
 let merlinModeActive = false;
-let merlinIsListening = false;
 
 // Background cast listener state. Armed by main via `merlin-cast-armed`
 // the moment prepare_casting dispatches. When the participant says the
@@ -1059,8 +1068,29 @@ async function initSpeech(): Promise<void> {
   console.log('Initializing Gemini TTS...');
 
   onSpeakingStateChange((speaking) => {
-    updateMerlinSpeakingIndicator(speaking, merlinModeActive, merlinIsListening);
+    if (!speaking) {
+      dispatchTurnEvent({ type: 'tts.complete' });
+    }
   });
+
+  // FSM-driven voice-status label. Single subscriber replaces the
+  // previous per-site voiceStatus.textContent writes scattered through
+  // startMerlinMode / handleMerlinTranscript / updateMerlinSpeakingIndicator.
+  subscribeTurnState((state) => {
+    const voiceStatus = document.getElementById('merlin-voice-status');
+    if (!voiceStatus) return;
+    voiceStatus.textContent = STATE_LABEL[state];
+    voiceStatus.className = STATE_CSS_CLASS[state]
+      ? `merlin-voice-status ${STATE_CSS_CLASS[state]}`
+      : 'merlin-voice-status';
+  });
+
+  // FSM-driven mic management. Owns the physical mic-open/close
+  // operations. Reconciles after every state change so callers no
+  // longer need to call start/stopContinuousListening directly. When
+  // entering `resuming`, asynchronously opens the mic and dispatches
+  // mic.opened on completion (transitioning resuming → listening).
+  initMicManagement();
 
   const success = await initTTS();
   ttsReady = success;
@@ -1074,6 +1104,54 @@ async function initSpeech(): Promise<void> {
   } else {
     console.warn('TTS not available');
   }
+}
+
+// ============ MIC MANAGEMENT (FSM subscriber) ============
+
+let micPhysicallyOpen = false;
+let micOpenInFlight = false;
+
+/**
+ * Reconcile the physical mic state with what the FSM says it should
+ * be. Called after every turn-state transition.
+ *
+ * Mic should be OPEN in: listening, play, resuming (because resuming
+ * is the "wait while mic is opening" transitional state — opening
+ * triggers a mic.opened event that advances the FSM to listening).
+ *
+ * Mic should be CLOSED in: idle, intro_speaking, thinking,
+ * chunk_speaking, working, remainder_speaking, outro_speaking.
+ */
+function reconcileMicForState(state: ReturnType<typeof getTurnState>): void {
+  const shouldBeOpen = MIC_OPEN_IN.has(state) || state === 'resuming';
+
+  if (shouldBeOpen && !micPhysicallyOpen && !micOpenInFlight) {
+    micOpenInFlight = true;
+    void (async () => {
+      try {
+        await startContinuousListening(handleMerlinTranscript);
+        micPhysicallyOpen = true;
+      } catch (err) {
+        console.error('[Mic] startContinuousListening failed:', err);
+      } finally {
+        micOpenInFlight = false;
+      }
+      // Dispatch mic.opened only if we're still in resuming — listening
+      // and play states don't care because they're already the target.
+      if (getTurnState() === 'resuming') {
+        dispatchTurnEvent({ type: 'mic.opened' });
+      }
+    })();
+  } else if (!shouldBeOpen && micPhysicallyOpen) {
+    stopContinuousListening();
+    micPhysicallyOpen = false;
+  }
+}
+
+function initMicManagement(): void {
+  subscribeTurnState((state) => {
+    reconcileMicForState(state);
+  });
 }
 
 // ============ MERLIN MODE ============
@@ -1092,6 +1170,7 @@ async function startMerlinMode(): Promise<void> {
 
   const ts = () => new Date().toISOString().slice(11, 23);
   console.log(`[Merlin ${ts()}] Starting...`);
+  dispatchTurnEvent({ type: 'session.start' });
   merlinModeActive = true;
 
   // Activate UI
@@ -1102,12 +1181,8 @@ async function startMerlinMode(): Promise<void> {
 
   clearMerlinUI();
 
-  // Update status
-  const voiceStatus = document.getElementById('merlin-voice-status');
-  if (voiceStatus) {
-    voiceStatus.textContent = 'Starting session...';
-    voiceStatus.className = 'merlin-voice-status processing';
-  }
+  // Voice-status label is now driven by the turn-state FSM subscriber
+  // in initSpeech() — no per-site voiceStatus.textContent writes here.
 
   try {
     // Start session with Gemini
@@ -1139,9 +1214,9 @@ async function startMerlinMode(): Promise<void> {
       }
     }
 
-    // Start continuous listening (after TTS finishes)
-    merlinIsListening = true;
-    await startContinuousListening(handleMerlinTranscript);
+    // FSM intro_speaking → resuming on the intro TTS's tts.complete.
+    // The mic subscriber will call startContinuousListening and
+    // dispatch mic.opened on completion. No manual call needed.
 
     // Register speech start callback to begin analysis capture early
     setSpeechStartCallback(() => {
@@ -1169,12 +1244,15 @@ async function stopMerlinMode(): Promise<void> {
   if (!merlinModeActive) return;
 
   console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Stopping...`);
+  dispatchTurnEvent({ type: 'session.stop' });
 
-  // Stop continuous listening and clear callbacks
+  // Stop continuous listening and clear callbacks. The FSM session.stop
+  // dispatch above also triggers reconcileMicForState(idle) which
+  // closes the mic, but this explicit call covers the case where the
+  // mic subscriber's async open is in flight when stop is called.
   stopContinuousListening();
   setSpeechStartCallback(null);
   pendingAnalysisCapture = null;
-  merlinIsListening = false;
   // Disarm the background cast listener — next session re-arms via
   // merlin-cast-armed when prepare_casting fires.
   armedMagicWord = null;
@@ -1227,6 +1305,17 @@ async function toggleMerlinMode(): Promise<void> {
 // Lock to prevent concurrent Merlin transcript processing
 let isProcessingMerlinTranscript = false;
 
+// Single-slot queue for transcripts that arrive while a turn is still
+// in flight. The FSM now opens the mic as soon as Merlin's chunk audio
+// ends (chunk_speaking → resuming → listening), so the user can speak
+// during main's dispatch loop. Their transcript can't run immediately
+// because main's chat is busy; we hold the latest one here and process
+// it in handleMerlinTranscript's finally block once the current turn
+// resolves. Latest-wins is intentional — multi-slot queue would invite
+// out-of-order processing if the user speaks several utterances in a
+// row.
+let pendingTranscript: string | null = null;
+
 /**
  * Handle transcript from continuous listening in Merlin mode
  */
@@ -1241,32 +1330,40 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
   // is idempotent for phase advance; it resets the inactivity timer).
   const tsBg = () => new Date().toISOString().slice(11, 23);
   if (!isSpeaking()) {
-    if (armedMagicWord && transcriptContains(transcript, armedMagicWord)) {
-      console.log(`[Merlin ${tsBg()}] Background trigger: magic word "${armedMagicWord}" matched — firing cast`);
+    if (transcriptMatchesMagicWord(transcript, armedMagicWord)) {
+      console.log(`[Merlin ${tsBg()}] Background trigger: magic word "${armedMagicWord}" matched (fuzzy-tolerant) in "${transcript}" — firing cast`);
+      dispatchTurnEvent({ type: 'cast.triggered' });
       void window.electronAPI.merlinTriggerCast();
       return;
     }
   }
 
-  // Prevent concurrent processing - drop if already processing
+  // Prevent concurrent processing. The mic is open during main's
+  // dispatch loop (post-chunk), so transcripts can land while the
+  // previous turn is still resolving. Queue the latest one and let
+  // the finally block dequeue it after the current turn ends. We
+  // still dispatch whisper.transcript here so the FSM moves to
+  // `thinking` immediately — otherwise the bottom voice-status would
+  // stay on "Listening..." even though we've captured the user's
+  // speech, and they'd think nothing happened.
   if (isProcessingMerlinTranscript) {
-    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Dropping transcript (busy): "${transcript}"`);
+    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Queueing transcript while busy: "${transcript}"`);
+    dispatchTurnEvent({ type: 'whisper.transcript', text: transcript });
+    pendingTranscript = transcript;
     return;
   }
 
   isProcessingMerlinTranscript = true;
+  dispatchTurnEvent({ type: 'whisper.transcript', text: transcript });
   const ts = () => new Date().toISOString().slice(11, 23);
   console.log(`[Merlin ${ts()}] User said: "${transcript}"`);
 
   // Add user message to UI
   addMerlinMessage('user', transcript);
 
-  // Update UI to show processing
-  const voiceStatus = document.getElementById('merlin-voice-status');
-  if (voiceStatus) {
-    voiceStatus.textContent = 'Processing...';
-    voiceStatus.className = 'merlin-voice-status processing';
-  }
+  // Voice-status label is driven by the turn-state FSM subscriber —
+  // the whisper.transcript dispatch above moved state to `thinking`,
+  // which the subscriber rendered as "Thinking...".
 
   // Use the pre-started analysis capture if available
   let analysisPromise: Promise<{ face: MicroExpressionAnalysis | null; body: BodyLanguageAnalysis | null }>;
@@ -1304,6 +1401,10 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     console.log(`[Merlin ${ts()}] Calling Gemini...`);
     const response = await window.electronAPI.merlinProcessSpeech(transcript);
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Response:`, response.text);
+    dispatchTurnEvent({
+      type: 'turn.resolved',
+      hasRemainder: !!(response.spokenText && response.spokenText.length > 0),
+    });
 
     // During play phase, re-casts and ambient speech return empty text
     // (only the first cast triggers a Gemini welcome line). Skip UI +
@@ -1333,11 +1434,10 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     // of the response, etc.). When no chunk fired, spokenText equals the
     // full response. Empty means everything already spoken — skip.
     if (ttsReady && response.spokenText) {
-      stopContinuousListening();
-
-      // Wait for any in-flight chunk-path TTS to finish before kicking
-      // off the remainder. Two parallel TTS requests would interleave
-      // their audio chunks at the LiveTTS server and play overlapping.
+      // Mic is already closed by the FSM (we're in chunk_speaking or
+      // working or thinking — none have mic open). Serialize against
+      // any in-flight chunk-path TTS so the two TTS streams don't
+      // interleave at the LiveTTS WebSocket.
       if (inFlightSpeechPromise) {
         console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Awaiting in-flight chunk TTS before speaking remainder`);
         await inFlightSpeechPromise;
@@ -1347,13 +1447,10 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
       console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Speaking remainder (${response.spokenText.length} chars)`);
       await speakWithStreaming(response.spokenText, 'wizard');
 
-      // Resume listening after TTS finishes
-      if (merlinModeActive) {
-        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after TTS`);
-        await startContinuousListening(handleMerlinTranscript);
-        merlinIsListening = true;
-        updateMerlinSpeakingIndicator(isSpeaking(), merlinModeActive, merlinIsListening);
-      }
+      // FSM remainder_speaking → resuming on tts.complete (fires from
+      // the speakWithStreaming above when its audio ends). The mic
+      // subscriber re-opens the mic and dispatches mic.opened, taking
+      // the FSM to listening. No explicit calls needed here.
     } else if (response.text && !response.spokenText) {
       // Chunk-only turn: the chunk handler streamed the response via
       // onMerlinSpeakChunk earlier and closed the mic. There's no
@@ -1363,16 +1460,21 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
       // cleared inFlightSpeechPromise long before merlinProcessSpeech
       // resolved). Don't gate the resume on inFlightSpeechPromise; just
       // await it if it's still set, then resume unconditionally.
+      // Chunk-only turn: the FSM took the path
+      //   chunk_speaking → working → resuming
+      // (when the chunk's tts.complete arrived during the dispatch
+      // loop) OR chunk_speaking → resuming (when the audio outlasted
+      // the dispatch loop and turn.resolved with hasRemainder=false
+      // fired while still in chunk_speaking). Either way the mic
+      // subscriber is already re-opening the mic; we don't need to
+      // do anything here.
       if (inFlightSpeechPromise) {
-        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder — awaiting chunk TTS to finish`);
+        // Still wait for chunk audio to finish before letting
+        // handleMerlinTranscript return — otherwise the finally block
+        // resets isProcessingMerlinTranscript while a chunk is still
+        // playing, allowing a new transcript to start mid-audio.
         await inFlightSpeechPromise;
         inFlightSpeechPromise = null;
-      }
-      if (merlinModeActive) {
-        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after chunk-only turn`);
-        await startContinuousListening(handleMerlinTranscript);
-        merlinIsListening = true;
-        updateMerlinSpeakingIndicator(isSpeaking(), merlinModeActive, merlinIsListening);
       }
     } else {
       // Neither chunk nor remainder fired this turn — the mic was
@@ -1385,11 +1487,23 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
     if (statusDisplay) statusDisplay.textContent = `Merlin error: ${error}`;
   } finally {
     isProcessingMerlinTranscript = false;
+    // Voice-status label is driven by the turn-state FSM subscriber;
+    // no manual write needed here. If startContinuousListening above
+    // dispatched mic.opened, the subscriber rendered "Listening..."
+    // already. If it didn't (error path), the FSM is still in
+    // resuming → "Thinking..." which is accurate.
 
-    // Resume listening indicator
-    if (voiceStatus && merlinModeActive) {
-      voiceStatus.textContent = 'Listening...';
-      voiceStatus.className = 'merlin-voice-status listening';
+    // Process the queued transcript (if any). Schedule via microtask
+    // instead of calling synchronously so the current turn's stack
+    // fully unwinds before the next turn starts — keeps logs readable
+    // and avoids any subtle reentrancy if a state update inside the
+    // next handleMerlinTranscript triggers a subscriber that reads
+    // isProcessingMerlinTranscript.
+    const queued = pendingTranscript;
+    pendingTranscript = null;
+    if (queued !== null && merlinModeActive) {
+      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Dequeuing transcript: "${queued}"`);
+      void Promise.resolve().then(() => handleMerlinTranscript(queued));
     }
   }
 }
@@ -1483,6 +1597,7 @@ if (window.electronAPI) {
   // Listen for auto-end signal when Merlin session completes
   window.electronAPI.onMerlinAutoEnd(() => {
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Session complete - auto-ending...`);
+    dispatchTurnEvent({ type: 'session.complete' });
     stopMerlinMode();
   });
 
@@ -1493,7 +1608,7 @@ if (window.electronAPI) {
   // mirroring the post-response TTS path; it resumes when the
   // processUserSpeech finally lands and the response-side TTS finishes
   // (or is skipped because finalText was already streamed).
-  window.electronAPI.onMerlinSpeakChunk((text: string) => {
+  window.electronAPI.onMerlinSpeakChunk(({ text, expectRemainder }) => {
     if (!ttsReady || !text) return;
     if (isTestModeMuted()) {
       // Conversation Tester is running — swallow chunk TTS silently so
@@ -1502,10 +1617,13 @@ if (window.electronAPI) {
       inFlightSpeechPromise = Promise.resolve();
       return;
     }
-    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Parallel-TTS chunk: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
-    stopContinuousListening();
-    merlinIsListening = false;
-    updateMerlinSpeakingIndicator(isSpeaking(), merlinModeActive, merlinIsListening);
+    console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Parallel-TTS chunk (expectRemainder=${expectRemainder}): ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
+    // FSM transition into chunk_speaking triggers the mic subscriber to
+    // close the mic. No explicit stopContinuousListening call needed.
+    // expectRemainder determines whether we'll exit chunk_speaking to
+    // resuming (open mic immediately, real-chunk case) or to working
+    // (keep mic closed waiting for post-tool ack, filler case).
+    dispatchTurnEvent({ type: 'chunk.text-arrived', text, expectRemainder });
     // Track the promise so the post-turn spokenText TTS path can await
     // it. Without this serialization, the second speakWithStreaming
     // fires another LiveTTS request while the chunk's audio chunks are

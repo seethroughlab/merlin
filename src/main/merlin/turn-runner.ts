@@ -65,8 +65,16 @@ export interface TurnDispatchContext {
    * — generate_sprite alone is 24-30s of Imagen latency. The chunk
    * forwarded here will NOT be included in the final returned text,
    * so the renderer doesn't re-speak it.
+   *
+   * The second arg signals whether a post-tool remainder is expected:
+   *  - `false` (real chunk) — Gemini emitted text + tools; post-tool
+   *     text is dropped per the chunkAlreadyResponded rule. Renderer
+   *     can open the mic the moment this chunk's audio ends.
+   *  - `true`  (filler) — Gemini emitted tools-only; renderer played
+   *     a pre-canned filler; the real ack lands as post-tool text.
+   *     Renderer must keep the mic closed until the remainder arrives.
    */
-  onSpeakChunk?: (text: string) => void;
+  onSpeakChunk?: (text: string, expectRemainder: boolean) => void;
   /**
    * Notified when prepare_casting fires, so the renderer can arm a
    * background magic-word listener independent of the Gemini turn
@@ -168,7 +176,10 @@ export async function runMerlinTurn(
   // lands as post-tool text and should be spoken.
   let fillerSpoken = false;
   if (initialText && result.toolCalls.length > 0 && ctx.onSpeakChunk) {
-    ctx.onSpeakChunk(initialText);
+    // Real chunk: Gemini's actual text response. Post-tool text will
+    // be dropped by chunkAlreadyResponded. Renderer can open mic on
+    // audio end → expectRemainder=false.
+    ctx.onSpeakChunk(initialText, false);
     streamedText = initialText;
   } else if (!initialText && result.toolCalls.length > 0 && ctx.onSpeakChunk) {
     // Gemini went straight to tools without an acknowledgement —
@@ -176,10 +187,11 @@ export async function runMerlinTurn(
     // filler so the participant hears Merlin's voice within 200ms
     // instead of waiting 25s for sprite generation in silence. The
     // filler is also added to accumulatedText so the chat bubble
-    // reflects what was actually said.
+    // reflects what was actually said. The real ack arrives post-tool
+    // → expectRemainder=true so the renderer keeps the mic closed.
     const filler = pickAckFiller();
     log.warn('TurnRunner', `Initial Gemini response had tool calls but no text — speaking filler: "${filler}"`);
-    ctx.onSpeakChunk(filler);
+    ctx.onSpeakChunk(filler, true);
     streamedText = filler;
     accumulatedText = filler;
     fillerSpoken = true;

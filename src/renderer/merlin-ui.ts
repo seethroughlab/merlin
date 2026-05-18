@@ -38,7 +38,6 @@ export function updateMerlinUI(update: MerlinUIUpdate): void {
   const header = document.getElementById('merlin-header');
   const phaseSpan = document.getElementById('merlin-phase');
   const turnSpan = document.getElementById('merlin-turn');
-  const voiceStatus = document.getElementById('merlin-voice-status');
 
   if (!sidebar || !panel) return;
 
@@ -51,21 +50,10 @@ export function updateMerlinUI(update: MerlinUIUpdate): void {
     header.className = `merlin-header element-${update.spell.element}`;
   }
 
-  if (voiceStatus) {
-    if (update.isProcessing) {
-      voiceStatus.textContent = 'Processing...';
-      voiceStatus.className = 'merlin-voice-status processing';
-    } else if (update.isListening) {
-      voiceStatus.textContent = 'Listening...';
-      voiceStatus.className = 'merlin-voice-status listening';
-    } else if (update.phase === 'idle') {
-      voiceStatus.textContent = 'Shift+M to begin';
-      voiceStatus.className = 'merlin-voice-status';
-    } else {
-      voiceStatus.textContent = 'Ready';
-      voiceStatus.className = 'merlin-voice-status';
-    }
-  }
+  // Voice-status label is driven by the turn-state FSM subscriber
+  // registered in src/renderer/main.ts. Main-process update flags
+  // (update.isProcessing / update.isListening) are ignored here —
+  // the FSM is the source of truth for the voice indicator.
 
   if (update.lastMessage) {
     addMerlinMessage(update.lastMessage.role, update.lastMessage.content);
@@ -141,24 +129,8 @@ export function clearMerlinUI(): void {
   updateMerlinSpellUI(emptySpell);
 }
 
-export function updateMerlinSpeakingIndicator(
-  speaking: boolean,
-  merlinModeActive: boolean,
-  merlinIsListening: boolean,
-): void {
-  const voiceStatus = document.getElementById('merlin-voice-status');
-  if (voiceStatus && merlinModeActive) {
-    if (speaking) {
-      voiceStatus.textContent = 'Speaking...';
-      voiceStatus.className = 'merlin-voice-status speaking';
-    } else if (merlinIsListening) {
-      voiceStatus.textContent = 'Listening...';
-      voiceStatus.className = 'merlin-voice-status listening';
-    } else {
-      // TTS audio ended but the mic isn't open yet (chunk handler closed
-      // it; resume hasn't run). Don't leave the label stuck on "Speaking..."
-      voiceStatus.textContent = 'Thinking...';
-      voiceStatus.className = 'merlin-voice-status processing';
-    }
-  }
-}
+// Voice-status label is now driven by the turn-state FSM subscriber
+// in src/renderer/main.ts. The former updateMerlinSpeakingIndicator(),
+// which inferred state from a (speaking, merlinModeActive,
+// merlinIsListening) tuple, has been removed — those three flags were
+// the symptom of the scattered-state bug class we replaced.

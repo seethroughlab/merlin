@@ -119,7 +119,7 @@ export interface MerlinSessionConfig {
    * (potentially slow) tool dispatch — masking 25s Imagen calls behind
    * the spoken description of the spell.
    */
-  onSpeakChunk?: (text: string) => void;
+  onSpeakChunk?: (text: string, expectRemainder: boolean) => void;
   /**
    * Fired when prepare_casting dispatches — the moment Merlin declares
    * the magic word. Main wires this to an IPC that arms the renderer's
@@ -232,7 +232,9 @@ export class MerlinSession {
     // double-speak.
     let introStreamedText = '';
     if (result.text && result.toolCalls.length > 0 && this.config.onSpeakChunk) {
-      this.config.onSpeakChunk(result.text);
+      // Intro chunk: this is the only text the intro flow speaks (the
+      // image-based intro itself); no post-tool remainder is expected.
+      this.config.onSpeakChunk(result.text, false);
       introStreamedText = result.text;
     }
     // The intro flow doesn't expect request_visual_feedback (it runs
@@ -420,7 +422,8 @@ export class MerlinSession {
         );
       },
       onSpeakChunk: this.config.onSpeakChunk
-        ? (text: string) => safeInvoke('onSpeakChunk', () => this.config.onSpeakChunk!(text))
+        ? (text: string, expectRemainder: boolean) =>
+            safeInvoke('onSpeakChunk', () => this.config.onSpeakChunk!(text, expectRemainder))
         : undefined,
       onCastArmed: ({ magicWord, gestureHint }) => {
         safeInvoke('onCastArmed', () => {
