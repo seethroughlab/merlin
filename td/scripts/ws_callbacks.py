@@ -708,23 +708,33 @@ def handle_zone_update(dat, msg):
     #      particle context.
     compute_dat.text = full_shader
     compute_dat.cook(force=True)
+    pointgen = op('/project1/pointgenerator1')
     particle = op('/project1/particle1')
+    if pointgen:
+        pointgen.cook(force=True)
     if particle:
         particle.cook(force=True)
     glsl_pop.cook(force=True)
 
     ok, err = _check_glsl_compile(glsl_pop)
 
-    # One retry pass for the specific TDIn_PartId / per-particle-intrinsic
-    # races that can occur right after pushParticleParams or other
-    # particle1-mutating messages. Re-cooking particle1 then glsl_pop
-    # gives TD a second chance to fully wire up the particle inputs
-    # before compile. Empirically this clears the error in the common
-    # case where the next push happened too quickly after a particle
-    # params update.
-    if not ok and err and 'TDIn_PartId' in err and particle:
-        print(f"[WS] Zone '{zone}' hit TDIn_PartId race — retrying after extra particle1 cook")
-        particle.cook(force=True)
+    # Retry loop for the TDIn_PartId / per-particle-intrinsic race that
+    # can occur right after pushParticleParams or other particle1-mutating
+    # messages. Re-cooking the full chain (compute_dat -> pointgenerator1
+    # -> particle1 -> glsl_pop) on each pass gives TD multiple chances to
+    # finish wiring the particle inputs before compile. One retry handles
+    # the common case but heavier reset sequences (particle_params +
+    # sprite_colors + merlin_state + zone push back-to-back) need more.
+    MAX_PARTID_RETRIES = 4
+    retry = 0
+    while not ok and err and 'TDIn_PartId' in err and retry < MAX_PARTID_RETRIES:
+        retry += 1
+        print(f"[WS] Zone '{zone}' hit TDIn_PartId race — retry {retry}/{MAX_PARTID_RETRIES}")
+        compute_dat.cook(force=True)
+        if pointgen:
+            pointgen.cook(force=True)
+        if particle:
+            particle.cook(force=True)
         glsl_pop.cook(force=True)
         ok, err = _check_glsl_compile(glsl_pop)
 
@@ -1128,22 +1138,35 @@ def handle_particle_params(msg):
 
     Missing nodes are skipped silently so dev-time TD state churn (a
     deleted node from an experiment) doesn't crash the WS handler.
+
+    After mutating particle1/pointgenerator1 params we force-cook both
+    so TD finishes rebuilding the per-particle compute bindings inside
+    this handler. Without this, the very next zone_update message can
+    race the rebuild and hit `'TDIn_PartId' : no matching overloaded
+    function found` at compile time (the compiler runs against a
+    half-rewired particle context).
     """
     p1 = op('/project1/particle1')
+    p1_touched = False
     if p1 is not None:
         if 'maxCount' in msg:
             p1.par.maxparticles = int(msg['maxCount'])
+            p1_touched = True
         if 'lifespan' in msg:
             p1.par.life = float(msg['lifespan'])
+            p1_touched = True
         if 'emitRate' in msg:
             p1.par.birthrate = float(msg['emitRate'])
+            p1_touched = True
 
     pg = op('/project1/pointgenerator1')
+    pg_touched = False
     if pg is not None and 'spawnRadius' in msg:
         r = float(msg['spawnRadius'])
         pg.par.radiusx = r
         pg.par.radiusy = r
         pg.par.radiusz = r
+        pg_touched = True
 
     mat = op('/project1/glsl_billboard')
     if mat is not None and 'blendMode' in msg:
@@ -1154,6 +1177,13 @@ def handle_particle_params(msg):
         elif bm == 'alpha':
             mat.par.srcblend = 'sa'
             mat.par.destblend = 'omsa'
+
+    # Settle the particle context synchronously so subsequent zone
+    # updates compile against a fully rewired particle1.
+    if pg_touched and pg is not None:
+        pg.cook(force=True)
+    if p1_touched and p1 is not None:
+        p1.cook(force=True)
 
     print(
         f"[WS] Particle params: count={msg.get('maxCount', '-')} "
