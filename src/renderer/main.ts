@@ -1351,20 +1351,28 @@ async function handleMerlinTranscript(transcript: string): Promise<void> {
       if (merlinModeActive) {
         console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after TTS`);
         await startContinuousListening(handleMerlinTranscript);
+        merlinIsListening = true;
+        updateMerlinSpeakingIndicator(isSpeaking(), merlinModeActive, merlinIsListening);
       }
-    } else if (inFlightSpeechPromise) {
-      // No remainder, but a chunk IS in flight (the common path under
-      // the one-response-per-turn rule). Wait for the chunk to finish,
-      // then RESUME listening — the chunk handler called
-      // stopContinuousListening when TTS started, so without resuming
-      // here the mic stays closed forever and the session "stops after
-      // 1 reaction".
-      console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder — awaiting chunk TTS to finish`);
-      await inFlightSpeechPromise;
-      inFlightSpeechPromise = null;
+    } else if (response.text && !response.spokenText) {
+      // Chunk-only turn: the chunk handler streamed the response via
+      // onMerlinSpeakChunk earlier and closed the mic. There's no
+      // un-streamed remainder (one-response-per-turn). We MUST resume
+      // listening — but the chunk's TTS may either still be in flight
+      // (turn finished fast) or already completed (its .finally
+      // cleared inFlightSpeechPromise long before merlinProcessSpeech
+      // resolved). Don't gate the resume on inFlightSpeechPromise; just
+      // await it if it's still set, then resume unconditionally.
+      if (inFlightSpeechPromise) {
+        console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] No remainder — awaiting chunk TTS to finish`);
+        await inFlightSpeechPromise;
+        inFlightSpeechPromise = null;
+      }
       if (merlinModeActive) {
         console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Resuming listening after chunk-only turn`);
         await startContinuousListening(handleMerlinTranscript);
+        merlinIsListening = true;
+        updateMerlinSpeakingIndicator(isSpeaking(), merlinModeActive, merlinIsListening);
       }
     } else {
       // Neither chunk nor remainder fired this turn — the mic was
@@ -1496,6 +1504,8 @@ if (window.electronAPI) {
     }
     console.log(`[Merlin ${new Date().toISOString().slice(11, 23)}] Parallel-TTS chunk: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
     stopContinuousListening();
+    merlinIsListening = false;
+    updateMerlinSpeakingIndicator(isSpeaking(), merlinModeActive, merlinIsListening);
     // Track the promise so the post-turn spokenText TTS path can await
     // it. Without this serialization, the second speakWithStreaming
     // fires another LiveTTS request while the chunk's audio chunks are

@@ -347,7 +347,7 @@ async function createSpoutWindow(): Promise<void> {
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false,
-      offscreen: true,
+      offscreen: { useSharedTexture: true },
     },
   });
 
@@ -394,7 +394,7 @@ async function createMaskWindow(): Promise<void> {
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false,
-      offscreen: true,
+      offscreen: { useSharedTexture: true },
     },
   });
 

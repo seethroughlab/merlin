@@ -1,3 +1,14 @@
+/**
+ * Preload — the renderer ↔ main IPC contract.
+ *
+ * Runs in Electron's isolated preload context and exposes one typed
+ * `window.electronAPI` object via contextBridge. The renderer NEVER calls
+ * `ipcRenderer` directly; every renderer→main method (merlinStart,
+ * merlinProcessSpeech, …) and every main→renderer listener
+ * (onMerlinSpeakChunk, …) is enumerated here. This file is the single
+ * source of truth for the shape of any IPC call between the two halves.
+ */
+
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   TrackingFrame,

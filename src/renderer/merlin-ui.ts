@@ -154,6 +154,11 @@ export function updateMerlinSpeakingIndicator(
     } else if (merlinIsListening) {
       voiceStatus.textContent = 'Listening...';
       voiceStatus.className = 'merlin-voice-status listening';
+    } else {
+      // TTS audio ended but the mic isn't open yet (chunk handler closed
+      // it; resume hasn't run). Don't leave the label stuck on "Speaking..."
+      voiceStatus.textContent = 'Thinking...';
+      voiceStatus.className = 'merlin-voice-status processing';
     }
   }
 }
